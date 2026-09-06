@@ -29,9 +29,26 @@ const tresult kNotImplemented = -2;
 const tresult kInternalError = -3;
 const tresult kNotInitialized = -4;
 
-#define INLINE_UID(b0, b1, b2, b3, b4, b5, b6, b7, b8, b9, b10, b11, b12, b13, b14, b15) \
-    { (uint8_t)(b0), (uint8_t)(b1), (uint8_t)(b2), (uint8_t)(b3), (uint8_t)(b4), (uint8_t)(b5), (uint8_t)(b6), (uint8_t)(b7), \
-      (uint8_t)(b8), (uint8_t)(b9), (uint8_t)(b10), (uint8_t)(b11), (uint8_t)(b12), (uint8_t)(b13), (uint8_t)(b14), (uint8_t)(b15) }
+// Steinberg COM_COMPATIBLE INLINE_UID macro (matches Windows COM GUID memory layout)
+#define INLINE_UID(l1, l2, l3, l4) \
+{ \
+    static_cast<uint8_t>(((uint32_t)(l1) & 0x000000FF)      ), \
+    static_cast<uint8_t>(((uint32_t)(l1) & 0x0000FF00) >>  8), \
+    static_cast<uint8_t>(((uint32_t)(l1) & 0x00FF0000) >> 16), \
+    static_cast<uint8_t>(((uint32_t)(l1) & 0xFF000000) >> 24), \
+    static_cast<uint8_t>(((uint32_t)(l2) & 0x00FF0000) >> 16), \
+    static_cast<uint8_t>(((uint32_t)(l2) & 0xFF000000) >> 24), \
+    static_cast<uint8_t>(((uint32_t)(l2) & 0x000000FF)      ), \
+    static_cast<uint8_t>(((uint32_t)(l2) & 0x0000FF00) >>  8), \
+    static_cast<uint8_t>(((uint32_t)(l3) & 0xFF000000) >> 24), \
+    static_cast<uint8_t>(((uint32_t)(l3) & 0x00FF0000) >> 16), \
+    static_cast<uint8_t>(((uint32_t)(l3) & 0x0000FF00) >>  8), \
+    static_cast<uint8_t>(((uint32_t)(l3) & 0x000000FF)      ), \
+    static_cast<uint8_t>(((uint32_t)(l4) & 0xFF000000) >> 24), \
+    static_cast<uint8_t>(((uint32_t)(l4) & 0x00FF0000) >> 16), \
+    static_cast<uint8_t>(((uint32_t)(l4) & 0x0000FF00) >>  8), \
+    static_cast<uint8_t>(((uint32_t)(l4) & 0x000000FF)      )  \
+}
 
 class FUnknown {
 public:
@@ -41,10 +58,10 @@ public:
 };
 
 // FUnknown IID: 00000000-00000000-C0000000-00000046
-static const TUID FUnknown_iid = INLINE_UID(0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0xC0, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x46);
+static const TUID FUnknown_iid = INLINE_UID(0x00000000, 0x00000000, 0xC0000000, 0x00000046);
 
-// IPluginBase: 22888DDB-156E-45AE-83FA-C6B86842B60F
-static const TUID IPluginBase_iid = INLINE_UID(0x22, 0x88, 0x8D, 0xDB, 0x15, 0x6E, 0x45, 0xAE, 0x83, 0xFA, 0xC6, 0xB8, 0x68, 0x42, 0xB6, 0x0F);
+// IPluginBase: 22888DDB-156E-45AE-8358-B34808190625
+static const TUID IPluginBase_iid = INLINE_UID(0x22888DDB, 0x156E45AE, 0x8358B348, 0x08190625);
 
 class IPluginBase : public FUnknown {
 public:
@@ -86,16 +103,16 @@ public:
     virtual tresult SMTG_STDCALL createInstance(const TUID cid, const TUID _iid, void** obj) = 0;
 };
 
-// IPluginFactory IID: 7A4D8170-52AE-4AB5-9E73-2D6A0832F3F4
-static const TUID IPluginFactory_iid = INLINE_UID(0x7A, 0x4D, 0x81, 0x70, 0x52, 0xAE, 0x4A, 0xB5, 0x9E, 0x73, 0x2D, 0x6A, 0x08, 0x32, 0xF3, 0xF4);
+// IPluginFactory IID: 7A4D811C-5211-4A1F-AED9-D2EE0B43BF9F
+static const TUID IPluginFactory_iid = INLINE_UID(0x7A4D811C, 0x52114A1F, 0xAED9D2EE, 0x0B43BF9F);
 
 class IPluginFactory2 : public IPluginFactory {
 public:
     virtual tresult SMTG_STDCALL getClassInfo2(int32 index, PClassInfo2* info) = 0;
 };
 
-// IPluginFactory2 IID: 0007B650-F24B-4C0A-A4EC-24795D693E33
-static const TUID IPluginFactory2_iid = INLINE_UID(0x00, 0x07, 0xB6, 0x50, 0xF2, 0x4B, 0x4C, 0x0A, 0xA4, 0xEC, 0x24, 0x79, 0x5D, 0x69, 0x3E, 0x33);
+// IPluginFactory2 IID: 0007B650-F24B-4C0B-A464-EDB9F00B2ABB
+static const TUID IPluginFactory2_iid = INLINE_UID(0x0007B650, 0xF24B4C0B, 0xA464EDB9, 0xF00B2ABB);
 
 namespace Vst {
 
@@ -157,8 +174,8 @@ public:
     virtual tresult SMTG_STDCALL addEvent(Event& e) = 0;
 };
 
-// IEventList IID: 3A2842CB-5F7E-4545-B2E6-8186105374E6
-static const TUID IEventList_iid = INLINE_UID(0x3A, 0x28, 0x42, 0xCB, 0x5F, 0x7E, 0x45, 0x45, 0xB2, 0xE6, 0x81, 0x86, 0x10, 0x53, 0x74, 0xE6);
+// IEventList IID: 3A2C4214-346349FE-B2C4F397-B9695A44
+static const TUID IEventList_iid = INLINE_UID(0x3A2C4214, 0x346349FE, 0xB2C4F397, 0xB9695A44);
 
 // Parameter Changes
 class IParamValueQueue : public FUnknown {
@@ -169,8 +186,8 @@ public:
     virtual tresult SMTG_STDCALL addPoint(int32 sampleOffset, ParamValue value, int32& index) = 0;
 };
 
-// IParamValueQueue IID: 01263A18-ED7B-4962-A68A-0DAAA26A3207
-static const TUID IParamValueQueue_iid = INLINE_UID(0x01, 0x26, 0x3A, 0x18, 0xED, 0x7B, 0x49, 0x62, 0xA6, 0x8A, 0x0D, 0xAA, 0xA2, 0x6A, 0x32, 0x07);
+// IParamValueQueue IID: 01263A18-ED074F6F-98C9D356-4686F9BA
+static const TUID IParamValueQueue_iid = INLINE_UID(0x01263A18, 0xED074F6F, 0x98C9D356, 0x4686F9BA);
 
 class IParameterChanges : public FUnknown {
 public:
@@ -179,8 +196,8 @@ public:
     virtual IParamValueQueue* SMTG_STDCALL addParameterData(const ParamID& id, int32& index) = 0;
 };
 
-// IParameterChanges IID: A4779663-0BB6-4A56-B443-84A884A8570E
-static const TUID IParameterChanges_iid = INLINE_UID(0xA4, 0x77, 0x96, 0x63, 0x0B, 0xB6, 0x4A, 0x56, 0xB4, 0x43, 0x84, 0xA8, 0x84, 0xA8, 0x57, 0x0E);
+// IParameterChanges IID: A4779663-0BB64A56-B44384A8-466FEB9D
+static const TUID IParameterChanges_iid = INLINE_UID(0xA4779663, 0x0BB64A56, 0xB44384A8, 0x466FEB9D);
 
 struct BusInfo {
     MediaType mediaType;
@@ -191,12 +208,19 @@ struct BusInfo {
     uint32 flags;
 };
 
+struct RoutingInfo {
+    MediaType mediaType;
+    int32 busIndex;
+    int32 channel;
+};
+
 class IComponent : public IPluginBase {
 public:
     virtual tresult SMTG_STDCALL getControllerClassId(TUID classId) = 0;
     virtual tresult SMTG_STDCALL setIoMode(IoMode mode) = 0;
     virtual int32 SMTG_STDCALL getBusCount(MediaType type, BusDirection dir) = 0;
     virtual tresult SMTG_STDCALL getBusInfo(MediaType type, BusDirection dir, int32 index, BusInfo& bus) = 0;
+    virtual tresult SMTG_STDCALL getRoutingInfo(RoutingInfo& inInfo, RoutingInfo& outInfo) = 0;
     virtual tresult SMTG_STDCALL activateBus(MediaType type, BusDirection dir, int32 index, bool state) = 0;
     virtual tresult SMTG_STDCALL setActive(bool state) = 0;
     virtual tresult SMTG_STDCALL setState(void* state) = 0;
@@ -204,7 +228,7 @@ public:
 };
 
 // IComponent IID: E831FF31-F2D5-4301-928E-BBEE25697802
-static const TUID IComponent_iid = INLINE_UID(0xE8, 0x31, 0xFF, 0x31, 0xF2, 0xD5, 0x43, 0x01, 0x92, 0x8E, 0xBB, 0xEE, 0x25, 0x69, 0x78, 0x02);
+static const TUID IComponent_iid = INLINE_UID(0xE831FF31, 0xF2D54301, 0x928EBBEE, 0x25697802);
 
 struct ProcessSetup {
     int32 processMode;
@@ -249,8 +273,8 @@ public:
     virtual uint32 SMTG_STDCALL getTailSamples() = 0;
 };
 
-// IAudioProcessor IID: 420435E3-B752-4298-8564-00025F8240F6
-static const TUID IAudioProcessor_iid = INLINE_UID(0x42, 0x04, 0x35, 0xE3, 0xB7, 0x52, 0x42, 0x98, 0x85, 0x64, 0x00, 0x02, 0x5F, 0x82, 0x40, 0xF6);
+// IAudioProcessor IID: 42043F99-B7DA453C-A569E79D-9AAEC33D
+static const TUID IAudioProcessor_iid = INLINE_UID(0x42043F99, 0xB7DA453C, 0xA569E79D, 0x9AAEC33D);
 
 // Parameter Info
 struct ParameterInfo {
@@ -274,6 +298,17 @@ enum ParameterFlags {
     kIsBypass = 1 << 16
 };
 
+class IComponentHandler : public FUnknown {
+public:
+    virtual tresult SMTG_STDCALL beginEdit(ParamID id) = 0;
+    virtual tresult SMTG_STDCALL performEdit(ParamID id, ParamValue valueNormalized) = 0;
+    virtual tresult SMTG_STDCALL endEdit(ParamID id) = 0;
+    virtual tresult SMTG_STDCALL restartComponent(int32 flags) = 0;
+};
+
+// IComponentHandler IID: 93A0BEA3-0BD0-45DB-8E89-0B0CC1E46AC6
+static const TUID IComponentHandler_iid = INLINE_UID(0x93A0BEA3, 0x0BD045DB, 0x8E890B0C, 0xC1E46AC6);
+
 class IEditController : public IPluginBase {
 public:
     virtual tresult SMTG_STDCALL setComponentState(void* state) = 0;
@@ -287,24 +322,47 @@ public:
     virtual ParamValue SMTG_STDCALL plainParamToNormalized(ParamID id, ParamValue plainValue) = 0;
     virtual ParamValue SMTG_STDCALL getParamNormalized(ParamID id) = 0;
     virtual tresult SMTG_STDCALL setParamNormalized(ParamID id, ParamValue value) = 0;
-    virtual tresult SMTG_STDCALL setComponentHandler(void* handler) = 0;
+    virtual tresult SMTG_STDCALL setComponentHandler(IComponentHandler* handler) = 0;
     virtual void* SMTG_STDCALL createView(const char8* name) = 0;
 };
 
-// IEditController IID: DCD76820-B5FA-4C62-9492-98780C73C508
-static const TUID IEditController_iid = INLINE_UID(0xDC, 0xD7, 0x68, 0x20, 0xB5, 0xFA, 0x4C, 0x62, 0x94, 0x92, 0x98, 0x78, 0x0C, 0x73, 0xC5, 0x08);
+// IEditController IID: DCD7BBE3-7742448D-A874AACC-979C759E
+static const TUID IEditController_iid = INLINE_UID(0xDCD7BBE3, 0x7742448D, 0xA874AACC, 0x979C759E);
 
 class IMidiMapping : public FUnknown {
 public:
     virtual tresult SMTG_STDCALL getMidiControllerAssignment(int32 busIndex, int16_t channel, int16_t midiControllerNumber, ParamID& id) = 0;
 };
 
-// IMidiMapping IID: DF0FF9F7-4967-4669-B682-26D0533ABDC6
-static const TUID IMidiMapping_iid = INLINE_UID(0xDF, 0x0F, 0xF9, 0xF7, 0x49, 0x67, 0x46, 0x69, 0xB6, 0x82, 0x26, 0xD0, 0x53, 0x3A, 0xBD, 0xC6);
+// IMidiMapping IID: DF0FF9F7-49B74669-B63AB732-7ADBF5E5
+static const TUID IMidiMapping_iid = INLINE_UID(0xDF0FF9F7, 0x49B74669, 0xB63AB732, 0x7ADBF5E5);
+
+class IMessage : public FUnknown {
+public:
+    virtual const char8* SMTG_STDCALL getMessageID() = 0;
+    virtual void SMTG_STDCALL setMessageID(const char8* id) = 0;
+    virtual void* SMTG_STDCALL getAttributes() = 0;
+};
+
+// IMessage IID: 936F033B-C6C047DB-BB0882F8-13C1E613
+static const TUID IMessage_iid = INLINE_UID(0x936F033B, 0xC6C047DB, 0xBB0882F8, 0x13C1E613);
+
+class IConnectionPoint : public FUnknown {
+public:
+    virtual tresult SMTG_STDCALL connect(IConnectionPoint* other) = 0;
+    virtual tresult SMTG_STDCALL disconnect(IConnectionPoint* other) = 0;
+    virtual tresult SMTG_STDCALL notify(IMessage* message) = 0;
+};
+
+// IConnectionPoint IID: 70A4156F-6E6E4026-989148BF-AA60D8D1
+static const TUID IConnectionPoint_iid = INLINE_UID(0x70A4156F, 0x6E6E4026, 0x989148BF, 0xAA60D8D1);
 
 // Speaker arrangements
-const SpeakerArrangement kSpeakerMono = 0x01;
-const SpeakerArrangement kSpeakerStereo = 0x03; // L + R
+namespace SpeakerArr {
+    const SpeakerArrangement kEmpty  = 0;
+    const SpeakerArrangement kMono   = (1ULL << 19);
+    const SpeakerArrangement kStereo = (1ULL << 0) | (1ULL << 1); // 0x03
+}
 
 } // namespace Vst
 } // namespace Steinberg

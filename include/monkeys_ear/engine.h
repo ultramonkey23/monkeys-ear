@@ -44,6 +44,16 @@ public:
     float get_macro(MacroId id) const;
     void load_preset(const PresetData& preset);
     const PresetData& get_current_preset() const;
+    void set_master_gain_db(float db) {
+        auto p = preset_manager_.get_current();
+        p.master_gain_db = db;
+        load_preset(p);
+    }
+    void set_waveform(Waveform wf) {
+        auto p = preset_manager_.get_current();
+        p.synth_waveform = static_cast<int>(wf);
+        load_preset(p);
+    }
 
     // Latency & Real-time Metrics Query
     LatencyStats get_latency_stats() const;
