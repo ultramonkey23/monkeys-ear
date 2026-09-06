@@ -1,0 +1,15 @@
+build/
+bin/
+*.wav
+*.exe
+*.dll
+*.vst3
+*.obj
+*.o
+*.a
+*.lib
+.ninja_*
+CMakeCache.txt
+CMakeFiles/
+.vscode/
+.vs/
