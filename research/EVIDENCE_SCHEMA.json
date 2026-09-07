@@ -1,0 +1,57 @@
+{
+  "schema": "monkeys_ear_research_evidence_v1",
+  "purpose": "Machine-readable contract for research experiments and listening outcomes. Inspired by Lab evidence/learning patterns without duplicating Lab authority.",
+  "authority": {
+    "source_truth_order": [
+      "cody_explicit_direction",
+      "local_product_code_and_live_runtime",
+      "build_runtime_audio_artifacts",
+      "verified_experiment_outputs",
+      "github_research_docs",
+      "chat_or_agent_recollection"
+    ],
+    "rule": "weaker evidence never outranks stronger evidence"
+  },
+  "required_fields": {
+    "evidence_id": "stable unique id",
+    "subsystem": "pitch-correction | eq | synthesis | sampling | dynamics | nonlinear | modulation | routing | spatial | capture | sequencing | soundspace | wordmath | other",
+    "claim": "single concrete claim being tested",
+    "status": "HYPOTHESIS | SYNTHETIC | MEASURED | LISTENED | VERIFIED | DEMOTED | RETIRED",
+    "observed_at": "ISO-8601 UTC timestamp",
+    "source_truth": "local | imported-local | github-research | external-reference | generated-test",
+    "artifacts": "paths, hashes, renders, scripts, settings, logs, or commit refs needed to reproduce",
+    "baselines": "simpler or external comparison methods",
+    "metrics": "engineering measurements; may be empty for listening-only outcomes",
+    "listening": "blind/level-matched labels, listener identity or anonymous id, and conditions when available",
+    "failure_modes": "known negative cases, regressions, or conditions where the claim does not hold",
+    "proof_strength": "0.0-1.0 confidence in the evidence quality, not musical preference",
+    "promotion_effect": "NONE | CANDIDATE | PROMOTE | DEMOTE | RETIRE"
+  },
+  "proof_guidance": {
+    "0.0-0.2": "idea, anecdote, weak or irreproducible observation",
+    "0.2-0.4": "synthetic or incomplete evidence; useful for hypothesis generation only",
+    "0.4-0.7": "reproducible engineering evidence with appropriate baselines",
+    "0.7-0.9": "repeated engineering evidence plus controlled real-audio or listening support",
+    "0.9-1.0": "multiple independent/repeated validations with strong provenance; still not absolute truth"
+  },
+  "learning_gate": {
+    "rule": "Only VERIFIED evidence may change durable product guidance automatically. SYNTHETIC/MEASURED/LISTENED evidence may propose changes but must not silently rewrite architecture truth.",
+    "stale_rule": "Old evidence remains provenance but should be rechecked when algorithms, product code, test corpus, or external baselines materially change.",
+    "negative_results": "Failures and demotions are first-class evidence and must remain discoverable enough to prevent rediscovery."
+  },
+  "example": {
+    "evidence_id": "pitch-projector-001",
+    "subsystem": "pitch-correction",
+    "claim": "Projected bounded correction prevents accepted actions from worsening the chosen objective under the tested corpus.",
+    "status": "SYNTHETIC",
+    "observed_at": "2026-09-07T00:00:00Z",
+    "source_truth": "generated-test",
+    "artifacts": ["research/pitch-correction/example_script.py"],
+    "baselines": ["fixed-form correction"],
+    "metrics": {"accepted_action_regressions": 0},
+    "listening": null,
+    "failure_modes": ["objective may not correlate with preference"],
+    "proof_strength": 0.35,
+    "promotion_effect": "CANDIDATE"
+  }
+}
