@@ -128,6 +128,12 @@ void PolyBLEPOscillator::reset_phase() {
     wrapped_ = false;
 }
 
+void PolyBLEPOscillator::set_phase(float phase_cycles) {
+    phase_ = phase_cycles - std::floor(phase_cycles);
+    if (phase_ < 0.0f) phase_ += 1.0f;
+    wrapped_ = false;
+}
+
 void PolyBLEPOscillator::sync_reset() {
     phase_ = 0.0f;
 }
@@ -208,12 +214,22 @@ SynthVoice::SynthVoice()
       fm_amount_(0.0f),
       hard_sync_(false),
       sub_mix_(0.25f),
+      fundamental_mix_(0.20f),
+      sub_ratio_denominator_(2),
+      sub_polarity_(1.0f),
+      sub_saturation_(0.0f),
+      sub_envelope_amount_(1.0f),
       noise_mix_(0.02f),
       age_(0.0f),
-      noise_seed_(0x12345678) {
+      noise_seed_(0x12345678),
+      current_frequency_(440.0f),
+      target_frequency_(440.0f),
+      portamento_seconds_(0.0f),
+      vibrato_semitones_(0.0f) {
     osc1_.set_waveform(Waveform::Saw);
     osc2_.set_waveform(Waveform::Pulse);
     sub_osc_.set_waveform(Waveform::Sine);
+    fundamental_osc_.set_waveform(Waveform::Sine);
 }
 
 void SynthVoice::set_sample_rate(float sr) {
@@ -221,6 +237,7 @@ void SynthVoice::set_sample_rate(float sr) {
     osc1_.set_sample_rate(sr);
     osc2_.set_sample_rate(sr);
     sub_osc_.set_sample_rate(sr);
+    fundamental_osc_.set_sample_rate(sr);
     amp_env_.set_sample_rate(sr);
     filter_env_.set_sample_rate(sr);
 }
@@ -229,15 +246,29 @@ void SynthVoice::note_on(int note, float velocity) {
     note_ = note;
     velocity_ = velocity;
     base_frequency_ = midi_to_freq(static_cast<float>(note));
+    target_frequency_ = base_frequency_;
+    if (!is_active() || portamento_seconds_ <= 0.0001f) current_frequency_ = target_frequency_;
     age_ = 0.0f;
 
     update_frequencies();
     osc1_.reset_phase();
     osc2_.reset_phase();
     sub_osc_.reset_phase();
+    fundamental_osc_.reset_phase();
 
     amp_env_.trigger(velocity);
     filter_env_.trigger(velocity);
+}
+
+void SynthVoice::retarget_note(int note, float velocity, bool retrigger) {
+    note_ = note;
+    velocity_ = velocity;
+    base_frequency_ = midi_to_freq(static_cast<float>(note));
+    target_frequency_ = base_frequency_;
+    if (retrigger) {
+        amp_env_.trigger(velocity);
+        filter_env_.trigger(velocity);
+    }
 }
 
 void SynthVoice::note_off() {
@@ -258,6 +289,15 @@ void SynthVoice::set_waveform(Waveform wf) {
 void SynthVoice::set_sub_mix(float sub_mix) {
     sub_mix_ = clamp(sub_mix, 0.0f, 1.0f);
 }
+
+void SynthVoice::set_fundamental_mix(float mix) { fundamental_mix_ = clamp(mix, 0.0f, 1.0f); }
+void SynthVoice::set_sub_ratio(int denominator) { sub_ratio_denominator_ = clamp(denominator, 1, 4); update_frequencies(); }
+void SynthVoice::set_sub_phase(float phase_cycles) { sub_osc_.set_phase(phase_cycles); }
+void SynthVoice::set_sub_polarity(bool inverted) { sub_polarity_ = inverted ? -1.0f : 1.0f; }
+void SynthVoice::set_sub_saturation(float amount) { sub_saturation_ = clamp(amount, 0.0f, 1.0f); }
+void SynthVoice::set_sub_envelope(float amount) { sub_envelope_amount_ = clamp(amount, 0.0f, 1.0f); }
+void SynthVoice::set_portamento(float seconds) { portamento_seconds_ = clamp(seconds, 0.0f, 2.0f); }
+void SynthVoice::set_vibrato(float semitones) { vibrato_semitones_ = clamp(semitones, -2.0f, 2.0f); }
 
 void SynthVoice::set_noise_mix(float noise_mix) {
     noise_mix_ = clamp(noise_mix, 0.0f, 1.0f);
@@ -291,14 +331,17 @@ void SynthVoice::set_filter_env_parameters(float a, float d, float s, float r) {
 
 void SynthVoice::update_frequencies() {
     float bend_factor = std::pow(2.0f, pitch_bend_semitones_ / 12.0f);
-    float f1 = base_frequency_ * bend_factor;
+    target_frequency_ = base_frequency_ * bend_factor;
+    if (portamento_seconds_ <= 0.0001f) current_frequency_ = target_frequency_;
+    float f1 = current_frequency_ * std::pow(2.0f, vibrato_semitones_ / 12.0f);
     float f2_ratio = std::pow(2.0f, (static_cast<float>(osc2_semi_) + detune_cents_ / 100.0f) / 12.0f);
     float f2 = f1 * f2_ratio;
-    float f_sub = f1 * 0.5f; // 1 octave down
+    float f_sub = f1 / static_cast<float>(sub_ratio_denominator_);
 
     osc1_.set_frequency(f1);
     osc2_.set_frequency(f2);
     sub_osc_.set_frequency(f_sub);
+    fundamental_osc_.set_frequency(f1);
 }
 
 float SynthVoice::next_noise() {
@@ -311,12 +354,27 @@ bool SynthVoice::is_active() const {
 }
 
 float SynthVoice::process(float& filter_env_out) {
+    float weight = 0.0f;
+    return sanitize(process_split(filter_env_out, weight) + weight);
+}
+
+float SynthVoice::process_split(float& filter_env_out, float& weight_out) {
     if (!is_active()) {
         filter_env_out = 0.0f;
+        weight_out = 0.0f;
         return 0.0f;
     }
 
     age_ += 1.0f / sample_rate_;
+    if (portamento_seconds_ > 0.0001f) {
+        float glide = 1.0f - std::exp(-1.0f / (portamento_seconds_ * sample_rate_));
+        current_frequency_ += (target_frequency_ - current_frequency_) * glide;
+    } else current_frequency_ = target_frequency_;
+    float f1 = current_frequency_ * std::pow(2.0f, vibrato_semitones_ / 12.0f);
+    osc1_.set_frequency(f1);
+    osc2_.set_frequency(f1 * std::pow(2.0f, (static_cast<float>(osc2_semi_) + detune_cents_/100.0f)/12.0f));
+    sub_osc_.set_frequency(f1 / static_cast<float>(sub_ratio_denominator_));
+    fundamental_osc_.set_frequency(f1);
 
     // Modulator Oscillator (Osc 2)
     float s2 = osc2_.process();
@@ -331,17 +389,21 @@ float SynthVoice::process(float& filter_env_out) {
     float s1 = osc1_.process_with_pm(pm_input);
 
     float s_sub = sub_osc_.process();
+    float s_fundamental = fundamental_osc_.process();
     float noise = next_noise();
 
     // Sum interacting sources
     float carrier_level = 0.55f;
     float mod_level = 0.45f * (1.0f - fm_amount_ * 0.35f);
-    float raw_voice = carrier_level * s1 + mod_level * s2 + sub_mix_ * s_sub + noise_mix_ * noise;
+    float character = carrier_level * s1 + mod_level * s2 + noise_mix_ * noise;
 
     float amp = amp_env_.process();
     filter_env_out = filter_env_.process();
-
-    return sanitize(raw_voice * amp);
+    float sub_env = lerp(1.0f, amp, sub_envelope_amount_);
+    float sub = s_sub * sub_polarity_;
+    if (sub_saturation_ > 0.0f) sub = lerp(sub, fast_tanh(sub * (1.0f + 4.0f*sub_saturation_)), sub_saturation_);
+    weight_out = sanitize((fundamental_mix_ * s_fundamental + sub_mix_ * sub) * sub_env);
+    return sanitize(character * amp);
 }
 
 // ── VoiceManager Implementation ────────────────────────────────────────
@@ -350,7 +412,9 @@ VoiceManager::VoiceManager()
       pitch_bend_(0.0f),
       fm_amount_(0.0f),
       osc2_semi_(0),
-      hard_sync_(false) {
+      hard_sync_(false),
+      mono_(false),
+      legato_(false) {
 }
 
 void VoiceManager::set_sample_rate(float sr) {
@@ -378,6 +442,15 @@ int VoiceManager::find_free_voice() {
 }
 
 void VoiceManager::note_on(int note, float velocity) {
+    if (mono_) {
+        if (voices_[0].is_active()) voices_[0].retarget_note(note, velocity, !legato_);
+        else voices_[0].note_on(note, velocity);
+        voices_[0].set_pitch_bend(pitch_bend_);
+        voices_[0].set_fm_amount(fm_amount_);
+        voices_[0].set_osc2_semi(osc2_semi_);
+        voices_[0].set_hard_sync(hard_sync_);
+        return;
+    }
     int idx = find_free_voice();
     if (idx >= 0 && idx < static_cast<int>(MAX_VOICES)) {
         voices_[idx].note_on(note, velocity);
@@ -420,6 +493,15 @@ void VoiceManager::set_sub_mix(float sub_mix) {
         v.set_sub_mix(sub_mix);
     }
 }
+void VoiceManager::set_fundamental_mix(float mix) { for (auto& v : voices_) v.set_fundamental_mix(mix); }
+void VoiceManager::set_sub_ratio(int denominator) { for (auto& v : voices_) v.set_sub_ratio(denominator); }
+void VoiceManager::set_sub_phase(float phase_cycles) { for (auto& v : voices_) v.set_sub_phase(phase_cycles); }
+void VoiceManager::set_sub_polarity(bool inverted) { for (auto& v : voices_) v.set_sub_polarity(inverted); }
+void VoiceManager::set_sub_saturation(float amount) { for (auto& v : voices_) v.set_sub_saturation(amount); }
+void VoiceManager::set_sub_envelope(float amount) { for (auto& v : voices_) v.set_sub_envelope(amount); }
+void VoiceManager::set_voice_mode(bool mono, bool legato) { mono_ = mono; legato_ = legato; }
+void VoiceManager::set_portamento(float seconds) { for (auto& v : voices_) v.set_portamento(seconds); }
+void VoiceManager::set_vibrato(float semitones) { for (auto& v : voices_) v.set_vibrato(semitones); }
 
 void VoiceManager::set_noise_mix(float noise_mix) {
     for (auto& v : voices_) {
@@ -467,14 +549,22 @@ void VoiceManager::set_filter_envelope(float a, float d, float s, float r) {
 }
 
 float VoiceManager::process(float& out_filter_env) {
+    float weight = 0.0f;
+    return sanitize(process_split(out_filter_env, weight) + weight);
+}
+
+float VoiceManager::process_split(float& out_filter_env, float& out_weight) {
     float sum = 0.0f;
+    float weight_sum = 0.0f;
     float env_sum = 0.0f;
     size_t active_count = 0;
 
     for (auto& v : voices_) {
         if (v.is_active()) {
             float f_env = 0.0f;
-            sum += v.process(f_env);
+            float weight = 0.0f;
+            sum += v.process_split(f_env, weight);
+            weight_sum += weight;
             env_sum += f_env;
             active_count++;
         }
@@ -484,10 +574,12 @@ float VoiceManager::process(float& out_filter_env) {
         out_filter_env = env_sum / static_cast<float>(active_count);
         // Polyphonic scaling to prevent harsh digital clipping
         float headroom_scale = 1.0f / std::sqrt(static_cast<float>(active_count));
+        out_weight = sanitize(weight_sum * headroom_scale);
         return sanitize(sum * headroom_scale);
     }
 
     out_filter_env = 0.0f;
+    out_weight = 0.0f;
     return 0.0f;
 }
 

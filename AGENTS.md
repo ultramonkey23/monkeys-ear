@@ -29,7 +29,7 @@ LIVE is sacred:
 - **Strict zero allocation / zero deallocation** on the audio thread during `process()`.
 - **Zero locks, zero mutexes, zero file I/O, zero network calls, zero UI operations** in the real-time path.
 - Hard deadline margin target: >90% at 32 / 64 / 128 sample buffers.
-- Absolute speaker and hearing safety: Every output path passes through a zero-latency brickwall safety limiter and denormal/NaN scrubber.
+- Signal-level protection: Every output path passes through a zero-latency limiter and denormal/NaN scrubber. This does not guarantee hearing safety; monitoring level remains the musician's responsibility.
 
 ---
 

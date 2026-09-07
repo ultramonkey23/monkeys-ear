@@ -60,6 +60,16 @@ public:
 // FUnknown IID: 00000000-00000000-C0000000-00000046
 static const TUID FUnknown_iid = INLINE_UID(0x00000000, 0x00000000, 0xC0000000, 0x00000046);
 
+enum IBSeekMode { kIBSeekSet = 0, kIBSeekCur, kIBSeekEnd };
+class IBStream : public FUnknown {
+public:
+    virtual tresult SMTG_STDCALL read(void* buffer, int32 numBytes, int32* numBytesRead) = 0;
+    virtual tresult SMTG_STDCALL write(void* buffer, int32 numBytes, int32* numBytesWritten) = 0;
+    virtual tresult SMTG_STDCALL seek(int64 pos, int32 mode, int64* result) = 0;
+    virtual tresult SMTG_STDCALL tell(int64* pos) = 0;
+};
+static const TUID IBStream_iid = INLINE_UID(0xC3BF6EA2, 0x30994752, 0x9B6BF990, 0x1EE33E9B);
+
 // IPluginBase: 22888DDB-156E-45AE-8358-B34808190625
 static const TUID IPluginBase_iid = INLINE_UID(0x22888DDB, 0x156E45AE, 0x8358B348, 0x08190625);
 
@@ -223,8 +233,8 @@ public:
     virtual tresult SMTG_STDCALL getRoutingInfo(RoutingInfo& inInfo, RoutingInfo& outInfo) = 0;
     virtual tresult SMTG_STDCALL activateBus(MediaType type, BusDirection dir, int32 index, bool state) = 0;
     virtual tresult SMTG_STDCALL setActive(bool state) = 0;
-    virtual tresult SMTG_STDCALL setState(void* state) = 0;
-    virtual tresult SMTG_STDCALL getState(void* state) = 0;
+    virtual tresult SMTG_STDCALL setState(IBStream* state) = 0;
+    virtual tresult SMTG_STDCALL getState(IBStream* state) = 0;
 };
 
 // IComponent IID: E831FF31-F2D5-4301-928E-BBEE25697802
@@ -311,9 +321,9 @@ static const TUID IComponentHandler_iid = INLINE_UID(0x93A0BEA3, 0x0BD045DB, 0x8
 
 class IEditController : public IPluginBase {
 public:
-    virtual tresult SMTG_STDCALL setComponentState(void* state) = 0;
-    virtual tresult SMTG_STDCALL setState(void* state) = 0;
-    virtual tresult SMTG_STDCALL getState(void* state) = 0;
+    virtual tresult SMTG_STDCALL setComponentState(IBStream* state) = 0;
+    virtual tresult SMTG_STDCALL setState(IBStream* state) = 0;
+    virtual tresult SMTG_STDCALL getState(IBStream* state) = 0;
     virtual int32 SMTG_STDCALL getParameterCount() = 0;
     virtual tresult SMTG_STDCALL getParameterInfo(int32 paramIndex, ParameterInfo& info) = 0;
     virtual tresult SMTG_STDCALL getParamStringByValue(ParamID id, ParamValue valueNormalized, char16 string[128]) = 0;

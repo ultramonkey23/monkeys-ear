@@ -95,6 +95,7 @@ float StateVariableFilter::process(float input, float env_mod, float env_amount)
 
     // Notch
     float notch = hp + lp;
+    float peak = lp - hp;
 
     float out = 0.0f;
     switch (mode_) {
@@ -109,6 +110,9 @@ float StateVariableFilter::process(float input, float env_mod, float env_amount)
             break;
         case FilterMode::Notch:
             out = notch;
+            break;
+        case FilterMode::Peak:
+            out = peak;
             break;
     }
 

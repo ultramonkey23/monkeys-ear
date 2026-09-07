@@ -9,6 +9,14 @@ PresetData::PresetData()
       master_gain_db(0.0f),
       synth_waveform(0),
       sub_mix(0.20f),
+      fundamental_mix(0.20f),
+      sub_ratio_denominator(2),
+      sub_phase(0.0f),
+      sub_polarity_inverted(false),
+      sub_saturation(0.0f),
+      sub_envelope_amount(1.0f),
+      source_level(0.85f),
+      character_level(0.75f),
       noise_mix(0.02f),
       amp_attack(0.005f),
       amp_decay(0.150f),
@@ -29,7 +37,22 @@ PresetData::PresetData()
       state_enabled(true),
       lfo1_rate_hz(1.5f),
       lfo1_depth(0.0f),
-      input_route_mode(0) {
+      input_route_mode(0),
+      filter_mode_a(0), filter_mode_b(0), filter_cutoff_b_hz(12000.0f),
+      filter_resonance_b(0.05f), filter_drive(0.0f), filter_wet(1.0f),
+      filter_routing(0), filter_slope_a_24db(false), filter_slope_b_24db(false),
+      filter_key_tracking(0.0f),
+      eq_type{{0,0,0,0}}, eq_frequency_hz{{55.0f,250.0f,1800.0f,9000.0f}},
+      eq_gain_db{{0,0,0,0}}, eq_q{{0.707f,0.8f,1.0f,0.707f}},
+      eq_bypass(false), eq_gain_compensation(true),
+      lfo1_waveform(0), motion_curve(0.35f), mod_lfo_cutoff(0.0f),
+      mod_lfo_resonance(0.0f), mod_lfo_fm(0.0f), mod_lfo_sub_blend(0.0f),
+      mod_lfo_drive(0.0f), mod_lfo_eq_frequency(0.0f), mod_lfo_eq_gain(0.0f),
+      mod_state_direction_filter(0.0f), mod_state_fast_fm(0.0f),
+      mod_state_slow_balance(0.0f), mod_state_slow_resonator(0.0f),
+      mod_audio_envelope_drive(0.0f), mono_mode(false), legato(false),
+      portamento_seconds(0.0f), pitch_bend_range(2.0f), vibrato_depth_semitones(0.0f),
+      velocity_tone(0.0f), aftertouch_filter(0.0f), aftertouch_drive(0.0f) {
     macros[MACRO_CUTOFF] = 0.65f;     // Open bright cutoff
     macros[MACRO_RESONANCE] = 0.25f;  // Moderate bite
     macros[MACRO_DRIVE] = 0.30f;      // Warm tube drive
@@ -49,6 +72,10 @@ std::string PresetData::serialize() const {
     oss << "MASTER_GAIN=" << master_gain_db << "\n";
     oss << "WAVEFORM=" << synth_waveform << "\n";
     oss << "SUB_MIX=" << sub_mix << "\n";
+    oss << "FUND_MIX=" << fundamental_mix << "\nSUB_RATIO=" << sub_ratio_denominator << "\n";
+    oss << "SUB_PHASE=" << sub_phase << "\nSUB_POLARITY=" << (sub_polarity_inverted?1:0) << "\n";
+    oss << "SUB_SAT=" << sub_saturation << "\nSUB_ENV=" << sub_envelope_amount << "\n";
+    oss << "SOURCE_LEVEL=" << source_level << "\nCHAR_LEVEL=" << character_level << "\n";
     oss << "NOISE_MIX=" << noise_mix << "\n";
     oss << "AMP_A=" << amp_attack << "\n";
     oss << "AMP_D=" << amp_decay << "\n";
@@ -70,6 +97,16 @@ std::string PresetData::serialize() const {
     oss << "LFO1_RATE=" << lfo1_rate_hz << "\n";
     oss << "LFO1_DEPTH=" << lfo1_depth << "\n";
     oss << "ROUTE_MODE=" << input_route_mode << "\n";
+    oss << "FILTER_MODE_A=" << filter_mode_a << "\nFILTER_MODE_B=" << filter_mode_b << "\n";
+    oss << "FILTER_CUTOFF_B=" << filter_cutoff_b_hz << "\nFILTER_RES_B=" << filter_resonance_b << "\n";
+    oss << "FILTER_DRIVE=" << filter_drive << "\nFILTER_WET=" << filter_wet << "\nFILTER_ROUTING=" << filter_routing << "\n";
+    oss << "FILTER_SLOPE_A=" << (filter_slope_a_24db?1:0) << "\nFILTER_SLOPE_B=" << (filter_slope_b_24db?1:0) << "\nFILTER_KEYTRACK=" << filter_key_tracking << "\n";
+    for (size_t i=0;i<4;++i) oss << "EQ"<<i<<"_TYPE="<<eq_type[i]<<"\nEQ"<<i<<"_FREQ="<<eq_frequency_hz[i]<<"\nEQ"<<i<<"_GAIN="<<eq_gain_db[i]<<"\nEQ"<<i<<"_Q="<<eq_q[i]<<"\n";
+    oss << "EQ_BYPASS="<<(eq_bypass?1:0)<<"\nEQ_GAIN_COMP="<<(eq_gain_compensation?1:0)<<"\n";
+    oss << "LFO1_WAVE="<<lfo1_waveform<<"\nMOTION_CURVE="<<motion_curve<<"\n";
+    oss << "MOD_LFO_CUTOFF="<<mod_lfo_cutoff<<"\nMOD_LFO_RES="<<mod_lfo_resonance<<"\nMOD_LFO_FM="<<mod_lfo_fm<<"\nMOD_LFO_SUB="<<mod_lfo_sub_blend<<"\nMOD_LFO_DRIVE="<<mod_lfo_drive<<"\nMOD_LFO_EQ_FREQ="<<mod_lfo_eq_frequency<<"\nMOD_LFO_EQ_GAIN="<<mod_lfo_eq_gain<<"\n";
+    oss << "MOD_STATE_DIR_FILTER="<<mod_state_direction_filter<<"\nMOD_STATE_FAST_FM="<<mod_state_fast_fm<<"\nMOD_STATE_SLOW_BAL="<<mod_state_slow_balance<<"\nMOD_STATE_SLOW_RESO="<<mod_state_slow_resonator<<"\nMOD_AUDIO_ENV_DRIVE="<<mod_audio_envelope_drive<<"\n";
+    oss << "MONO="<<(mono_mode?1:0)<<"\nLEGATO="<<(legato?1:0)<<"\nPORTAMENTO="<<portamento_seconds<<"\nBEND_RANGE="<<pitch_bend_range<<"\nVIBRATO="<<vibrato_depth_semitones<<"\nVELOCITY_TONE="<<velocity_tone<<"\nAFTERTOUCH_FILTER="<<aftertouch_filter<<"\nAFTERTOUCH_DRIVE="<<aftertouch_drive<<"\n";
     return oss.str();
 }
 
@@ -92,6 +129,14 @@ bool PresetData::deserialize(const std::string& data) {
         } else if (key == "MASTER_GAIN") master_gain_db = std::stof(val_str);
         else if (key == "WAVEFORM") synth_waveform = std::stoi(val_str);
         else if (key == "SUB_MIX") sub_mix = std::stof(val_str);
+        else if (key == "FUND_MIX") fundamental_mix = std::stof(val_str);
+        else if (key == "SUB_RATIO") sub_ratio_denominator = std::stoi(val_str);
+        else if (key == "SUB_PHASE") sub_phase = std::stof(val_str);
+        else if (key == "SUB_POLARITY") sub_polarity_inverted = std::stoi(val_str)!=0;
+        else if (key == "SUB_SAT") sub_saturation = std::stof(val_str);
+        else if (key == "SUB_ENV") sub_envelope_amount = std::stof(val_str);
+        else if (key == "SOURCE_LEVEL") source_level = std::stof(val_str);
+        else if (key == "CHAR_LEVEL") character_level = std::stof(val_str);
         else if (key == "NOISE_MIX") noise_mix = std::stof(val_str);
         else if (key == "AMP_A") amp_attack = std::stof(val_str);
         else if (key == "AMP_D") amp_decay = std::stof(val_str);
@@ -113,6 +158,43 @@ bool PresetData::deserialize(const std::string& data) {
         else if (key == "LFO1_RATE") lfo1_rate_hz = std::stof(val_str);
         else if (key == "LFO1_DEPTH") lfo1_depth = std::stof(val_str);
         else if (key == "ROUTE_MODE") input_route_mode = std::stoi(val_str);
+        else if (key == "FILTER_MODE_A") filter_mode_a=std::stoi(val_str);
+        else if (key == "FILTER_MODE_B") filter_mode_b=std::stoi(val_str);
+        else if (key == "FILTER_CUTOFF_B") filter_cutoff_b_hz=std::stof(val_str);
+        else if (key == "FILTER_RES_B") filter_resonance_b=std::stof(val_str);
+        else if (key == "FILTER_DRIVE") filter_drive=std::stof(val_str);
+        else if (key == "FILTER_WET") filter_wet=std::stof(val_str);
+        else if (key == "FILTER_ROUTING") filter_routing=std::stoi(val_str);
+        else if (key == "FILTER_SLOPE_A") filter_slope_a_24db=std::stoi(val_str)!=0;
+        else if (key == "FILTER_SLOPE_B") filter_slope_b_24db=std::stoi(val_str)!=0;
+        else if (key == "FILTER_KEYTRACK") filter_key_tracking=std::stof(val_str);
+        else if (key.rfind("EQ",0)==0 && key.size()>3 && key[3]=='_') {
+            int i=key[2]-'0'; if(i>=0&&i<4){ auto suffix=key.substr(4); if(suffix=="TYPE")eq_type[i]=std::stoi(val_str); else if(suffix=="FREQ")eq_frequency_hz[i]=std::stof(val_str); else if(suffix=="GAIN")eq_gain_db[i]=std::stof(val_str); else if(suffix=="Q")eq_q[i]=std::stof(val_str); }
+        }
+        else if (key == "EQ_BYPASS") eq_bypass=std::stoi(val_str)!=0;
+        else if (key == "EQ_GAIN_COMP") eq_gain_compensation=std::stoi(val_str)!=0;
+        else if (key == "LFO1_WAVE") lfo1_waveform=std::stoi(val_str);
+        else if (key == "MOTION_CURVE") motion_curve=std::stof(val_str);
+        else if (key == "MOD_LFO_CUTOFF") mod_lfo_cutoff=std::stof(val_str);
+        else if (key == "MOD_LFO_RES") mod_lfo_resonance=std::stof(val_str);
+        else if (key == "MOD_LFO_FM") mod_lfo_fm=std::stof(val_str);
+        else if (key == "MOD_LFO_SUB") mod_lfo_sub_blend=std::stof(val_str);
+        else if (key == "MOD_LFO_DRIVE") mod_lfo_drive=std::stof(val_str);
+        else if (key == "MOD_LFO_EQ_FREQ") mod_lfo_eq_frequency=std::stof(val_str);
+        else if (key == "MOD_LFO_EQ_GAIN") mod_lfo_eq_gain=std::stof(val_str);
+        else if (key == "MOD_STATE_DIR_FILTER") mod_state_direction_filter=std::stof(val_str);
+        else if (key == "MOD_STATE_FAST_FM") mod_state_fast_fm=std::stof(val_str);
+        else if (key == "MOD_STATE_SLOW_BAL") mod_state_slow_balance=std::stof(val_str);
+        else if (key == "MOD_STATE_SLOW_RESO") mod_state_slow_resonator=std::stof(val_str);
+        else if (key == "MOD_AUDIO_ENV_DRIVE") mod_audio_envelope_drive=std::stof(val_str);
+        else if (key == "MONO") mono_mode=std::stoi(val_str)!=0;
+        else if (key == "LEGATO") legato=std::stoi(val_str)!=0;
+        else if (key == "PORTAMENTO") portamento_seconds=std::stof(val_str);
+        else if (key == "BEND_RANGE") pitch_bend_range=std::stof(val_str);
+        else if (key == "VIBRATO") vibrato_depth_semitones=std::stof(val_str);
+        else if (key == "VELOCITY_TONE") velocity_tone=std::stof(val_str);
+        else if (key == "AFTERTOUCH_FILTER") aftertouch_filter=std::stof(val_str);
+        else if (key == "AFTERTOUCH_DRIVE") aftertouch_drive=std::stof(val_str);
     }
     return true;
 }
@@ -267,6 +349,45 @@ PresetData PresetManager::create_factory_guitar_processor() {
     p.state_enabled = true;
     p.input_route_mode = 2; // External guitar input
     return p;
+}
+
+PresetData PresetManager::create_monolith() {
+    PresetData p = create_factory_bass(); p.name="MONOLITH";
+    p.synth_waveform=3; p.fundamental_mix=0.72f; p.sub_mix=0.58f; p.sub_ratio_denominator=2;
+    p.sub_saturation=0.22f; p.sub_envelope_amount=0.82f; p.character_level=0.30f;
+    p.macros[MACRO_CUTOFF]=0.32f; p.macros[MACRO_DRIVE]=0.28f; p.macros[MACRO_BODY]=0.18f;
+    p.filter_mode_a=0; p.filter_mode_b=0; p.filter_cutoff_b_hz=145.0f; p.filter_slope_a_24db=true;
+    p.filter_routing=0; p.eq_type={{2,1,1,5}}; p.eq_frequency_hz={{48,180,720,6200}};
+    p.eq_gain_db={{2.5f,-2.0f,1.0f,0}}; p.eq_q={{0.7f,1.0f,0.8f,0.7f}};
+    p.state_resistance=0.72f; p.state_coupling=0.14f; p.mod_state_slow_balance=0.18f;
+    p.macros[MACRO_DELAY]=0; p.macros[MACRO_SPACE]=0.05f; p.master_gain_db=-5.0f; return p;
+}
+
+PresetData PresetManager::create_feral_wobble() {
+    PresetData p=create_factory_bass(); p.name="FERAL WOBBLE"; p.synth_waveform=0;
+    p.fundamental_mix=0.28f; p.sub_mix=0.42f; p.sub_ratio_denominator=2; p.sub_saturation=0.40f;
+    p.character_level=0.88f; p.filter_mode_a=0; p.filter_mode_b=2; p.filter_cutoff_b_hz=92.0f;
+    p.filter_resonance_b=0.20f; p.filter_drive=0.62f; p.filter_routing=2; p.filter_slope_a_24db=true;
+    p.lfo1_rate_hz=3.25f; p.lfo1_depth=1.0f; p.lfo1_waveform=1; p.motion_curve=0.58f;
+    p.mod_lfo_cutoff=0.78f; p.mod_lfo_resonance=0.24f; p.mod_lfo_fm=0.36f;
+    p.mod_lfo_sub_blend=-0.22f; p.mod_lfo_drive=0.24f; p.mod_lfo_eq_frequency=0.32f;
+    p.mod_state_direction_filter=0.38f; p.mod_state_fast_fm=0.34f; p.mod_state_slow_balance=0.30f;
+    p.mod_state_slow_resonator=0.24f; p.eq_type={{4,1,1,3}}; p.eq_frequency_hz={{28,170,1450,7200}};
+    p.eq_gain_db={{0,-2.5f,3.5f,1.0f}}; p.eq_q={{0.7f,1.2f,1.5f,0.7f}}; p.master_gain_db=-7.0f; return p;
+}
+
+PresetData PresetManager::create_velvet_lead() {
+    PresetData p=create_factory_lead(); p.name="VELVET LEAD"; p.synth_waveform=2;
+    p.fundamental_mix=0.16f; p.sub_mix=0.08f; p.character_level=0.78f; p.mono_mode=true; p.legato=true;
+    p.portamento_seconds=0.085f; p.pitch_bend_range=12.0f; p.vibrato_depth_semitones=0.28f;
+    p.velocity_tone=0.42f; p.aftertouch_filter=0.55f; p.aftertouch_drive=0.26f;
+    p.amp_attack=0.012f; p.amp_sustain=0.90f; p.amp_release=0.58f; p.osc_fm_amount=0.08f;
+    p.osc_hard_sync=false; p.filter_mode_a=0; p.filter_mode_b=0; p.filter_cutoff_b_hz=7600.0f;
+    p.filter_resonance_b=0.08f; p.filter_drive=0.18f; p.filter_slope_b_24db=true;
+    p.eq_type={{4,1,1,3}}; p.eq_frequency_hz={{38,320,2100,7200}}; p.eq_gain_db={{0,-1.2f,2.2f,-1.5f}};
+    p.eq_q={{0.7f,0.9f,0.8f,0.7f}}; p.state_resistance=0.42f; p.state_coupling=0.34f;
+    p.mod_state_direction_filter=0.10f; p.mod_state_slow_resonator=0.16f; p.macros[MACRO_DRIVE]=0.38f;
+    p.macros[MACRO_DELAY]=0.22f; p.macros[MACRO_SPACE]=0.20f; p.master_gain_db=-5.5f; return p;
 }
 
 } // namespace monkeys_ear

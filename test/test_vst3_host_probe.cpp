@@ -12,6 +12,27 @@ using namespace Steinberg::Vst;
 
 typedef IPluginFactory* (SMTG_STDCALL *GetPluginFactoryProc)();
 
+class OneEventList final : public IEventList {
+public:
+    Event event{}; uint32 refs=1;
+    tresult SMTG_STDCALL queryInterface(const TUID,void** obj)override{*obj=nullptr;return kResultFalse;}
+    uint32 SMTG_STDCALL addRef()override{return ++refs;} uint32 SMTG_STDCALL release()override{return --refs;}
+    int32 SMTG_STDCALL getEventCount()override{return 1;}
+    tresult SMTG_STDCALL getEvent(int32 index,Event& e)override{if(index!=0)return kInvalidArgument;e=event;return kResultOk;}
+    tresult SMTG_STDCALL addEvent(Event& e)override{event=e;return kResultOk;}
+};
+
+class MemoryStream final : public IBStream {
+public:
+    std::vector<uint8_t> bytes; size_t pos=0; uint32 refs=1;
+    tresult SMTG_STDCALL queryInterface(const TUID,void** obj)override{*obj=nullptr;return kResultFalse;}
+    uint32 SMTG_STDCALL addRef()override{return ++refs;} uint32 SMTG_STDCALL release()override{return --refs;}
+    tresult SMTG_STDCALL read(void* dst,int32 n,int32* done)override{size_t count=std::min<size_t>(n,bytes.size()-std::min(pos,bytes.size()));memcpy(dst,bytes.data()+pos,count);pos+=count;if(done)*done=static_cast<int32>(count);return count==static_cast<size_t>(n)?kResultOk:kResultFalse;}
+    tresult SMTG_STDCALL write(void* src,int32 n,int32* done)override{if(pos+n>bytes.size())bytes.resize(pos+n);memcpy(bytes.data()+pos,src,n);pos+=n;if(done)*done=n;return kResultOk;}
+    tresult SMTG_STDCALL seek(int64 p,int32 mode,int64* result)override{int64 base=mode==kIBSeekCur?static_cast<int64>(pos):(mode==kIBSeekEnd?static_cast<int64>(bytes.size()):0);pos=static_cast<size_t>(std::max<int64>(0,base+p));if(result)*result=pos;return kResultOk;}
+    tresult SMTG_STDCALL tell(int64* p)override{if(p)*p=pos;return kResultOk;}
+};
+
 int main() {
     std::cout << "=======================================================\n";
     std::cout << "  HOST VERIFICATION PROBE // VST3 BINARY INSPECTION\n";
@@ -103,7 +124,7 @@ int main() {
 
     int32 paramCount = controller->getParameterCount();
     std::cout << "          Total Exposed Parameters: " << paramCount << "\n";
-    assert(paramCount == 19);
+    assert(paramCount == 80);
 
     std::cout << "\n[EXPOSED PARAMETERS ENUMERATION]:\n";
     for (int32 i = 0; i < paramCount; ++i) {
@@ -122,6 +143,24 @@ int main() {
                   << std::left << std::setw(36) << titleAscii
                   << " (Default: " << valStringAscii << ")\n";
     }
+
+    // Component/controller state is an actual versioned 79-float host stream.
+    MemoryStream state_stream;
+    assert(fx_comp->getState(&state_stream)==kResultOk);
+    assert(state_stream.bytes.size()==12u+80u*sizeof(float));
+    state_stream.pos=0;
+    assert(controller->setComponentState(&state_stream)==kResultOk);
+    std::cout << "[PASS] Versioned host preset state round-trip: "<<state_stream.bytes.size()<<" bytes\n";
+
+    // Actual Instrument-class MIDI processing, not topology alone.
+    IAudioProcessor* instr_proc=nullptr; assert(instr_comp->queryInterface(IAudioProcessor_iid,(void**)&instr_proc)==kResultOk);
+    ProcessSetup instr_setup{};instr_setup.sampleRate=48000;instr_setup.maxSamplesPerBlock=128;instr_proc->setupProcessing(instr_setup);instr_comp->setActive(true);
+    std::vector<float> instr_l(128),instr_r(128);float* instr_channels[]={instr_l.data(),instr_r.data()};AudioBusBuffers instr_out{};instr_out.numChannels=2;instr_out.channelBuffers32=instr_channels;
+    OneEventList notes;notes.event.type=kNoteOnEvent;notes.event.noteOn.pitch=48;notes.event.noteOn.velocity=.9f;
+    ProcessData instr_data{};instr_data.numSamples=128;instr_data.numOutputs=1;instr_data.outputs=&instr_out;instr_data.inputEvents=&notes;
+    assert(instr_proc->process(instr_data)==kResultOk);float instr_peak=0;for(float v:instr_l)instr_peak=std::max(instr_peak,std::abs(v));assert(instr_peak>.001f);
+    std::cout<<"[PASS] Instrument component processed MIDI note through audio output; peak="<<instr_peak<<"\n";
+    instr_comp->setActive(false);instr_proc->release();
 
     // ── Live Processing Verification on FX Instance ──────────────────────
     std::cout << "\n[TEST] Feeding External Audio into Monkey's Ear FX Component...\n";

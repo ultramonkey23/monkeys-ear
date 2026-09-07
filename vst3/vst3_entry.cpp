@@ -26,7 +26,12 @@ static const TUID kMonkeysEarControllerCID = INLINE_UID(
     0x4D6F6E6B, 0x65797345, 0x61724374, 0x726C7202
 );
 
-static constexpr int kNumParams = 19;
+static constexpr int kNumParams = 80;
+static constexpr uint32 kStateMagic = 0x4D453032u; // ME02
+static constexpr uint32 kStateVersion = 2u;
+
+static tresult write_plugin_state(IBStream* stream, const std::shared_ptr<struct SharedPluginState>& state);
+static tresult read_plugin_state(IBStream* stream, const std::shared_ptr<struct SharedPluginState>& state);
 
 // Helper to copy ASCII string to char16_t array
 static void copy_to_char16(char16* dest, const char* src, size_t max_len) {
@@ -44,6 +49,7 @@ struct SharedPluginState {
     std::atomic<bool> dirty[kNumParams];
 
     SharedPluginState(bool is_fx = false) {
+        for (int i = 0; i < kNumParams; ++i) params[i].store(0.5f);
         params[0].store(0.65f); // Cutoff
         params[1].store(0.25f); // Resonance
         params[2].store(0.30f); // Drive
@@ -63,9 +69,36 @@ struct SharedPluginState {
         params[16].store(0.50f); // State Persistence
         params[17].store(1.00f); // State Mechanism Enable (1 = Stateful, 0 = Conventional)
         params[18].store(is_fx ? 1.00f : 0.00f); // Input Route Mode (0: Synth, 0.5: Blend, 1.0: Ext Audio)
+        params[19].store(0.20f); params[20].store(0.20f); params[21].store(0.34f);
+        params[22].store(0.0f); params[23].store(0.0f); params[24].store(0.0f); params[25].store(1.0f);
+        params[26].store(0.85f); params[27].store(0.75f); params[28].store(0.0f); params[29].store(0.92f);
+        params[30].store(0.0f); params[31].store(0.0f); params[32].store(1.0f); params[33].store(0.0f);
+        params[34].store(0.0f); params[35].store(0.0f); params[36].store(0.0f);
+        for(int b=0;b<4;++b){ params[37+b*4].store(0.0f); params[38+b*4].store(0.5f); params[39+b*4].store(0.5f); params[40+b*4].store(0.35f); }
+        params[53].store(0.0f); params[54].store(1.0f); params[55].store(0.48f); params[56].store(0.0f);
+        params[57].store(0.35f); for(int i=58;i<=69;++i) params[i].store(0.5f);
+        params[70].store(0.0f); params[71].store(0.0f); params[72].store(0.0f); params[73].store(0.043f);
+        params[74].store(0.0f); params[75].store(0.0f); params[76].store(0.5f); params[77].store(0.5f); params[78].store(0.0f);
+        params[79].store(0.0f);
         for (int i = 0; i < kNumParams; ++i) dirty[i].store(false);
     }
 };
+
+static bool stream_write(IBStream* s, void* data, int32 bytes) { int32 done=0; return s&&s->write(data,bytes,&done)==kResultOk&&done==bytes; }
+static bool stream_read(IBStream* s, void* data, int32 bytes) { int32 done=0; return s&&s->read(data,bytes,&done)==kResultOk&&done==bytes; }
+static tresult write_plugin_state(IBStream* stream, const std::shared_ptr<SharedPluginState>& state) {
+    if(!stream||!state)return kInvalidArgument;
+    uint32 magic=kStateMagic,version=kStateVersion,count=kNumParams;
+    if(!stream_write(stream,&magic,4)||!stream_write(stream,&version,4)||!stream_write(stream,&count,4))return kInternalError;
+    for(int i=0;i<kNumParams;++i){float v=state->params[i].load();if(!stream_write(stream,&v,4))return kInternalError;} return kResultOk;
+}
+static tresult read_plugin_state(IBStream* stream, const std::shared_ptr<SharedPluginState>& state) {
+    if(!stream||!state)return kInvalidArgument;
+    uint32 magic=0,version=0,count=0;
+    if(!stream_read(stream,&magic,4)||!stream_read(stream,&version,4)||!stream_read(stream,&count,4))return kInternalError;
+    if(magic!=kStateMagic||version>kStateVersion||count>static_cast<uint32>(kNumParams))return kResultFalse;
+    for(uint32 i=0;i<count;++i){float v=0;if(!stream_read(stream,&v,4))return kInternalError;state->params[i].store(std::clamp(v,0.0f,1.0f));state->dirty[i].store(true);} return kResultOk;
+}
 
 static std::mutex g_state_mutex;
 static std::shared_ptr<SharedPluginState> g_last_created_state = nullptr;
@@ -201,12 +234,12 @@ public:
         return kResultOk;
     }
 
-    tresult SMTG_STDCALL setState(void* /*state*/) override {
-        return kResultOk;
+    tresult SMTG_STDCALL setState(IBStream* stream) override {
+        return read_plugin_state(stream,state_);
     }
 
-    tresult SMTG_STDCALL getState(void* /*state*/) override {
-        return kResultOk;
+    tresult SMTG_STDCALL getState(IBStream* stream) override {
+        return write_plugin_state(stream,state_);
     }
 
     // ── IAudioProcessor ──────────────────────────────────────────────────────
@@ -344,35 +377,7 @@ public:
 
 private:
     void apply_param_to_engine(ParamID id, float value) {
-        if (id < monkeys_ear::NUM_MACROS) {
-            engine_.set_macro(static_cast<monkeys_ear::MacroId>(id), value);
-        } else if (id == 8) {
-            float db = (value > 0.001f) ? (value - 0.85f) * 40.0f : -100.0f;
-            engine_.set_master_gain_db(db);
-        } else if (id == 9) {
-            auto wf = static_cast<monkeys_ear::Waveform>(static_cast<int>(value * 3.99f));
-            engine_.set_waveform(wf);
-        } else if (id == 10) {
-            engine_.set_osc_fm(value);
-        } else if (id == 11) {
-            int semi = static_cast<int>(std::round((value - 0.5f) * 48.0f));
-            engine_.set_osc2_semi(semi);
-        } else if (id == 12) {
-            engine_.set_osc_hard_sync(value >= 0.5f);
-        } else if (id == 13) {
-            engine_.set_state_resistance(value);
-        } else if (id == 14) {
-            engine_.set_state_repulsion(value);
-        } else if (id == 15) {
-            engine_.set_state_coupling(value);
-        } else if (id == 16) {
-            engine_.set_state_persistence(value);
-        } else if (id == 17) {
-            engine_.set_state_enabled(value >= 0.5f);
-        } else if (id == 18) {
-            int mode = static_cast<int>(value * 2.99f);
-            engine_.set_input_route_mode(mode);
-        }
+        engine_.set_parameter_normalized(static_cast<int>(id), value);
     }
 
     std::atomic<uint32> ref_count_;
@@ -445,16 +450,16 @@ public:
     }
 
     // ── IEditController ──────────────────────────────────────────────────────
-    tresult SMTG_STDCALL setComponentState(void* /*state*/) override {
-        return kResultOk;
+    tresult SMTG_STDCALL setComponentState(IBStream* stream) override {
+        return read_plugin_state(stream,state_);
     }
 
-    tresult SMTG_STDCALL setState(void* /*state*/) override {
-        return kResultOk;
+    tresult SMTG_STDCALL setState(IBStream* stream) override {
+        return read_plugin_state(stream,state_);
     }
 
-    tresult SMTG_STDCALL getState(void* /*state*/) override {
-        return kResultOk;
+    tresult SMTG_STDCALL getState(IBStream* stream) override {
+        return write_plugin_state(stream,state_);
     }
 
     int32 SMTG_STDCALL getParameterCount() override {
@@ -489,22 +494,20 @@ public:
             "State: Phase Resonance Coupling",
             "State: Macro Persistence",
             "State: Mechanism Mode (A/B)",
-            "Audio Input Route Mode"
-        };
-        static const char* shortTitles[kNumParams] = {
-            "Bright", "Bite", "Heat", "Body", "Echo", "Space", "MicMix", "Char",
-            "Gain", "Wave", "CrossFM", "Osc2Semi", "Sync", "Resist", "Repel", "Couple",
-            "Persist", "StateAB", "InRoute"
-        };
-        static const char* units[kNumParams] = {
-            "Hz", "%", "%", "%", "%", "%", "%", "%",
-            "dB", "type", "%", "semi", "mode", "%", "%", "%",
-            "%", "A/B", "mode"
+            "Audio Input Route Mode",
+            "SUB: Fundamental Level", "SUB: Subharmonic Blend", "SUB: Ratio (1/n)", "SUB: Phase", "SUB: Polarity", "SUB: Saturation", "SUB: Envelope Follow",
+            "SOURCE: Weight Level", "SOURCE: Character Level",
+            "FILTER: Pass A Mode", "FILTER: Pass B Cutoff", "FILTER: Pass B Mode", "FILTER: Routing", "FILTER: Wet Dry", "FILTER: Key Tracking", "FILTER: Pass A Slope", "FILTER: Pass B Slope", "FILTER: Internal Drive",
+            "EQ 1: Type", "EQ 1: Frequency", "EQ 1: Gain", "EQ 1: Q", "EQ 2: Type", "EQ 2: Frequency", "EQ 2: Gain", "EQ 2: Q",
+            "EQ 3: Type", "EQ 3: Frequency", "EQ 3: Gain", "EQ 3: Q", "EQ 4: Type", "EQ 4: Frequency", "EQ 4: Gain", "EQ 4: Q", "EQ: Bypass", "EQ: Gain Compensation",
+            "MOTION: LFO Rate", "MOTION: LFO Waveform", "MOTION: Curve", "MOTION: LFO to Cutoff", "MOTION: LFO to Resonance", "MOTION: LFO to FM", "MOTION: LFO to Sub", "MOTION: LFO to Drive", "MOTION: LFO to EQ Frequency", "MOTION: LFO to EQ Gain",
+            "STATE: Direction to Filter", "STATE: Fast Energy to FM", "STATE: Slow Energy to Balance", "STATE: Slow Energy to Resonator", "MOTION: Audio Envelope to Drive",
+            "SOURCE: Mono Mode", "SOURCE: Legato", "SOURCE: Portamento", "SOURCE: Pitch Bend Range", "SOURCE: Vibrato Depth", "SOURCE: Velocity Tone", "STATE: Aftertouch to Filter", "DRIVE/BODY: Aftertouch to Drive", "MOTION: LFO Master Depth", "PRESET: Target Patch"
         };
 
         copy_to_char16(info.title, titles[paramIndex], 128);
-        copy_to_char16(info.shortTitle, shortTitles[paramIndex], 128);
-        copy_to_char16(info.units, units[paramIndex], 128);
+        copy_to_char16(info.shortTitle, titles[paramIndex], 128);
+        copy_to_char16(info.units, "%", 128);
 
         return kResultOk;
     }
@@ -532,6 +535,9 @@ public:
             int m = static_cast<int>(valueNormalized * 2.99);
             const char* modes[] = {"Synth Only", "Hybrid Blend", "External Audio"};
             snprintf(buf, sizeof(buf), "%s", (m >= 0 && m <= 2) ? modes[m] : "Synth");
+        } else if (id == 79) {
+            int p=static_cast<int>(valueNormalized*3.99); const char* names[]={"Current","MONOLITH","FERAL WOBBLE","VELVET LEAD"};
+            snprintf(buf,sizeof(buf),"%s",names[std::clamp(p,0,3)]);
         } else {
             snprintf(buf, sizeof(buf), "%.1f %%", valueNormalized * 100.0);
         }

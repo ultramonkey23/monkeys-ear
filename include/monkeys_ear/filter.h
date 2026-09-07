@@ -8,7 +8,8 @@ enum class FilterMode {
     Lowpass,
     Bandpass,
     Highpass,
-    Notch
+    Notch,
+    Peak
 };
 
 class StateVariableFilter {

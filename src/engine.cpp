@@ -6,7 +6,8 @@ namespace monkeys_ear {
 MonkeysEarEngine::MonkeysEarEngine()
     : sample_rate_(48000.0f),
       max_block_size_(512),
-      master_volume_(0.85f) {
+      master_volume_(0.85f), aftertouch_(0.0f), audio_envelope_(0.0f),
+      current_midi_note_(60), last_velocity_(0.5f), modulation_counter_(0) {
     init(sample_rate_, max_block_size_);
 }
 
@@ -19,6 +20,14 @@ void MonkeysEarEngine::init(float sample_rate, size_t max_block_size) {
     chrono_body_.set_sample_rate(sample_rate_);
     lfo1_.set_sample_rate(sample_rate_);
     filter_.set_sample_rate(sample_rate_);
+    weight_lowpass_.set_sample_rate(sample_rate_);
+    eq_.set_sample_rate(sample_rate_);
+    external_sub_.set_sample_rate(sample_rate_);
+    cutoff_motion_.set_sample_rate(sample_rate_, 7.0f);
+    resonance_motion_.set_sample_rate(sample_rate_, 10.0f);
+    fm_motion_.set_sample_rate(sample_rate_, 5.0f);
+    sub_motion_.set_sample_rate(sample_rate_, 12.0f);
+    drive_motion_.set_sample_rate(sample_rate_, 10.0f);
     drive_tube_.set_sample_rate(sample_rate_);
     resonator_cab_.set_sample_rate(sample_rate_);
     delay_.set_sample_rate(sample_rate_);
@@ -35,6 +44,9 @@ void MonkeysEarEngine::reset() {
     chrono_body_.reset();
     lfo1_.reset_phase();
     filter_.reset();
+    weight_lowpass_.reset();
+    eq_.reset();
+    external_sub_.reset();
     drive_tube_.reset();
     resonator_cab_.reset();
     delay_.reset();
@@ -49,11 +61,21 @@ void MonkeysEarEngine::apply_macros() {
     // Macro 1: Brightness / Filter Cutoff (exponential map 40Hz to 18000Hz)
     float m_cutoff = p.macros[MACRO_CUTOFF];
     float cutoff_hz = 40.0f * std::pow(450.0f, m_cutoff);
-    filter_.set_cutoff(cutoff_hz);
+    float key_ratio = std::pow(2.0f, p.filter_key_tracking * (static_cast<float>(current_midi_note_)-60.0f)/12.0f);
+    cutoff_hz = clamp(cutoff_hz * key_ratio, 20.0f, sample_rate_*0.45f);
 
     // Macro 2: Bite / Filter Resonance (0.05 to 0.92)
     float m_res = p.macros[MACRO_RESONANCE];
-    filter_.set_resonance(0.05f + m_res * 0.85f);
+    float resonance_a = 0.05f + m_res * 0.85f;
+    filter_.set_stage(0, static_cast<FilterMode>(clamp(p.filter_mode_a,0,4)), cutoff_hz,
+                      resonance_a, p.filter_drive, p.filter_slope_a_24db);
+    filter_.set_stage(1, static_cast<FilterMode>(clamp(p.filter_mode_b,0,4)), p.filter_cutoff_b_hz,
+                      p.filter_resonance_b, p.filter_drive, p.filter_slope_b_24db);
+    filter_.set_routing(static_cast<FilterRouting>(clamp(p.filter_routing,0,2)));
+    filter_.set_mix(p.filter_wet);
+    weight_lowpass_.set_mode(FilterMode::Lowpass);
+    weight_lowpass_.set_cutoff(clamp(std::min(180.0f, cutoff_hz), 55.0f, 180.0f));
+    weight_lowpass_.set_resonance(0.05f);
 
     // Macro 3: Heat / Tube Saturation (0.0 to 1.0)
     float m_drive = p.macros[MACRO_DRIVE];
@@ -93,12 +115,20 @@ void MonkeysEarEngine::apply_macros() {
     // Advanced Sound Construction: Oscillators
     voice_manager_.set_waveform(static_cast<Waveform>(p.synth_waveform));
     voice_manager_.set_sub_mix(p.sub_mix);
+    voice_manager_.set_fundamental_mix(p.fundamental_mix);
+    voice_manager_.set_sub_ratio(p.sub_ratio_denominator);
+    voice_manager_.set_sub_phase(p.sub_phase);
+    voice_manager_.set_sub_polarity(p.sub_polarity_inverted);
+    voice_manager_.set_sub_saturation(p.sub_saturation);
+    voice_manager_.set_sub_envelope(p.sub_envelope_amount);
     voice_manager_.set_noise_mix(p.noise_mix);
     voice_manager_.set_fm_amount(p.osc_fm_amount);
     voice_manager_.set_osc2_semi(p.osc2_semi);
     voice_manager_.set_hard_sync(p.osc_hard_sync);
     voice_manager_.set_amp_envelope(p.amp_attack, p.amp_decay, p.amp_sustain, p.amp_release);
     voice_manager_.set_filter_envelope(p.filter_attack, p.filter_decay, p.filter_sustain, p.filter_release);
+    voice_manager_.set_voice_mode(p.mono_mode, p.legato);
+    voice_manager_.set_portamento(p.portamento_seconds);
 
     // Cody's Chrono-Stateful Resonant Body
     chrono_body_.set_resistance(p.state_resistance);
@@ -112,6 +142,16 @@ void MonkeysEarEngine::apply_macros() {
     // Modulation
     lfo1_.set_rate_hz(p.lfo1_rate_hz);
     lfo1_.set_depth(p.lfo1_depth);
+    lfo1_.set_waveform(static_cast<LFOWaveform>(clamp(p.lfo1_waveform,0,4)));
+    external_sub_.set_ratio(p.sub_ratio_denominator);
+    external_sub_.set_phase(p.sub_phase);
+    external_sub_.set_polarity(p.sub_polarity_inverted);
+    external_sub_.set_saturation(p.sub_saturation);
+    for (size_t i=0;i<ParametricEQ::NUM_BANDS;++i) {
+        eq_.set_band(i, {static_cast<EQType>(clamp(p.eq_type[i],0,5)), p.eq_frequency_hz[i], p.eq_gain_db[i], p.eq_q[i]});
+    }
+    eq_.set_bypass(p.eq_bypass);
+    eq_.set_gain_compensation(p.eq_gain_compensation);
 }
 
 void MonkeysEarEngine::set_macro(MacroId id, float value) {
@@ -133,84 +173,79 @@ const PresetData& MonkeysEarEngine::get_current_preset() const {
 }
 
 void MonkeysEarEngine::set_master_gain_db(float db) {
-    auto p = preset_manager_.get_current();
-    p.master_gain_db = db;
-    load_preset(p);
+    preset_manager_.mutable_current().master_gain_db = clamp(db, -100.0f, 12.0f); apply_macros();
 }
 
 void MonkeysEarEngine::set_waveform(Waveform wf) {
-    auto p = preset_manager_.get_current();
-    p.synth_waveform = static_cast<int>(wf);
-    load_preset(p);
+    preset_manager_.mutable_current().synth_waveform = static_cast<int>(wf); apply_macros();
 }
 
 void MonkeysEarEngine::set_osc_fm(float fm) {
-    auto p = preset_manager_.get_current();
-    p.osc_fm_amount = fm;
-    load_preset(p);
+    preset_manager_.mutable_current().osc_fm_amount = clamp(fm,0.0f,1.0f); apply_macros();
 }
 
 void MonkeysEarEngine::set_osc2_semi(int semi) {
-    auto p = preset_manager_.get_current();
-    p.osc2_semi = semi;
-    load_preset(p);
+    preset_manager_.mutable_current().osc2_semi = clamp(semi,-24,24); apply_macros();
 }
 
 void MonkeysEarEngine::set_osc_hard_sync(bool sync) {
-    auto p = preset_manager_.get_current();
-    p.osc_hard_sync = sync;
-    load_preset(p);
+    preset_manager_.mutable_current().osc_hard_sync = sync; apply_macros();
 }
 
 void MonkeysEarEngine::set_state_resistance(float r) {
-    auto p = preset_manager_.get_current();
-    p.state_resistance = r;
-    load_preset(p);
+    preset_manager_.mutable_current().state_resistance = clamp(r,0.0f,1.0f); apply_macros();
 }
 
 void MonkeysEarEngine::set_state_repulsion(float k) {
-    auto p = preset_manager_.get_current();
-    p.state_repulsion = k;
-    load_preset(p);
+    preset_manager_.mutable_current().state_repulsion = clamp(k,0.0f,1.0f); apply_macros();
 }
 
 void MonkeysEarEngine::set_state_coupling(float kappa) {
-    auto p = preset_manager_.get_current();
-    p.state_coupling = kappa;
-    load_preset(p);
+    preset_manager_.mutable_current().state_coupling = clamp(kappa,0.0f,1.0f); apply_macros();
 }
 
 void MonkeysEarEngine::set_state_persistence(float tau) {
-    auto p = preset_manager_.get_current();
-    p.state_persistence = tau;
-    load_preset(p);
+    preset_manager_.mutable_current().state_persistence = clamp(tau,0.0f,1.0f); apply_macros();
 }
 
 void MonkeysEarEngine::set_state_enabled(bool en) {
-    auto p = preset_manager_.get_current();
-    p.state_enabled = en;
-    load_preset(p);
+    preset_manager_.mutable_current().state_enabled = en; apply_macros();
 }
 
 void MonkeysEarEngine::set_lfo1_rate(float hz) {
-    auto p = preset_manager_.get_current();
-    p.lfo1_rate_hz = hz;
-    load_preset(p);
+    preset_manager_.mutable_current().lfo1_rate_hz = clamp(hz,0.05f,30.0f); apply_macros();
 }
 
 void MonkeysEarEngine::set_lfo1_depth(float depth) {
-    auto p = preset_manager_.get_current();
-    p.lfo1_depth = depth;
-    load_preset(p);
+    preset_manager_.mutable_current().lfo1_depth = clamp(depth,0.0f,1.0f); apply_macros();
 }
 
 void MonkeysEarEngine::set_input_route_mode(int mode) {
-    auto p = preset_manager_.get_current();
-    p.input_route_mode = mode;
-    load_preset(p);
+    preset_manager_.mutable_current().input_route_mode = clamp(mode,0,2); apply_macros();
+}
+
+void MonkeysEarEngine::set_aftertouch(float value) { aftertouch_ = clamp(value,0.0f,1.0f); }
+
+void MonkeysEarEngine::set_parameter_normalized(int id, float v) {
+    v=clamp(v,0.0f,1.0f); auto& p=preset_manager_.mutable_current();
+    if(id<NUM_MACROS){ preset_manager_.set_macro(static_cast<MacroId>(id),v); apply_macros(); return; }
+    switch(id){
+      case 8:p.master_gain_db=v>0.001f?(v-0.85f)*40.0f:-100.0f;break; case 9:p.synth_waveform=static_cast<int>(v*3.99f);break;
+      case 10:p.osc_fm_amount=v;break; case 11:p.osc2_semi=static_cast<int>(std::round((v-.5f)*48));break; case 12:p.osc_hard_sync=v>=.5f;break;
+      case 13:p.state_resistance=v;break;case 14:p.state_repulsion=v;break;case 15:p.state_coupling=v;break;case 16:p.state_persistence=v;break;case 17:p.state_enabled=v>=.5f;break;case 18:p.input_route_mode=static_cast<int>(v*2.99f);break;
+      case 19:p.fundamental_mix=v;break;case 20:p.sub_mix=v;break;case 21:p.sub_ratio_denominator=1+static_cast<int>(v*3.99f);break;case 22:p.sub_phase=v;break;case 23:p.sub_polarity_inverted=v>=.5f;break;case 24:p.sub_saturation=v;break;case 25:p.sub_envelope_amount=v;break;case 26:p.source_level=v;break;case 27:p.character_level=v;break;
+      case 28:p.filter_mode_a=static_cast<int>(v*4.99f);break;case 29:p.filter_cutoff_b_hz=40.0f*std::pow(450.0f,v);break;case 30:p.filter_mode_b=static_cast<int>(v*4.99f);break;case 31:p.filter_routing=static_cast<int>(v*2.99f);break;case 32:p.filter_wet=v;break;case 33:p.filter_key_tracking=v;break;case 34:p.filter_slope_a_24db=v>=.5f;break;case 35:p.filter_slope_b_24db=v>=.5f;break;case 36:p.filter_drive=v*2.0f;break;
+      case 53:p.eq_bypass=v>=.5f;break;case 54:p.eq_gain_compensation=v>=.5f;break;case 55:p.lfo1_rate_hz=.05f*std::pow(600.0f,v);break;case 56:p.lfo1_waveform=static_cast<int>(v*4.99f);break;case 57:p.motion_curve=v;break;case 58:p.mod_lfo_cutoff=(v-.5f)*2;break;case 59:p.mod_lfo_resonance=(v-.5f)*2;break;case 60:p.mod_lfo_fm=(v-.5f)*2;break;case 61:p.mod_lfo_sub_blend=(v-.5f)*2;break;case 62:p.mod_lfo_drive=(v-.5f)*2;break;case 63:p.mod_lfo_eq_frequency=(v-.5f)*2;break;case 64:p.mod_lfo_eq_gain=(v-.5f)*2;break;case 65:p.mod_state_direction_filter=(v-.5f)*2;break;case 66:p.mod_state_fast_fm=(v-.5f)*2;break;case 67:p.mod_state_slow_balance=(v-.5f)*2;break;case 68:p.mod_state_slow_resonator=(v-.5f)*2;break;case 69:p.mod_audio_envelope_drive=(v-.5f)*2;break;
+      case 70:p.mono_mode=v>=.5f;break;case 71:p.legato=v>=.5f;break;case 72:p.portamento_seconds=v*v*2.0f;break;case 73:p.pitch_bend_range=1.0f+v*23.0f;break;case 74:p.vibrato_depth_semitones=v*2.0f;break;case 75:p.velocity_tone=v;break;case 76:p.aftertouch_filter=(v-.5f)*2;break;case 77:p.aftertouch_drive=(v-.5f)*2;break;case 78:p.lfo1_depth=v;break;
+      case 79:{int patch=static_cast<int>(v*3.99f);if(patch==1)load_preset(PresetManager::create_monolith());else if(patch==2)load_preset(PresetManager::create_feral_wobble());else if(patch==3)load_preset(PresetManager::create_velvet_lead());return;}
+      default: if(id>=37&&id<=52){int b=(id-37)/4, f=(id-37)%4; if(f==0)p.eq_type[b]=static_cast<int>(v*5.99f);else if(f==1)p.eq_frequency_hz[b]=20.0f*std::pow(1000.0f,v);else if(f==2)p.eq_gain_db[b]=(v-.5f)*36.0f;else p.eq_q[b]=.15f*std::pow(80.0f,v);}break;
+    } apply_macros();
 }
 
 void MonkeysEarEngine::handle_midi_note_on(int note, float velocity) {
+    current_midi_note_ = note;
+    last_velocity_ = clamp(velocity,0.0f,1.0f);
+    apply_macros();
     voice_manager_.note_on(note, velocity);
 }
 
@@ -219,12 +254,13 @@ void MonkeysEarEngine::handle_midi_note_off(int note) {
 }
 
 void MonkeysEarEngine::handle_midi_pitch_bend(float semitones) {
-    voice_manager_.set_pitch_bend(semitones);
+    float range=preset_manager_.get_current().pitch_bend_range;
+    voice_manager_.set_pitch_bend(clamp(semitones,-range,range));
 }
 
 void MonkeysEarEngine::handle_midi_cc(int cc_number, float value_0_to_1) {
     switch (cc_number) {
-        case 1:  set_macro(MACRO_CUTOFF, value_0_to_1); break;
+        case 1:  set_aftertouch(value_0_to_1); break;
         case 74: set_macro(MACRO_CUTOFF, value_0_to_1); break;
         case 71: set_macro(MACRO_RESONANCE, value_0_to_1); break;
         case 91: set_macro(MACRO_SPACE, value_0_to_1); break;
@@ -252,11 +288,17 @@ void MonkeysEarEngine::process_block(
 
     for (size_t i = 0; i < num_samples; ++i) {
         // 0. Modulation (LFO)
-        float lfo_val = lfo1_.process();
+        float lfo_val = shape_modulation(lfo1_.process(), p.motion_curve);
 
         // 1. Synth Voices Generation
         float filter_env = 0.0f;
-        float synth_sample = voice_manager_.process(filter_env);
+        const auto& prior_state=chrono_body_.get_state();
+        float fast=clamp(std::sqrt(std::max(0.0f,prior_state.energy_fast))*2.0f,0.0f,1.0f);
+        float fm_mod=fm_motion_.process(lfo_val*p.mod_lfo_fm + fast*p.mod_state_fast_fm);
+        voice_manager_.set_fm_amount(clamp(p.osc_fm_amount + fm_mod*.45f,0.0f,1.0f));
+        voice_manager_.set_vibrato(std::sin(static_cast<float>(modulation_counter_)*TWO_PI*5.3f/sample_rate_) * p.vibrato_depth_semitones + aftertouch_*p.vibrato_depth_semitones*.35f);
+        float synth_weight=0.0f;
+        float synth_sample = voice_manager_.process_split(filter_env, synth_weight);
 
         // 2. Live External Audio Ingest & Preamp/Conditioning
         float ext_sample = 0.0f;
@@ -264,12 +306,14 @@ void MonkeysEarEngine::process_block(
             ext_sample = (input_r != nullptr) ? 0.5f * (input_l[i] + input_r[i]) : input_l[i];
         }
         float blended_ext = audio_input_.process_sample(ext_sample, synth_sample);
+        audio_envelope_ += (std::abs(ext_sample)-audio_envelope_) * (std::abs(ext_sample)>audio_envelope_?.02f:.0008f);
+        float tracked_sub=external_sub_.process(ext_sample);
 
         // 3. Routing Mode Resolution
         float exciter = 0.0f;
         if (p.input_route_mode == 2) {
             // Pure External Audio Processor (Guitar / Mic / Recorded Audio)
-            exciter = (input_l != nullptr) ? ext_sample : 0.0f;
+            exciter = (input_l != nullptr) ? blended_ext : 0.0f;
         } else if (p.input_route_mode == 1) {
             // Hybrid Blend Mode
             exciter = blended_ext;
@@ -282,20 +326,45 @@ void MonkeysEarEngine::process_block(
         // (Multiscale State -> Resistance -> Repulsion -> Signed Coupling)
         float stateful_source = chrono_body_.process_sample(exciter);
 
+        const auto& state=chrono_body_.get_state();
+        float direction=clamp(state.velocity/900.0f,-1.0f,1.0f);
+        float slow=clamp(std::sqrt(std::max(0.0f,state.energy_slow))*2.0f,0.0f,1.0f);
+
         // 5. State Variable Filter (with envelope and LFO modulation)
-        float mod_env = filter_env + lfo_val * 0.25f;
-        float filtered = filter_.process(stateful_source, mod_env, env_amt);
+        float filter_motion=cutoff_motion_.process(lfo_val*p.mod_lfo_cutoff + direction*p.mod_state_direction_filter + aftertouch_*p.aftertouch_filter + (last_velocity_-.5f)*p.velocity_tone);
+        float resonance_mod=resonance_motion_.process(lfo_val*p.mod_lfo_resonance);
+        float mod_env = filter_env*env_amt + filter_motion;
+        float filtered = filter_.process(stateful_source, clamp(mod_env,-1.0f,1.0f), 1.0f);
 
         // 6. Tube Drive Stage (with dynamic cathode sag memory)
+        float drive_mod=drive_motion_.process(lfo_val*p.mod_lfo_drive + audio_envelope_*p.mod_audio_envelope_drive + aftertouch_*p.aftertouch_drive);
+        if((modulation_counter_++ & 15u)==0u){
+            drive_tube_.set_drive(clamp(p.macros[MACRO_DRIVE]+drive_mod*.5f,0.0f,1.0f));
+            resonator_cab_.set_body_size(clamp(.6f+p.macros[MACRO_BODY]*1.4f+slow*p.mod_state_slow_resonator,0.4f,2.2f));
+            float base_cutoff=40.0f*std::pow(450.0f,p.macros[MACRO_CUTOFF]);
+            base_cutoff*=std::pow(2.0f,p.filter_key_tracking*(static_cast<float>(current_midi_note_)-60.0f)/12.0f);
+            filter_.set_stage(0,static_cast<FilterMode>(clamp(p.filter_mode_a,0,4)),base_cutoff,
+                clamp(.05f+p.macros[MACRO_RESONANCE]*.85f+resonance_mod*.35f,0.0f,.98f),p.filter_drive,p.filter_slope_a_24db);
+        }
         float driven = drive_tube_.process(filtered);
 
         // 7. Modal Cabinet Resonator
         float resonated = resonator_cab_.process(driven);
 
+        float weight = synth_weight;
+        if(p.input_route_mode==2) weight = weight_lowpass_.process(ext_sample) * p.fundamental_mix + tracked_sub*p.sub_mix;
+        else if(p.input_route_mode==1) weight = lerp(synth_weight, weight_lowpass_.process(ext_sample)*p.fundamental_mix+tracked_sub*p.sub_mix, p.macros[MACRO_MIC_BLEND]);
+        weight=weight_lowpass_.process(weight);
+        float sub_move=sub_motion_.process(lfo_val*p.mod_lfo_sub_blend + slow*p.mod_state_slow_balance);
+        float recombined=sanitize(resonated*p.character_level + weight*p.source_level*clamp(1.0f+sub_move*.6f,0.1f,1.8f));
+        float eq_freq=lfo_val*p.mod_lfo_eq_frequency*.75f;
+        float eq_gain=lfo_val*p.mod_lfo_eq_gain*9.0f;
+        float equalized=eq_.process(recombined,eq_freq,eq_gain);
+
         // 8. Stereo Ping-Pong Delay
         float delayed_l = 0.0f;
         float delayed_r = 0.0f;
-        delay_.process(resonated, resonated, delayed_l, delayed_r);
+        delay_.process(equalized, equalized, delayed_l, delayed_r);
 
         // 9. FDN Algorithmic Reverb
         float reverbed_l = 0.0f;

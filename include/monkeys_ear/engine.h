@@ -13,6 +13,7 @@
 #include "monkeys_ear/preset.h"
 #include "monkeys_ear/chrono_state.h"
 #include "monkeys_ear/lfo.h"
+#include "monkeys_ear/tonal.h"
 
 namespace monkeys_ear {
 
@@ -60,6 +61,8 @@ public:
     void set_lfo1_rate(float hz);
     void set_lfo1_depth(float depth);
     void set_input_route_mode(int mode);
+    void set_parameter_normalized(int parameter_id, float value);
+    void set_aftertouch(float value_0_to_1);
 
     // Latency & Real-time Metrics Query
     LatencyStats get_latency_stats() const;
@@ -77,7 +80,10 @@ private:
     AudioInputProcessor audio_input_;
     ChronoStateBody chrono_body_;
     LFO lfo1_;
-    StateVariableFilter filter_;
+    MultiPassFilter filter_;
+    StateVariableFilter weight_lowpass_;
+    ParametricEQ eq_;
+    ExternalSubharmonic external_sub_;
     TubeDriveStage drive_tube_;
     CabinetResonator resonator_cab_;
     StereoDelay delay_;
@@ -87,6 +93,16 @@ private:
     PresetManager preset_manager_;
 
     float master_volume_;
+    float aftertouch_;
+    float audio_envelope_;
+    int current_midi_note_;
+    float last_velocity_;
+    size_t modulation_counter_;
+    MotionSmoother cutoff_motion_;
+    MotionSmoother resonance_motion_;
+    MotionSmoother fm_motion_;
+    MotionSmoother sub_motion_;
+    MotionSmoother drive_motion_;
 
     void apply_macros();
 };

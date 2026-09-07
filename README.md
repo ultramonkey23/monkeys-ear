@@ -1,7 +1,7 @@
 # Monkey's Ear (ME-01)
 
 > **Production-grade low-latency digital instrument and sound-design environment.**
-> Combining synthesis, sampling, live audio/vocal processing, physical/nonlinear modeling, modulation, amplification, delay, reverb, and semantic control.
+> Combining pitch-locked weight construction, synthesis, live audio processing, multipass filtering, modulation, parametric EQ, amplification, delay, and reverb.
 
 ---
 
@@ -10,19 +10,23 @@
 ```
 MIDI / MIC / LIVE AUDIO
            ↓
-        SOURCE (Dual PolyBLEP Antialiased Osc + Sub + Noise)
+        SOURCE (Dual PolyBLEP + independent fundamental / 1:n sub weight)
            ↓
-        FILTER (Zero-Delay Feedback State Variable Filter with Nonlinear Saturation)
+       WEIGHT / CHARACTER SPLIT (clean anchor + ChronoState body)
+           ↓
+        FILTER (dual-pass ZDF SVF: LP/HP/BP/notch/peak, serial/parallel/split)
            ↓
      DRIVE / TUBE (Causal Asymmetric Waveshaping with Dynamic Cathode/Sag Memory)
            ↓
     CAB / RESONATOR (4-Pole Acoustic Body / Modal Chassis Resonator)
            ↓
+     PARAMETRIC EQ (4 bands: bell/shelves/HP/LP with smoothed modulation)
+           ↓
          DELAY (Stereo Cross-Feedback Ping-Pong with 4-point Hermite Interpolation)
            ↓
    FDN / ALGORITHMIC REVERB (8-Line Feedback Delay Network with Orthogonal Hadamard Matrix)
            ↓
-  OUTPUT & SAFETY LIMITER (Zero-Latency Soft-Knee Brickwall Ear Protection & Denormal Scrubbing)
+  OUTPUT & SAFETY LIMITER (Zero-Latency Signal Protection & Denormal Scrubbing)
 ```
 
 ---
@@ -33,15 +37,15 @@ Verified on Windows x64 @ 48kHz (Build with CMake + Ninja + GCC 14.2):
 
 | Buffer Size | Block Deadline | Measured Avg Block Time | Measured Max Block Time | Deadline Margin | Deadline Misses |
 |---|---|---|---|---|---|
-| **32 samples** | 666.67 $\mu s$ | **5.81 $\mu s$** | 8.70 $\mu s$ | **99.13 %** | 0 |
-| **64 samples** | 1333.33 $\mu s$ | **54.73 $\mu s$** (full polyphony + FX) | 676.50 $\mu s$ (under peak load) | **95.89 %** | 0 |
-| **128 samples** | 2666.67 $\mu s$ | **27.04 $\mu s$** | 48.10 $\mu s$ | **98.99 %** | 0 |
-| **256 samples** | 5333.33 $\mu s$ | **45.60 $\mu s$** | 83.20 $\mu s$ | **99.14 %** | 0 |
+| **32 samples** | 666.67 $\mu s$ | **12.82 $\mu s$** | 18.70 $\mu s$ | **98.08 %** | 0 |
+| **64 samples** | 1333.33 $\mu s$ | **27.31 $\mu s$** | 41.80 $\mu s$ | **97.95 %** | 0 |
+| **128 samples** | 2666.67 $\mu s$ | **51.45 $\mu s$** | 84.50 $\mu s$ | **98.07 %** | 0 |
+| **256 samples** | 5333.33 $\mu s$ | **153.22 $\mu s$** | 2224.20 $\mu s$ | **97.13 %** | 0 |
 
 - **Reported Plugin Latency**: 0 samples
 - **Memory Allocations in Audio Path**: 0
 - **Locks / Mutexes**: 0
-- **Audio Output Verification**: 48kHz 24-bit PCM stereo WAV rendered, peak bounded at -5.51 dBFS, RMS at -17.76 dBFS, zero NaNs/Infs.
+- **Audio Output Verification**: 48kHz 24-bit PCM stereo WAV targets rendered; focused tests cover finite extreme output, pitch ratios, filter/EQ response, modulation causality, and preset round-trip.
 
 ---
 
@@ -55,6 +59,16 @@ Verified on Windows x64 @ 48kHz (Build with CMake + Ninja + GCC 14.2):
 - **Macro 6 (Space)**: 8-Line FDN Reverb Room Size & T60 Decay
 - **Macro 7 (Mic Blend)**: Live Microphone / External Audio Input Mix
 - **Macro 8 (Character)**: Dynamic Cathode Memory & Thermal Sag
+
+## Tonal Motion Architecture
+
+The native host surface now exposes 80 automated controls grouped by `SOURCE`, `SUB`, `FILTER`, `EQ`, `MOTION`, `STATE`, `DRIVE/BODY`, `SPACE`, `OUTPUT`, and `PRESET`. `PRESET: Target Patch` selects Current, MONOLITH, FERAL WOBBLE, or VELVET LEAD directly in REAPER; Current preserves the restored parameter state.
+
+The weight path supplies independent fundamental and 1/1, 1/2, 1/3, or 1/4 subharmonic energy with phase, polarity, envelope-follow, and saturation controls. MIDI is oscillator locked. The FX path uses a causal positive-crossing tracker for stable monophonic input from 45–500 Hz. It needs two crossings (about 4–44 ms across that range), adds no hidden lookahead or reported plugin latency, and fades its generated sub when pitch confidence falls. Chords, noisy material, weak fundamentals, and rapid transitions are deliberately treated as uncertain rather than advertised as perfect tracking.
+
+ChronoState remains a real state engine in the character path. Its fast energy, slow energy, and signed direction can drive FM depth, weight/character balance, resonator scale, and filter movement. Conventional LFO, envelope, velocity, key tracking, MIDI controls, and aftertouch-depth controls remain independently predictable.
+
+The limiter is a bounded signal-protection stage. It is not a hearing-safety guarantee and does not replace safe monitor gain.
 
 ---
 

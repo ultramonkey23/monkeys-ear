@@ -7,8 +7,20 @@
 #include <cmath>
 #include <iomanip>
 #include <numeric>
+#include <fstream>
 
 using namespace monkeys_ear;
+
+static float rms_of(const std::vector<float>& x, size_t begin = 0) {
+    double e=0.0; for(size_t i=begin;i<x.size();++i)e+=static_cast<double>(x[i])*x[i];
+    return x.size()>begin?static_cast<float>(std::sqrt(e/static_cast<double>(x.size()-begin))):0.0f;
+}
+
+static float estimate_frequency(const std::vector<float>& x, float sr, size_t begin) {
+    int crossings=0; size_t first=0,last=0;
+    for(size_t i=std::max<size_t>(begin,1);i<x.size();++i) if(x[i-1]<=0&&x[i]>0){if(crossings==0)first=i;last=i;++crossings;}
+    return crossings>1 ? sr*static_cast<float>(crossings-1)/static_cast<float>(last-first) : 0.0f;
+}
 
 // ── Test 1: PolyBLEP Oscillator & Cross-FM / Sync ────────────────────────
 void test_polyblep_oscillator() {
@@ -185,7 +197,7 @@ void test_external_audio_processor_causality() {
 
 // ── Test 4: Parameter Causality ──────────────────────────────────────────
 void test_parameter_causality() {
-    std::cout << "[TEST] Parameter Causality Verification (All 19 Parameters)... ";
+    std::cout << "[TEST] Parameter Causality Verification (state + expanded automation)... ";
     MonkeysEarEngine engine;
     engine.init(48000.0f, 256);
     engine.handle_midi_note_on(60, 0.8f);
@@ -219,7 +231,63 @@ void test_parameter_causality() {
     for (size_t i = 0; i < 256; ++i) cpl_diff += std::abs(out2[i] - out1[i]);
     assert(cpl_diff > 0.001);
 
+    engine.set_parameter_normalized(20, 0.91f);
+    engine.set_parameter_normalized(29, 0.42f);
+    engine.set_parameter_normalized(45, 0.73f);
+    engine.set_parameter_normalized(60, 0.88f);
+    const auto& automated=engine.get_current_preset();
+    assert(std::abs(automated.sub_mix-0.91f)<1e-5f);
+    assert(automated.eq_frequency_hz[2]>20.0f);
+    assert(automated.mod_lfo_fm>0.7f);
+    engine.set_parameter_normalized(79,0.67f);
+    assert(engine.get_current_preset().name=="FERAL WOBBLE");
+
     std::cout << "PASS\n";
+}
+
+void test_weight_and_external_subharmonics() {
+    std::cout << "[TEST] Pitch-Locked Weight Path & Causal External Tracking... ";
+    constexpr float SR=48000.0f; SynthVoice voice; voice.set_sample_rate(SR); voice.set_waveform(Waveform::Sine);
+    voice.set_fundamental_mix(0.0f); voice.set_sub_mix(1.0f); voice.set_sub_ratio(3); voice.set_sub_envelope(0.0f); voice.note_on(69,1.0f);
+    std::vector<float> sub(48000); for(size_t i=0;i<sub.size();++i){float env,w;voice.process_split(env,w);sub[i]=w;}
+    float f=estimate_frequency(sub,SR,4000); assert(std::abs(f-(440.0f/3.0f))<0.8f);
+    ExternalSubharmonic tracker; tracker.set_sample_rate(SR); tracker.set_ratio(2); std::vector<float> divided(48000);
+    for(size_t i=0;i<divided.size();++i) divided[i]=tracker.process(0.6f*std::sin(TWO_PI*110.0f*static_cast<float>(i)/SR));
+    assert(std::abs(tracker.tracked_frequency_hz()-110.0f)<1.0f); assert(tracker.confidence()>0.75f);
+    float sf=estimate_frequency(divided,SR,12000); assert(std::abs(sf-55.0f)<0.8f);
+    std::cout << "PASS (MIDI 1/3="<<f<<" Hz, tracked="<<tracker.tracked_frequency_hz()<<" Hz, divided="<<sf<<" Hz)\n";
+}
+
+static float filter_tone_rms(MultiPassFilter& f,float hz,float sr){std::vector<float>x(24000);for(size_t i=0;i<x.size();++i)x[i]=f.process(std::sin(TWO_PI*hz*static_cast<float>(i)/sr));return rms_of(x,4000);}
+void test_multipass_filter_and_eq() {
+    std::cout << "[TEST] Multipass Filter Responses & Parametric EQ... "; constexpr float SR=48000.0f;
+    MultiPassFilter lp; lp.set_sample_rate(SR); lp.set_stage(0,FilterMode::Lowpass,300,0.1f,0,false); lp.set_stage(1,FilterMode::Lowpass,18000,0,0,false); lp.set_routing(FilterRouting::Serial);
+    float low=filter_tone_rms(lp,100,SR); lp.reset(); float high=filter_tone_rms(lp,5000,SR); assert(low>high*5.0f);
+    MultiPassFilter hp; hp.set_sample_rate(SR); hp.set_stage(0,FilterMode::Highpass,300,0.1f,0,false); hp.set_stage(1,FilterMode::Lowpass,18000,0,0,false); float hp_low=filter_tone_rms(hp,100,SR); hp.reset(); float hp_high=filter_tone_rms(hp,5000,SR); assert(hp_high>hp_low*3.0f);
+    ParametricEQ flat,boost; flat.set_sample_rate(SR); boost.set_sample_rate(SR); boost.set_band(1,{EQType::Bell,1000,12,2.0f}); boost.set_gain_compensation(false);
+    std::vector<float>a(48000),b(48000);for(size_t i=0;i<a.size();++i){float s=.1f*std::sin(TWO_PI*1000*static_cast<float>(i)/SR);a[i]=flat.process(s);b[i]=boost.process(s);} assert(rms_of(b,12000)>rms_of(a,12000)*2.4f);
+    std::cout << "PASS (LP rejection="<<20*std::log10(low/high)<<" dB, bell boost="<<20*std::log10(rms_of(b,12000)/rms_of(a,12000))<<" dB)\n";
+}
+
+void test_preset_roundtrip_and_extremes() {
+    std::cout << "[TEST] Tonal Preset Round-Trip & Extreme Finite Output... ";
+    auto source=PresetManager::create_feral_wobble(); auto text=source.serialize(); PresetData restored; assert(restored.deserialize(text));
+    assert(restored.name==source.name && restored.sub_ratio_denominator==source.sub_ratio_denominator);
+    assert(restored.eq_type==source.eq_type && std::abs(restored.mod_state_fast_fm-source.mod_state_fast_fm)<1e-5f);
+    std::array<PresetData,3> patches={PresetManager::create_monolith(),PresetManager::create_feral_wobble(),PresetManager::create_velvet_lead()};
+    for(auto&p:patches){MonkeysEarEngine e;e.init(96000,32);e.load_preset(p);e.handle_midi_note_on(36,1);float in[32]{},l[32]{},r[32]{};for(int block=0;block<500;++block){e.set_aftertouch((block&1)?1:0);e.process_block(in,in,l,r,32);for(float v:l)assert(std::isfinite(v)&&std::abs(v)<=1.01f);}}
+    std::cout << "PASS\n";
+}
+
+void test_motion_causality() {
+    std::cout << "[TEST] Source-Transform-Destination Motion Causality... "; constexpr size_t N=24000,BS=64;
+    PresetData moving; moving.state_enabled=false; moving.lfo1_depth=1.0f; moving.lfo1_rate_hz=2.5f; moving.mod_lfo_cutoff=0.65f;
+    moving.macros[MACRO_CUTOFF]=0.45f; moving.macros[MACRO_DRIVE]=0.05f; moving.macros[MACRO_BODY]=0.0f; moving.macros[MACRO_DELAY]=0.0f; moving.macros[MACRO_SPACE]=0.0f; moving.master_gain_db=-12.0f;
+    auto static_patch=moving; static_patch.mod_lfo_cutoff=0;
+    MonkeysEarEngine a,b; a.init(48000,BS);b.init(48000,BS);a.load_preset(moving);b.load_preset(static_patch);a.handle_midi_note_on(40,.9f);b.handle_midi_note_on(40,.9f);
+    std::array<float,BS> in{},al{},ar{},bl{},br{};double diff=0;
+    for(size_t n=0;n<N;n+=BS){a.process_block(in.data(),in.data(),al.data(),ar.data(),BS);b.process_block(in.data(),in.data(),bl.data(),br.data(),BS);for(size_t i=0;i<BS;++i){float d=al[i]-bl[i];diff+=d*d;}}
+    float delta=std::sqrt(diff/static_cast<double>(N)); assert(delta>0.005f); std::cout<<"PASS (motion RMS delta="<<delta<<")\n";
 }
 
 // ── Test 5: A/B Experiment & Multi-Timbre Render ──────────────────────────
@@ -401,6 +469,24 @@ void run_ab_experiment_and_renders() {
         std::cout << "[AUDIO] Generated: monkeys_ear_vocal_proof.wav (Vocal Resonator)\n";
     }
 
+    // Required musical acceptance renders and serialized presets.
+    auto render_target = [&](const PresetData& preset, const char* stem, int note, bool expressive) {
+        MonkeysEarEngine eng; eng.init(SR,BLOCK_SIZE); eng.load_preset(preset);
+        std::vector<float> left(TOTAL_SAMPLES,0),right(TOTAL_SAMPLES,0); eng.handle_midi_note_on(note,.92f);
+        for(size_t b=0;b<NUM_BLOCKS;++b){float t=static_cast<float>(b*BLOCK_SIZE)/SR;
+            if(expressive){eng.set_aftertouch(clamp(t/2.0f,0.0f,1.0f));eng.handle_midi_pitch_bend(std::sin(TWO_PI*.45f*t)*1.8f);if(t>=1.45f&&t<1.452f)eng.handle_midi_note_on(note+5,.88f);}
+            eng.process_block(block_in.data(),block_in.data(),blk_out_l.data(),blk_out_r.data(),BLOCK_SIZE);
+            for(size_t s=0;s<BLOCK_SIZE;++s){left[b*BLOCK_SIZE+s]=blk_out_l[s];right[b*BLOCK_SIZE+s]=blk_out_r[s];}
+        }
+        float peak=0;for(float v:left)peak=std::max(peak,std::abs(v));float rms=rms_of(left,4096);
+        WavWriter::write_wav_24bit(std::string(stem)+".wav",left,right,static_cast<uint32_t>(SR));
+        std::ofstream preset_file(std::string(stem)+".mepreset",std::ios::binary);preset_file<<preset.serialize();preset_file.close();
+        std::cout<<"[TARGET] "<<preset.name<<": "<<stem<<".mepreset + .wav | peak="<<20*std::log10(std::max(peak,1e-9f))<<" dBFS, RMS="<<20*std::log10(std::max(rms,1e-9f))<<" dBFS\n";
+    };
+    render_target(PresetManager::create_monolith(),"MONOLITH",36,false);
+    render_target(PresetManager::create_feral_wobble(),"FERAL_WOBBLE",40,false);
+    render_target(PresetManager::create_velvet_lead(),"VELVET_LEAD",57,true);
+
     // ── Real-Time Benchmark Contract ─────────────────────────────────────
     std::cout << "\n[REAL-TIME CONTRACT] Verification across Buffer Sizes:\n";
     size_t test_buffers[] = {32, 64, 128, 256};
@@ -444,6 +530,10 @@ int main() {
         test_chrono_state_mathematics();
         test_external_audio_processor_causality();
         test_parameter_causality();
+        test_weight_and_external_subharmonics();
+        test_multipass_filter_and_eq();
+        test_preset_roundtrip_and_extremes();
+        test_motion_causality();
         run_ab_experiment_and_renders();
         return 0;
     } catch (const std::exception& e) {

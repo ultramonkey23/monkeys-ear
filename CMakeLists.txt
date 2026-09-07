@@ -26,6 +26,7 @@ add_library(monkeys_ear_core STATIC
     src/preset.cpp
     src/chrono_state.cpp
     src/lfo.cpp
+    src/tonal.cpp
     src/engine.cpp
 )
 
