@@ -2,7 +2,11 @@
 
 This directory is the durable research area for Monkey's Ear pitch correction / pitch control.
 
-Start with `ARCHITECTURE.md` for current direction and `RESEARCH_HISTORY.md` for evidence, baselines, failures, and decisions.
+## Source-of-truth warning
+
+The current GitHub repository is **not yet the complete Monkey's Ear product source**. A more complete local implementation existed before this GitHub repository was created, and that local code has not yet been imported and audited here. Therefore absence of code or features in GitHub must not be interpreted as proof that they do not exist in Monkey's Ear.
+
+Until the local implementation is brought in, this folder is **pre-integration research only**. Do not design around assumptions about missing product code, interfaces, DSP paths, UI, or existing pitch facilities.
 
 ## Scope
 
@@ -10,14 +14,14 @@ The goal is not to clone Auto-Tune. The goal is a controllable pitch-correction 
 
 ## Workflow
 
-1. inspect current repo truth before adding code;
-2. compare against strong external baselines on the same dry recorded source;
+1. inspect the imported/local product truth before integration or implementation decisions;
+2. compare against strong external baselines on the exact same dry recorded source;
 3. separate detection, musical target, expressive shape, and resynthesis in tests;
 4. run synthetic and recorded-audio experiments before promoting mechanisms;
 5. preserve executable/data evidence but avoid versioned design-doc accumulation;
-6. update `ARCHITECTURE.md` only when active design changes;
-7. update `RESEARCH_HISTORY.md` with concise evidence and demotions.
+6. keep one active architecture document once the local implementation has been audited;
+7. preserve concise research history, including failed and demoted mechanisms.
 
 ## Current state
 
-Research initialized. No existing pitch-correction implementation was found in the current repository at the start of this pass. Product integration and listening validation are pending.
+Research initialized. GitHub product-code coverage is incomplete and must not be treated as authoritative. Local implementation audit/import, product integration, recorded-track comparison, and listening validation are pending.
