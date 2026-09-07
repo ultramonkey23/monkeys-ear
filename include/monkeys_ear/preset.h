@@ -1,6 +1,7 @@
 #pragma once
 
 #include "monkeys_ear/types.h"
+#include "monkeys_ear/sound_space.h"
 #include <string>
 #include <array>
 #include <cstring>
@@ -116,6 +117,10 @@ struct PresetData {
     float aftertouch_filter;
     float aftertouch_drive;
 
+    // Bounded Sound Space: independent local pitch/partial/modal freedom plus
+    // four generic source -> destination relationships. Appended for recall compatibility.
+    SoundSpaceControls sound_space;
+
     PresetData();
     std::string serialize() const;
     bool deserialize(const std::string& data);
@@ -140,6 +145,7 @@ public:
     static PresetData create_monolith();
     static PresetData create_feral_wobble();
     static PresetData create_velvet_lead();
+    static PresetData create_sound_space();
 
     PresetData& mutable_current() { return current_; }
 

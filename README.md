@@ -62,7 +62,19 @@ Verified on Windows x64 @ 48kHz (Build with CMake + Ninja + GCC 14.2):
 
 ## Tonal Motion Architecture
 
-The native host surface now exposes 80 musician-facing automated controls grouped by `SOURCE`, `SUB`, `FILTER`, `EQ`, `MOTION`, `STATE`, `DRIVE/BODY`, `SPACE`, `OUTPUT`, and `PRESET`, plus hidden host inputs for hardware pitch bend and channel pressure. `PRESET: Target Patch` selects Current, MONOLITH, FERAL WOBBLE, or VELVET LEAD directly in REAPER; Current preserves the restored parameter state.
+The native host surface now exposes 111 musician-facing automated controls: the original 79 controls plus 30 appended `SPACE` controls for bounded pitch/harmonic/modal freedom, movement, attraction/resistance/repulsion, spectral yield, phase coupling, and four source -> destination routes. Two hidden host inputs remain reserved for hardware pitch bend and channel pressure. Legacy parameter IDs are unchanged; new controls are appended. `PRESET: Target Patch` retains Current, MONOLITH, FERAL WOBBLE, and VELVET LEAD; SOUND SPACE is also a serialized factory preset (`presets/SOUND_SPACE.mepreset`) built from the same controls.
+
+### Bounded Sound Space
+
+`SoundSpaceProcessor` keeps the low-frequency weight path independent and applies character motion through bounded mechanisms:
+
+- Pitch field: `f' = f * 2^(c/1200)`, with stateful cents displacement bounded by the musician's pitch limit.
+- Harmonic field: six independently moving partials use frequency-dependent freedom, keeping lower partials narrower than upper character.
+- Modal field: four second-order resonators are driven by character with independently bounded detuning.
+- Spectral negotiation: fast/slow weight energy drives a bounded, slewed character low-band yield that returns toward neutral.
+- Phase: a bounded mono-safe all-pass relationship shapes character phase before weight recombination.
+
+Routes are data (`source -> destination -> depth`), so LFO, envelope, state energy, direction, aftertouch, velocity, and audio energy can be rewired without a new DSP feature.
 
 The weight path supplies independent fundamental and 1/1, 1/2, 1/3, or 1/4 subharmonic energy with phase, polarity, envelope-follow, and saturation controls. MIDI is oscillator locked. The FX path uses a causal positive-crossing tracker for stable monophonic input from 45–500 Hz. It needs two crossings (about 4–44 ms across that range), adds no hidden lookahead or reported plugin latency, and fades its generated sub when pitch confidence falls. Chords, noisy material, weak fundamentals, and rapid transitions are deliberately treated as uncertain rather than advertised as perfect tracking.
 

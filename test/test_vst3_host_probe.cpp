@@ -124,7 +124,7 @@ int main() {
 
     int32 paramCount = controller->getParameterCount();
     std::cout << "          Total Exposed Parameters: " << paramCount << "\n";
-    assert(paramCount == 82);
+    assert(paramCount == 113);
 
     std::cout << "\n[EXPOSED PARAMETERS ENUMERATION]:\n";
     for (int32 i = 0; i < paramCount; ++i) {
@@ -144,10 +144,10 @@ int main() {
                   << " (Default: " << valStringAscii << ")\n";
     }
 
-    // Component/controller state is an actual versioned 79-float host stream.
+    // Component/controller state preserves 0..81 and appends Sound Space IDs 82..112.
     MemoryStream state_stream;
     assert(fx_comp->getState(&state_stream)==kResultOk);
-    assert(state_stream.bytes.size()==12u+82u*sizeof(float));
+    assert(state_stream.bytes.size()==12u+113u*sizeof(float));
     state_stream.pos=0;
     assert(controller->setComponentState(&state_stream)==kResultOk);
     std::cout << "[PASS] Versioned host preset state round-trip: "<<state_stream.bytes.size()<<" bytes\n";

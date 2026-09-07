@@ -290,6 +290,32 @@ void test_motion_causality() {
     float delta=std::sqrt(diff/static_cast<double>(N)); assert(delta>0.005f); std::cout<<"PASS (motion RMS delta="<<delta<<")\n";
 }
 
+void test_bounded_sound_space() {
+    std::cout<<"[TEST] Bounded Microfields, Spectral Negotiation & Phase Relationships... ";
+    constexpr float SR=48000.0f; BoundedMicrofield field; field.reset(.2f); float maximum=0.0f;
+    for(int i=0;i<240000;++i)maximum=std::max(maximum,std::abs(field.process(25.0f,4.0f,.45f,.55f,.8f,.4f,1.0f/SR)));
+    assert(maximum<=25.001f&&maximum>1.0f);
+
+    SoundSpaceProcessor processor;processor.set_sample_rate(SR);SoundSpaceControls c;c.enabled=true;
+    c.pitch_bound_cents=22;c.harmonic_bound_cents=46;c.modal_bound_cents=38;c.movement_hz=1.3f;
+    c.attraction=.58f;c.resistance=.66f;c.repulsion=.72f;c.frequency_freedom=.86f;
+    c.pitch_mix=.08f;c.harmonic_mix=.18f;c.modal_mix=.12f;c.spectral_depth_db=12;c.spectral_priority=.75f;c.phase_offset_cycles=.08f;c.phase_coupling=.5f;
+    c.routes[0]={0,1,.5f};processor.set_controls(c);SoundSpaceSources s{};float min_cut=0.0f,recovered=-99.0f,peak=0.0f;
+    for(int i=0;i<96000;++i){float t=static_cast<float>(i)/SR;s.lfo=std::sin(TWO_PI*.7f*t);s.envelope=i<48000?1.0f:0.0f;s.fast_energy=s.envelope*.7f;s.slow_energy=s.envelope*.5f;
+        float character=.18f*std::sin(TWO_PI*180.0f*t);float weight=i<48000?.55f*std::sin(TWO_PI*55.0f*t):0.0f;
+        float out=processor.process(character,weight,110.0f,s);assert(std::isfinite(out));peak=std::max(peak,std::abs(out));
+        if(i==47999)min_cut=processor.metrics().spectral_gain_db;
+        if(i==95999)recovered=processor.metrics().spectral_gain_db;
+    }
+    const auto& m=processor.metrics();assert(std::abs(m.pitch_cents)<=22.001f);assert(m.max_harmonic_cents<=46.001f);assert(m.max_modal_cents<=38.001f);
+    assert(min_cut<-2.0f&&recovered>min_cut&&peak>.1f);
+    SoundSpaceControls anchor;c=anchor;c.enabled=true;processor.reset();processor.set_controls(c);
+    for(int i=0;i<2048;++i){float w=.31f*std::sin(TWO_PI*61.0f*i/SR);assert(std::abs(processor.process(0.0f,w,110.0f,{})-w)<1e-6f);}
+    auto preset=PresetManager::create_sound_space();PresetData restored;assert(restored.deserialize(preset.serialize()));
+    assert(restored.sound_space.enabled&&std::abs(restored.sound_space.harmonic_bound_cents-58.0f)<.01f&&restored.sound_space.routes[3].destination==6);
+    std::cout<<"PASS (bound="<<maximum<<"c, yield="<<min_cut<<" dB -> "<<recovered<<" dB, peak="<<peak<<")\n";
+}
+
 // ── Test 5: A/B Experiment & Multi-Timbre Render ──────────────────────────
 void run_ab_experiment_and_renders() {
     std::cout << "\n=======================================================\n";
@@ -486,6 +512,7 @@ void run_ab_experiment_and_renders() {
     render_target(PresetManager::create_monolith(),"MONOLITH",36,false);
     render_target(PresetManager::create_feral_wobble(),"FERAL_WOBBLE",40,false);
     render_target(PresetManager::create_velvet_lead(),"VELVET_LEAD",57,true);
+    render_target(PresetManager::create_sound_space(),"SOUND_SPACE",48,true);
 
     // ── Real-Time Benchmark Contract ─────────────────────────────────────
     std::cout << "\n[REAL-TIME CONTRACT] Verification across Buffer Sizes:\n";
@@ -493,7 +520,7 @@ void run_ab_experiment_and_renders() {
     for (size_t bs : test_buffers) {
         MonkeysEarEngine bench_eng;
         bench_eng.init(SR, bs);
-        bench_eng.load_preset(PresetManager::create_factory_lead());
+        bench_eng.load_preset(PresetManager::create_sound_space());
         bench_eng.handle_midi_note_on(60, 0.9f);
         bench_eng.handle_midi_note_on(64, 0.85f);
         bench_eng.handle_midi_note_on(67, 0.85f);
@@ -534,6 +561,7 @@ int main() {
         test_multipass_filter_and_eq();
         test_preset_roundtrip_and_extremes();
         test_motion_causality();
+        test_bounded_sound_space();
         run_ab_experiment_and_renders();
         return 0;
     } catch (const std::exception& e) {

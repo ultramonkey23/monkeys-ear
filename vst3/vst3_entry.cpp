@@ -26,7 +26,7 @@ static const TUID kMonkeysEarControllerCID = INLINE_UID(
     0x4D6F6E6B, 0x65797345, 0x61724374, 0x726C7202
 );
 
-static constexpr int kNumParams = 82;
+static constexpr int kNumParams = 113;
 static constexpr uint32 kStateMagic = 0x4D453032u; // ME02
 static constexpr uint32 kStateVersion = 2u;
 
@@ -81,6 +81,11 @@ struct SharedPluginState {
         params[74].store(0.0f); params[75].store(0.0f); params[76].store(0.5f); params[77].store(0.5f); params[78].store(0.0f);
         params[79].store(0.0f);
         params[80].store(0.5f); params[81].store(0.0f);
+        params[82].store(0.0f); params[83].store(0.0f); params[84].store(0.0f); params[85].store(0.0f);
+        params[86].store(0.47f); for(int i=87;i<=90;++i)params[i].store(0.5f); params[91].store(0.5f);
+        params[92].store(0.0f);params[93].store(0.5f);for(int i=94;i<=97;++i)params[i].store(0.0f);
+        params[98].store(0.5f);params[99].store(0.5f);params[100].store(0.5f);
+        for(int route=0;route<4;++route){params[101+route*3].store(0.0f);params[102+route*3].store(0.0f);params[103+route*3].store(0.5f);}
         for (int i = 0; i < kNumParams; ++i) dirty[i].store(false);
     }
 };
@@ -471,9 +476,9 @@ public:
         if (paramIndex < 0 || paramIndex >= kNumParams) return kInvalidArgument;
 
         info.id = static_cast<ParamID>(paramIndex);
-        info.stepCount = 0; // Continuous
+        info.stepCount = (paramIndex==82)?1:((paramIndex>=101&&((paramIndex-101)%3)<2)?7:0);
         info.unitId = 0;
-        info.flags = kCanAutomate | (paramIndex >= 80 ? kIsHidden : 0);
+        info.flags = (paramIndex==80||paramIndex==81) ? (kIsHidden|kIsReadOnly) : kCanAutomate;
         info.defaultNormalizedValue = state_ ? state_->params[paramIndex].load() : 0.5;
 
         static const char* titles[kNumParams] = {
@@ -503,7 +508,9 @@ public:
             "EQ 3: Type", "EQ 3: Frequency", "EQ 3: Gain", "EQ 3: Q", "EQ 4: Type", "EQ 4: Frequency", "EQ 4: Gain", "EQ 4: Q", "EQ: Bypass", "EQ: Gain Compensation",
             "MOTION: LFO Rate", "MOTION: LFO Waveform", "MOTION: Curve", "MOTION: LFO to Cutoff", "MOTION: LFO to Resonance", "MOTION: LFO to FM", "MOTION: LFO to Sub", "MOTION: LFO to Drive", "MOTION: LFO to EQ Frequency", "MOTION: LFO to EQ Gain",
             "STATE: Direction to Filter", "STATE: Fast Energy to FM", "STATE: Slow Energy to Balance", "STATE: Slow Energy to Resonator", "MOTION: Audio Envelope to Drive",
-            "SOURCE: Mono Mode", "SOURCE: Legato", "SOURCE: Portamento", "SOURCE: Pitch Bend Range", "SOURCE: Vibrato Depth", "SOURCE: Velocity Tone", "STATE: Aftertouch to Filter", "DRIVE/BODY: Aftertouch to Drive", "MOTION: LFO Master Depth", "PRESET: Target Patch", "PERFORMANCE: Pitch Bend", "PERFORMANCE: Aftertouch"
+            "SOURCE: Mono Mode", "SOURCE: Legato", "SOURCE: Portamento", "SOURCE: Pitch Bend Range", "SOURCE: Vibrato Depth", "SOURCE: Velocity Tone", "STATE: Aftertouch to Filter", "DRIVE/BODY: Aftertouch to Drive", "MOTION: LFO Master Depth", "PRESET: Target Patch", "PERFORMANCE: Pitch Bend", "PERFORMANCE: Aftertouch",
+            "SPACE: Enable", "SPACE: Pitch Bound", "SPACE: Harmonic Bound", "SPACE: Modal Bound", "SPACE: Movement Rate", "SPACE: Attraction", "SPACE: Resistance", "SPACE: Repulsion", "SPACE: Frequency Freedom", "SPACE: Energy Widen", "SPACE: Attack Freedom", "SPACE: Release Relaxation", "SPACE: Pitch Layer Mix", "SPACE: Harmonic Layer Mix", "SPACE: Modal Layer Mix", "SPACE: Spectral Yield Depth", "SPACE: Spectral Priority", "SPACE: Phase Offset", "SPACE: Phase Coupling",
+            "SPACE ROUTE 1: Source", "SPACE ROUTE 1: Destination", "SPACE ROUTE 1: Depth", "SPACE ROUTE 2: Source", "SPACE ROUTE 2: Destination", "SPACE ROUTE 2: Depth", "SPACE ROUTE 3: Source", "SPACE ROUTE 3: Destination", "SPACE ROUTE 3: Depth", "SPACE ROUTE 4: Source", "SPACE ROUTE 4: Destination", "SPACE ROUTE 4: Depth"
         };
 
         copy_to_char16(info.title, titles[paramIndex], 128);
@@ -539,6 +546,13 @@ public:
         } else if (id == 79) {
             int p=static_cast<int>(valueNormalized*3.99); const char* names[]={"Current","MONOLITH","FERAL WOBBLE","VELVET LEAD"};
             snprintf(buf,sizeof(buf),"%s",names[std::clamp(p,0,3)]);
+        } else if(id>=83&&id<=85){snprintf(buf,sizeof(buf),"%.1f cents",valueNormalized*100.0);}
+        else if(id==86){snprintf(buf,sizeof(buf),"%.2f Hz",.02f*std::pow(1000.0f,static_cast<float>(valueNormalized)));}
+        else if(id==97){snprintf(buf,sizeof(buf),"%.1f dB",valueNormalized*18.0);}
+        else if(id==99){snprintf(buf,sizeof(buf),"%+.1f deg",(valueNormalized-.5)*180.0);}
+        else if(id>=101&&((id-101)%3)<2){
+            int n=static_cast<int>(valueNormalized*7.99);const char* src[]={"LFO","Envelope","Fast Energy","Slow Energy","Direction","Aftertouch","Velocity","Audio Energy"};const char* dst[]={"Pitch Bound","Harmonic Bound","Modal Bound","Movement Rate","Attraction","Spectral Depth","Phase","Harmonic Mix"};
+            snprintf(buf,sizeof(buf),"%s",((id-101)%3)==0?src[std::clamp(n,0,7)]:dst[std::clamp(n,0,7)]);
         } else {
             snprintf(buf, sizeof(buf), "%.1f %%", valueNormalized * 100.0);
         }

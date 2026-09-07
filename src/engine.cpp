@@ -23,6 +23,7 @@ void MonkeysEarEngine::init(float sample_rate, size_t max_block_size) {
     weight_lowpass_.set_sample_rate(sample_rate_);
     eq_.set_sample_rate(sample_rate_);
     external_sub_.set_sample_rate(sample_rate_);
+    sound_space_.set_sample_rate(sample_rate_);
     cutoff_motion_.set_sample_rate(sample_rate_, 7.0f);
     resonance_motion_.set_sample_rate(sample_rate_, 10.0f);
     fm_motion_.set_sample_rate(sample_rate_, 5.0f);
@@ -47,6 +48,7 @@ void MonkeysEarEngine::reset() {
     weight_lowpass_.reset();
     eq_.reset();
     external_sub_.reset();
+    sound_space_.reset();
     drive_tube_.reset();
     resonator_cab_.reset();
     delay_.reset();
@@ -152,6 +154,7 @@ void MonkeysEarEngine::apply_macros() {
     }
     eq_.set_bypass(p.eq_bypass);
     eq_.set_gain_compensation(p.eq_gain_compensation);
+    sound_space_.set_controls(p.sound_space);
 }
 
 void MonkeysEarEngine::set_macro(MacroId id, float value) {
@@ -240,7 +243,21 @@ void MonkeysEarEngine::set_parameter_normalized(int id, float v) {
       case 79:{int patch=static_cast<int>(v*3.99f);if(patch==1)load_preset(PresetManager::create_monolith());else if(patch==2)load_preset(PresetManager::create_feral_wobble());else if(patch==3)load_preset(PresetManager::create_velvet_lead());return;}
       case 80:handle_midi_pitch_bend((v-.5f)*2.0f*p.pitch_bend_range);return;
       case 81:set_aftertouch(v);return;
-      default: if(id>=37&&id<=52){int b=(id-37)/4, f=(id-37)%4; if(f==0)p.eq_type[b]=static_cast<int>(v*5.99f);else if(f==1)p.eq_frequency_hz[b]=20.0f*std::pow(1000.0f,v);else if(f==2)p.eq_gain_db[b]=(v-.5f)*36.0f;else p.eq_q[b]=.15f*std::pow(80.0f,v);}break;
+      case 82:p.sound_space.enabled=v>=.5f;break;
+      case 83:p.sound_space.pitch_bound_cents=v*100.0f;break;
+      case 84:p.sound_space.harmonic_bound_cents=v*100.0f;break;
+      case 85:p.sound_space.modal_bound_cents=v*100.0f;break;
+      case 86:p.sound_space.movement_hz=.02f*std::pow(1000.0f,v);break;
+      case 87:p.sound_space.attraction=v;break;case 88:p.sound_space.resistance=v;break;case 89:p.sound_space.repulsion=v;break;
+      case 90:p.sound_space.frequency_freedom=v;break;case 91:p.sound_space.energy_widen=(v-.5f)*2.0f;break;
+      case 92:p.sound_space.attack_freedom=v;break;case 93:p.sound_space.release_relaxation=v;break;
+      case 94:p.sound_space.pitch_mix=v;break;case 95:p.sound_space.harmonic_mix=v;break;case 96:p.sound_space.modal_mix=v;break;
+      case 97:p.sound_space.spectral_depth_db=v*18.0f;break;case 98:p.sound_space.spectral_priority=v;break;
+      case 99:p.sound_space.phase_offset_cycles=(v-.5f)*.5f;break;case 100:p.sound_space.phase_coupling=v;break;
+      default:
+        if(id>=37&&id<=52){int b=(id-37)/4, f=(id-37)%4; if(f==0)p.eq_type[b]=static_cast<int>(v*5.99f);else if(f==1)p.eq_frequency_hz[b]=20.0f*std::pow(1000.0f,v);else if(f==2)p.eq_gain_db[b]=(v-.5f)*36.0f;else p.eq_q[b]=.15f*std::pow(80.0f,v);}
+        else if(id>=101&&id<=112){int route=(id-101)/3,field=(id-101)%3;if(field==0)p.sound_space.routes[route].source=static_cast<int>(v*7.99f);else if(field==1)p.sound_space.routes[route].destination=static_cast<int>(v*7.99f);else p.sound_space.routes[route].depth=(v-.5f)*2.0f;}
+        break;
     } apply_macros();
 }
 
@@ -358,7 +375,12 @@ void MonkeysEarEngine::process_block(
         else if(p.input_route_mode==1) weight = lerp(synth_weight, weight_lowpass_.process(ext_sample)*p.fundamental_mix+tracked_sub*p.sub_mix, p.macros[MACRO_MIC_BLEND]);
         weight=weight_lowpass_.process(weight);
         float sub_move=sub_motion_.process(lfo_val*p.mod_lfo_sub_blend + slow*p.mod_state_slow_balance);
-        float recombined=sanitize(resonated*p.character_level + weight*p.source_level*clamp(1.0f+sub_move*.6f,0.1f,1.8f));
+        float character_layer=resonated*p.character_level;
+        float weight_layer=weight*p.source_level*clamp(1.0f+sub_move*.6f,0.1f,1.8f);
+        float center_hz=midi_to_freq(static_cast<float>(current_midi_note_));
+        if(p.input_route_mode!=0&&external_sub_.confidence()>.30f)center_hz=external_sub_.tracked_frequency_hz();
+        SoundSpaceSources space_sources{lfo_val,filter_env,fast,slow,direction,aftertouch_,last_velocity_,audio_envelope_};
+        float recombined=sound_space_.process(character_layer,weight_layer,center_hz,space_sources);
         float eq_freq=lfo_val*p.mod_lfo_eq_frequency*.75f;
         float eq_gain=lfo_val*p.mod_lfo_eq_gain*9.0f;
         float equalized=eq_.process(recombined,eq_freq,eq_gain);

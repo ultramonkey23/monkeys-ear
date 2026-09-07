@@ -107,6 +107,11 @@ std::string PresetData::serialize() const {
     oss << "MOD_LFO_CUTOFF="<<mod_lfo_cutoff<<"\nMOD_LFO_RES="<<mod_lfo_resonance<<"\nMOD_LFO_FM="<<mod_lfo_fm<<"\nMOD_LFO_SUB="<<mod_lfo_sub_blend<<"\nMOD_LFO_DRIVE="<<mod_lfo_drive<<"\nMOD_LFO_EQ_FREQ="<<mod_lfo_eq_frequency<<"\nMOD_LFO_EQ_GAIN="<<mod_lfo_eq_gain<<"\n";
     oss << "MOD_STATE_DIR_FILTER="<<mod_state_direction_filter<<"\nMOD_STATE_FAST_FM="<<mod_state_fast_fm<<"\nMOD_STATE_SLOW_BAL="<<mod_state_slow_balance<<"\nMOD_STATE_SLOW_RESO="<<mod_state_slow_resonator<<"\nMOD_AUDIO_ENV_DRIVE="<<mod_audio_envelope_drive<<"\n";
     oss << "MONO="<<(mono_mode?1:0)<<"\nLEGATO="<<(legato?1:0)<<"\nPORTAMENTO="<<portamento_seconds<<"\nBEND_RANGE="<<pitch_bend_range<<"\nVIBRATO="<<vibrato_depth_semitones<<"\nVELOCITY_TONE="<<velocity_tone<<"\nAFTERTOUCH_FILTER="<<aftertouch_filter<<"\nAFTERTOUCH_DRIVE="<<aftertouch_drive<<"\n";
+    const auto& s=sound_space;
+    oss<<"SPACE_ENABLED="<<(s.enabled?1:0)<<"\nSPACE_PITCH_BOUND="<<s.pitch_bound_cents<<"\nSPACE_HARM_BOUND="<<s.harmonic_bound_cents<<"\nSPACE_MODAL_BOUND="<<s.modal_bound_cents<<"\n";
+    oss<<"SPACE_RATE="<<s.movement_hz<<"\nSPACE_ATTRACT="<<s.attraction<<"\nSPACE_RESIST="<<s.resistance<<"\nSPACE_REPEL="<<s.repulsion<<"\nSPACE_FREQ_FREEDOM="<<s.frequency_freedom<<"\nSPACE_ENERGY_WIDEN="<<s.energy_widen<<"\n";
+    oss<<"SPACE_ATTACK="<<s.attack_freedom<<"\nSPACE_RELEASE="<<s.release_relaxation<<"\nSPACE_PITCH_MIX="<<s.pitch_mix<<"\nSPACE_HARM_MIX="<<s.harmonic_mix<<"\nSPACE_MODAL_MIX="<<s.modal_mix<<"\nSPACE_SPECTRAL_DB="<<s.spectral_depth_db<<"\nSPACE_PRIORITY="<<s.spectral_priority<<"\nSPACE_PHASE="<<s.phase_offset_cycles<<"\nSPACE_PHASE_COUPLE="<<s.phase_coupling<<"\n";
+    for(size_t i=0;i<s.routes.size();++i)oss<<"SPACE_ROUTE"<<i<<"_SOURCE="<<s.routes[i].source<<"\nSPACE_ROUTE"<<i<<"_DEST="<<s.routes[i].destination<<"\nSPACE_ROUTE"<<i<<"_DEPTH="<<s.routes[i].depth<<"\n";
     return oss.str();
 }
 
@@ -195,6 +200,26 @@ bool PresetData::deserialize(const std::string& data) {
         else if (key == "VELOCITY_TONE") velocity_tone=std::stof(val_str);
         else if (key == "AFTERTOUCH_FILTER") aftertouch_filter=std::stof(val_str);
         else if (key == "AFTERTOUCH_DRIVE") aftertouch_drive=std::stof(val_str);
+        else if(key=="SPACE_ENABLED")sound_space.enabled=std::stoi(val_str)!=0;
+        else if(key=="SPACE_PITCH_BOUND")sound_space.pitch_bound_cents=std::stof(val_str);
+        else if(key=="SPACE_HARM_BOUND")sound_space.harmonic_bound_cents=std::stof(val_str);
+        else if(key=="SPACE_MODAL_BOUND")sound_space.modal_bound_cents=std::stof(val_str);
+        else if(key=="SPACE_RATE")sound_space.movement_hz=std::stof(val_str);
+        else if(key=="SPACE_ATTRACT")sound_space.attraction=std::stof(val_str);
+        else if(key=="SPACE_RESIST")sound_space.resistance=std::stof(val_str);
+        else if(key=="SPACE_REPEL")sound_space.repulsion=std::stof(val_str);
+        else if(key=="SPACE_FREQ_FREEDOM")sound_space.frequency_freedom=std::stof(val_str);
+        else if(key=="SPACE_ENERGY_WIDEN")sound_space.energy_widen=std::stof(val_str);
+        else if(key=="SPACE_ATTACK")sound_space.attack_freedom=std::stof(val_str);
+        else if(key=="SPACE_RELEASE")sound_space.release_relaxation=std::stof(val_str);
+        else if(key=="SPACE_PITCH_MIX")sound_space.pitch_mix=std::stof(val_str);
+        else if(key=="SPACE_HARM_MIX")sound_space.harmonic_mix=std::stof(val_str);
+        else if(key=="SPACE_MODAL_MIX")sound_space.modal_mix=std::stof(val_str);
+        else if(key=="SPACE_SPECTRAL_DB")sound_space.spectral_depth_db=std::stof(val_str);
+        else if(key=="SPACE_PRIORITY")sound_space.spectral_priority=std::stof(val_str);
+        else if(key=="SPACE_PHASE")sound_space.phase_offset_cycles=std::stof(val_str);
+        else if(key=="SPACE_PHASE_COUPLE")sound_space.phase_coupling=std::stof(val_str);
+        else if(key.rfind("SPACE_ROUTE",0)==0){int i=key[11]-'0';if(i>=0&&i<4){auto suffix=key.substr(13);if(suffix=="SOURCE")sound_space.routes[i].source=std::stoi(val_str);else if(suffix=="DEST")sound_space.routes[i].destination=std::stoi(val_str);else if(suffix=="DEPTH")sound_space.routes[i].depth=std::stof(val_str);}}
     }
     return true;
 }
@@ -360,7 +385,9 @@ PresetData PresetManager::create_monolith() {
     p.filter_routing=0; p.eq_type={{2,1,1,5}}; p.eq_frequency_hz={{48,180,720,6200}};
     p.eq_gain_db={{2.5f,-2.0f,1.0f,0}}; p.eq_q={{0.7f,1.0f,0.8f,0.7f}};
     p.state_resistance=0.72f; p.state_coupling=0.14f; p.mod_state_slow_balance=0.18f;
-    p.macros[MACRO_DELAY]=0; p.macros[MACRO_SPACE]=0.05f; p.master_gain_db=-5.0f; return p;
+    p.sound_space.enabled=true;p.sound_space.harmonic_bound_cents=18;p.sound_space.harmonic_mix=.13f;p.sound_space.frequency_freedom=.85f;
+    p.sound_space.spectral_depth_db=7.0f;p.sound_space.spectral_priority=.82f;p.sound_space.resistance=.78f;
+    p.sound_space.routes[0]={2,1,.35f};p.macros[MACRO_DELAY]=0; p.macros[MACRO_SPACE]=0.05f; p.master_gain_db=-6.0f; return p;
 }
 
 PresetData PresetManager::create_feral_wobble() {
@@ -373,7 +400,9 @@ PresetData PresetManager::create_feral_wobble() {
     p.mod_lfo_sub_blend=-0.22f; p.mod_lfo_drive=0.24f; p.mod_lfo_eq_frequency=0.32f;
     p.mod_state_direction_filter=0.38f; p.mod_state_fast_fm=0.34f; p.mod_state_slow_balance=0.30f;
     p.mod_state_slow_resonator=0.24f; p.eq_type={{4,1,1,3}}; p.eq_frequency_hz={{28,170,1450,7200}};
-    p.eq_gain_db={{0,-2.5f,3.5f,1.0f}}; p.eq_q={{0.7f,1.2f,1.5f,0.7f}}; p.master_gain_db=-7.0f; return p;
+    p.eq_gain_db={{0,-2.5f,3.5f,1.0f}}; p.eq_q={{0.7f,1.2f,1.5f,0.7f}};
+    p.sound_space.enabled=true;p.sound_space.pitch_bound_cents=16;p.sound_space.harmonic_bound_cents=42;p.sound_space.modal_bound_cents=31;p.sound_space.movement_hz=2.1f;p.sound_space.attraction=.38f;p.sound_space.resistance=.48f;p.sound_space.repulsion=.72f;p.sound_space.harmonic_mix=.22f;p.sound_space.modal_mix=.16f;p.sound_space.phase_offset_cycles=.10f;p.sound_space.phase_coupling=.55f;p.sound_space.spectral_depth_db=5.0f;
+    p.sound_space.routes[0]={0,1,.75f};p.sound_space.routes[1]={2,3,.50f};p.sound_space.routes[2]={4,6,.45f};p.master_gain_db=-9.0f; return p;
 }
 
 PresetData PresetManager::create_velvet_lead() {
@@ -387,7 +416,16 @@ PresetData PresetManager::create_velvet_lead() {
     p.eq_type={{4,1,1,3}}; p.eq_frequency_hz={{38,320,2100,7200}}; p.eq_gain_db={{0,-1.2f,2.2f,-1.5f}};
     p.eq_q={{0.7f,0.9f,0.8f,0.7f}}; p.state_resistance=0.42f; p.state_coupling=0.34f;
     p.mod_state_direction_filter=0.10f; p.mod_state_slow_resonator=0.16f; p.macros[MACRO_DRIVE]=0.38f;
-    p.macros[MACRO_DELAY]=0.22f; p.macros[MACRO_SPACE]=0.20f; p.master_gain_db=-5.5f; return p;
+    p.sound_space.enabled=true;p.sound_space.pitch_bound_cents=24;p.sound_space.harmonic_bound_cents=14;p.sound_space.modal_bound_cents=9;p.sound_space.movement_hz=.42f;p.sound_space.attraction=.82f;p.sound_space.resistance=.74f;p.sound_space.repulsion=.58f;p.sound_space.pitch_mix=.08f;p.sound_space.harmonic_mix=.10f;p.sound_space.modal_mix=.06f;p.sound_space.attack_freedom=.75f;p.sound_space.release_relaxation=.85f;
+    p.sound_space.routes[0]={1,0,.72f};p.sound_space.routes[1]={5,0,.65f};p.sound_space.routes[2]={5,4,.35f};
+    p.macros[MACRO_DELAY]=0.22f; p.macros[MACRO_SPACE]=0.20f; p.master_gain_db=-7.0f; return p;
+}
+
+PresetData PresetManager::create_sound_space(){
+    PresetData p=create_factory_stateful_bell();p.name="SOUND SPACE";p.synth_waveform=3;p.fundamental_mix=.36f;p.sub_mix=.18f;p.character_level=.48f;p.osc_fm_amount=.10f;
+    p.sound_space.enabled=true;p.sound_space.pitch_bound_cents=19;p.sound_space.harmonic_bound_cents=58;p.sound_space.modal_bound_cents=44;p.sound_space.movement_hz=.73f;p.sound_space.attraction=.61f;p.sound_space.resistance=.59f;p.sound_space.repulsion=.68f;p.sound_space.frequency_freedom=.88f;p.sound_space.energy_widen=.55f;p.sound_space.attack_freedom=.42f;p.sound_space.release_relaxation=.72f;p.sound_space.pitch_mix=.09f;p.sound_space.harmonic_mix=.20f;p.sound_space.modal_mix=.18f;p.sound_space.spectral_depth_db=8.5f;p.sound_space.spectral_priority=.66f;p.sound_space.phase_offset_cycles=.08f;p.sound_space.phase_coupling=.46f;
+    p.sound_space.routes[0]={0,1,.55f};p.sound_space.routes[1]={3,2,.62f};p.sound_space.routes[2]={2,5,.48f};p.sound_space.routes[3]={5,6,.72f};
+    p.lfo1_rate_hz=.37f;p.lfo1_depth=1.0f;p.master_gain_db=-9.0f;return p;
 }
 
 } // namespace monkeys_ear

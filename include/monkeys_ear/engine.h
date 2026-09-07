@@ -71,6 +71,7 @@ public:
     float get_mic_peak() const { return audio_input_.get_peak_level(); }
     size_t get_active_voices() const { return voice_manager_.active_voice_count(); }
     const ChronoStateVariables& get_chrono_state() const { return chrono_body_.get_state(); }
+    const SoundSpaceMetrics& get_sound_space_metrics() const { return sound_space_.metrics(); }
 
 private:
     float sample_rate_;
@@ -84,6 +85,7 @@ private:
     StateVariableFilter weight_lowpass_;
     ParametricEQ eq_;
     ExternalSubharmonic external_sub_;
+    SoundSpaceProcessor sound_space_;
     TubeDriveStage drive_tube_;
     CabinetResonator resonator_cab_;
     StereoDelay delay_;
