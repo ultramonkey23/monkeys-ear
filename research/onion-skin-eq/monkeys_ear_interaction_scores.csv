@@ -1,0 +1,7 @@
+Pair,Mean interaction,Peak interaction,Peak freq (Hz),Peak time (s),Strongest region,Region score
+Bass ↔ Vocal,0.062,0.999,796.9,3.59,Low-mid,0.523
+Bass ↔ Guitar,0.067,0.999,796.9,0.8,Low-mid,0.893
+Guitar ↔ Vocal,0.04,0.999,820.3,1.5,Low-mid,0.523
+Kick ↔ Bass,0.021,0.972,562.5,5.5,Sub/Low,0.265
+Kick ↔ Guitar,0.017,0.972,539.1,5.5,Low-mid,0.243
+Kick ↔ Vocal,0.02,0.972,562.5,1.5,Sub/Low,0.195

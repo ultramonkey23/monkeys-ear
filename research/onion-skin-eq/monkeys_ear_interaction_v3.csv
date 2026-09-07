@@ -1,0 +1,6 @@
+Scenario,Pair,Class,Severity,Longest collision (ms),Episode count,Hotspot Hz,Asymmetry,Dominance
+Kick+Bass_coexist,Kick ↔ Bass,Competition,0.301,138.7,16,77.5,0.251,Bass
+Guitars_compete,Guitar A ↔ Guitar B,Masking,0.72,7968.0,1,451.7,0.0,Balanced
+Vocal_over_guitar,Vocal ↔ Guitar,Masking,0.651,5994.7,1,244.9,0.119,Balanced
+Separated_sources,Sub ↔ Air,Coexistence,0.0,0.0,0,34.6,0.0,Balanced
+Brief_collision,Vocal ↔ Cymbal,Pressure,0.254,42.7,8,244.9,0.183,Balanced
