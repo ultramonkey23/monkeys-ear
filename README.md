@@ -37,10 +37,10 @@ Verified on Windows x64 @ 48kHz (Build with CMake + Ninja + GCC 14.2):
 
 | Buffer Size | Block Deadline | Measured Avg Block Time | Measured Max Block Time | Deadline Margin | Deadline Misses |
 |---|---|---|---|---|---|
-| **32 samples** | 666.67 $\mu s$ | **12.82 $\mu s$** | 18.70 $\mu s$ | **98.08 %** | 0 |
-| **64 samples** | 1333.33 $\mu s$ | **27.31 $\mu s$** | 41.80 $\mu s$ | **97.95 %** | 0 |
-| **128 samples** | 2666.67 $\mu s$ | **51.45 $\mu s$** | 84.50 $\mu s$ | **98.07 %** | 0 |
-| **256 samples** | 5333.33 $\mu s$ | **153.22 $\mu s$** | 2224.20 $\mu s$ | **97.13 %** | 0 |
+| **32 samples** | 666.67 $\mu s$ | **13.84 $\mu s$** | 29.60 $\mu s$ | **97.92 %** | 0 |
+| **64 samples** | 1333.33 $\mu s$ | **24.74 $\mu s$** | 45.00 $\mu s$ | **98.14 %** | 0 |
+| **128 samples** | 2666.67 $\mu s$ | **94.97 $\mu s$** | 894.70 $\mu s$ | **96.44 %** | 0 |
+| **256 samples** | 5333.33 $\mu s$ | **106.06 $\mu s$** | 189.80 $\mu s$ | **98.01 %** | 0 |
 
 - **Reported Plugin Latency**: 0 samples
 - **Memory Allocations in Audio Path**: 0
@@ -62,7 +62,7 @@ Verified on Windows x64 @ 48kHz (Build with CMake + Ninja + GCC 14.2):
 
 ## Tonal Motion Architecture
 
-The native host surface now exposes 80 automated controls grouped by `SOURCE`, `SUB`, `FILTER`, `EQ`, `MOTION`, `STATE`, `DRIVE/BODY`, `SPACE`, `OUTPUT`, and `PRESET`. `PRESET: Target Patch` selects Current, MONOLITH, FERAL WOBBLE, or VELVET LEAD directly in REAPER; Current preserves the restored parameter state.
+The native host surface now exposes 80 musician-facing automated controls grouped by `SOURCE`, `SUB`, `FILTER`, `EQ`, `MOTION`, `STATE`, `DRIVE/BODY`, `SPACE`, `OUTPUT`, and `PRESET`, plus hidden host inputs for hardware pitch bend and channel pressure. `PRESET: Target Patch` selects Current, MONOLITH, FERAL WOBBLE, or VELVET LEAD directly in REAPER; Current preserves the restored parameter state.
 
 The weight path supplies independent fundamental and 1/1, 1/2, 1/3, or 1/4 subharmonic energy with phase, polarity, envelope-follow, and saturation controls. MIDI is oscillator locked. The FX path uses a causal positive-crossing tracker for stable monophonic input from 45–500 Hz. It needs two crossings (about 4–44 ms across that range), adds no hidden lookahead or reported plugin latency, and fades its generated sub when pitch confidence falls. Chords, noisy material, weak fundamentals, and rapid transitions are deliberately treated as uncertain rather than advertised as perfect tracking.
 

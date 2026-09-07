@@ -26,7 +26,7 @@ static const TUID kMonkeysEarControllerCID = INLINE_UID(
     0x4D6F6E6B, 0x65797345, 0x61724374, 0x726C7202
 );
 
-static constexpr int kNumParams = 80;
+static constexpr int kNumParams = 82;
 static constexpr uint32 kStateMagic = 0x4D453032u; // ME02
 static constexpr uint32 kStateVersion = 2u;
 
@@ -80,6 +80,7 @@ struct SharedPluginState {
         params[70].store(0.0f); params[71].store(0.0f); params[72].store(0.0f); params[73].store(0.043f);
         params[74].store(0.0f); params[75].store(0.0f); params[76].store(0.5f); params[77].store(0.5f); params[78].store(0.0f);
         params[79].store(0.0f);
+        params[80].store(0.5f); params[81].store(0.0f);
         for (int i = 0; i < kNumParams; ++i) dirty[i].store(false);
     }
 };
@@ -472,7 +473,7 @@ public:
         info.id = static_cast<ParamID>(paramIndex);
         info.stepCount = 0; // Continuous
         info.unitId = 0;
-        info.flags = kCanAutomate;
+        info.flags = kCanAutomate | (paramIndex >= 80 ? kIsHidden : 0);
         info.defaultNormalizedValue = state_ ? state_->params[paramIndex].load() : 0.5;
 
         static const char* titles[kNumParams] = {
@@ -502,7 +503,7 @@ public:
             "EQ 3: Type", "EQ 3: Frequency", "EQ 3: Gain", "EQ 3: Q", "EQ 4: Type", "EQ 4: Frequency", "EQ 4: Gain", "EQ 4: Q", "EQ: Bypass", "EQ: Gain Compensation",
             "MOTION: LFO Rate", "MOTION: LFO Waveform", "MOTION: Curve", "MOTION: LFO to Cutoff", "MOTION: LFO to Resonance", "MOTION: LFO to FM", "MOTION: LFO to Sub", "MOTION: LFO to Drive", "MOTION: LFO to EQ Frequency", "MOTION: LFO to EQ Gain",
             "STATE: Direction to Filter", "STATE: Fast Energy to FM", "STATE: Slow Energy to Balance", "STATE: Slow Energy to Resonator", "MOTION: Audio Envelope to Drive",
-            "SOURCE: Mono Mode", "SOURCE: Legato", "SOURCE: Portamento", "SOURCE: Pitch Bend Range", "SOURCE: Vibrato Depth", "SOURCE: Velocity Tone", "STATE: Aftertouch to Filter", "DRIVE/BODY: Aftertouch to Drive", "MOTION: LFO Master Depth", "PRESET: Target Patch"
+            "SOURCE: Mono Mode", "SOURCE: Legato", "SOURCE: Portamento", "SOURCE: Pitch Bend Range", "SOURCE: Vibrato Depth", "SOURCE: Velocity Tone", "STATE: Aftertouch to Filter", "DRIVE/BODY: Aftertouch to Drive", "MOTION: LFO Master Depth", "PRESET: Target Patch", "PERFORMANCE: Pitch Bend", "PERFORMANCE: Aftertouch"
         };
 
         copy_to_char16(info.title, titles[paramIndex], 128);
@@ -598,6 +599,12 @@ public:
             return kResultOk;
         } else if (midiControllerNumber == 93) {
             id = 4; // CC 93 -> Delay Echo
+            return kResultOk;
+        } else if (midiControllerNumber == 129) {
+            id = 80; // VST3 legacy MIDI pitch bend controller
+            return kResultOk;
+        } else if (midiControllerNumber == 130) {
+            id = 81; // VST3 legacy MIDI channel pressure controller
             return kResultOk;
         }
         return kResultFalse;

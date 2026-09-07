@@ -124,7 +124,7 @@ int main() {
 
     int32 paramCount = controller->getParameterCount();
     std::cout << "          Total Exposed Parameters: " << paramCount << "\n";
-    assert(paramCount == 80);
+    assert(paramCount == 82);
 
     std::cout << "\n[EXPOSED PARAMETERS ENUMERATION]:\n";
     for (int32 i = 0; i < paramCount; ++i) {
@@ -147,10 +147,14 @@ int main() {
     // Component/controller state is an actual versioned 79-float host stream.
     MemoryStream state_stream;
     assert(fx_comp->getState(&state_stream)==kResultOk);
-    assert(state_stream.bytes.size()==12u+80u*sizeof(float));
+    assert(state_stream.bytes.size()==12u+82u*sizeof(float));
     state_stream.pos=0;
     assert(controller->setComponentState(&state_stream)==kResultOk);
     std::cout << "[PASS] Versioned host preset state round-trip: "<<state_stream.bytes.size()<<" bytes\n";
+    IMidiMapping* midi_map=nullptr;assert(controller->queryInterface(IMidiMapping_iid,(void**)&midi_map)==kResultOk);
+    ParamID bend_id=0,pressure_id=0;assert(midi_map->getMidiControllerAssignment(0,0,129,bend_id)==kResultOk&&bend_id==80);
+    assert(midi_map->getMidiControllerAssignment(0,0,130,pressure_id)==kResultOk&&pressure_id==81);midi_map->release();
+    std::cout << "[PASS] Hardware pitch bend and channel pressure map to real-time performance inputs\n";
 
     // Actual Instrument-class MIDI processing, not topology alone.
     IAudioProcessor* instr_proc=nullptr; assert(instr_comp->queryInterface(IAudioProcessor_iid,(void**)&instr_proc)==kResultOk);

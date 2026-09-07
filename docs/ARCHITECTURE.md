@@ -70,7 +70,7 @@
 - Class ID: `4D6F6E6B-6579-7345-6172-496E73747201`.
 - Targets: REAPER on Windows x64.
 - Dual classes remain: pure Instrument (no audio input) and FX (stereo input).
-- 80 automated parameters use functional name prefixes as host-visible groups.
+- 80 musician-facing automated parameters use functional name prefixes as host-visible groups; two hidden VST3 performance inputs carry hardware pitch bend and channel pressure without cluttering the control surface.
 - Component/controller state is serialized as a versioned fixed-size stream; no audio-thread allocation is used for parameter application.
 - Factory target patches are selectable by the `PRESET: Target Patch` parameter and are also rendered by the deterministic test runner as `.mepreset` + `.wav` pairs.
 
