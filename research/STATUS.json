@@ -1,0 +1,41 @@
+{
+  "schema": "monkeys_ear_research_status_v1",
+  "repository_role": "research_shell",
+  "local_product_imported": false,
+  "warning": "GitHub absence is not evidence that a feature is absent from the pre-existing local Monkey's Ear implementation.",
+  "active_subsystems": {
+    "onion-skin-eq": {
+      "status": "ACTIVE_RESEARCH",
+      "architecture": "research/onion-skin-eq/ARCHITECTURE.md",
+      "history": "research/onion-skin-eq/RESEARCH_HISTORY.md",
+      "evidence_level": "SYNTHETIC_MEASURED",
+      "product_integration": "PENDING_LOCAL_AUDIT"
+    },
+    "pitch-correction": {
+      "status": "ACTIVE_RESEARCH",
+      "architecture": "research/pitch-correction/ARCHITECTURE.md",
+      "history": "research/pitch-correction/RESEARCH_HISTORY.md",
+      "evidence_level": "HYPOTHESIS_RESEARCH",
+      "product_integration": "PENDING_LOCAL_AUDIT"
+    }
+  },
+  "shared": {
+    "research_spine": "research/RESEARCH_SPINE.md",
+    "test_protocol": "research/TEST_PROTOCOL.md",
+    "evidence_schema": "research/EVIDENCE_SCHEMA.json"
+  },
+  "future_subsystems": [
+    "synthesis-voice",
+    "sampling-resampling",
+    "nonlinear-amplifier-physical-modeling",
+    "modulation",
+    "routing-graph",
+    "spatial-phase",
+    "capture-profiling",
+    "sequencing-timing",
+    "soundspace",
+    "wordmath"
+  ],
+  "creation_rule": "Do not create a future subsystem folder until real research or imported product work begins.",
+  "promotion_rule": "A mechanism is durable only after appropriate evidence and explicit promotion; negative evidence can demote previously promoted ideas."
+}
