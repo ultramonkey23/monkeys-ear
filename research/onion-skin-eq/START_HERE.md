@@ -2,42 +2,45 @@
 
 Status: exploratory research for the **EQ module only**. This does not define the architecture of the full Monkey's Ear system. Synthetic tests exist; real-stem listening validation and product integration are still pending.
 
-## UX contract
-The EQ must be easy to use. Default dynamics are subtle and automated. Advanced dynamics appear only when the user deliberately opens or configures them.
+## Product rule
+The EQ must be easy to use, but usability is not the research objective. The priority is sound quality and useful control. Automatic behavior is a convenience layer and must not drive the architecture.
 
-Normal EQ use should remain familiar: frequency, gain, Q and filter shape, plus at most a simple Dynamic/Auto amount. Threshold, ratio, attack/release, source priority, harmonic-family behavior, state controls, phase actions and stronger gain ranges are advanced/explicit controls, not front-panel requirements.
+Normal EQ use remains familiar: frequency, gain, Q and filter shape. Deeper dynamics, harmonic-family behavior, source relationships, state controls, phase actions and stronger correction are available when the user deliberately configures them.
 
-Automatic corrective behavior must be bounded, transient-aware, low-chatter, reversible and conservative. No automatic harmonic pitch movement, phase manipulation or stereo movement in the default lane.
+## Active technical direction
+Build an excellent conventional EQ first, then evaluate extensions by whether they improve a defined musical task without unacceptable collateral damage. Keep evidence, user intent and corrective action separate.
 
-## Active direction
-Build an excellent conventional EQ first, then extend it with optional relational dynamics. Keep acoustic evidence, user intent and corrective action separate. The active stack is:
+Current priority order:
 
-1. conventional EQ and clean filter behavior;
-2. spectral/temporal evidence and onion-skin history;
-3. transient vs sustained/body evidence;
-4. directional target/masker and harmonic-family evidence;
-5. user intent: Preserve / Yield / Equal;
-6. subtle bounded dynamic gain/compression as the primary automatic corrective action;
-7. stronger dynamics only after explicit user setup;
-8. optional phase/spatial/tiny harmonic movement only in advanced/experimental paths when evidence and listening justify it;
-9. state smoothing/resistance/return to prevent chatter.
+1. conventional filter quality and phase behavior;
+2. dynamic EQ / compression math, including transient vs sustained/body behavior;
+3. harmonic-family gain negotiation for depth and texture preservation;
+4. directional cross-texture relationships and Preserve / Yield / Equal intent;
+5. onion-skin temporal evidence and history;
+6. optional state smoothing, persistence, resistance and return;
+7. advanced phase/spatial/harmonic-motion experiments only when they beat simpler methods for a defined task;
+8. automatic behavior last, as a bounded UX layer over proven mechanisms.
 
-## What V1–V7 establish
-V1–V3 are historical synthetic overlap heuristics. V4 separates envelope complementarity from overlap. V5 verifies directional gain and silence behavior. V6 adds changing user priority plus bounded harmonic-family gain and movement. V6 reduced its engineering collision proxy from 0.3342 untouched to 0.3293 with dynamic harmonic gain while preserving harmonic-envelope identity above 0.9994. Adding tiny harmonic movement only improved the proxy to 0.3291, so movement remains experimental.
+## What V1–V8 establish
+V1–V3 are historical synthetic overlap heuristics. V4 separates envelope complementarity from overlap. V5 verifies directional gain and silence behavior. V6 adds changing user priority plus bounded harmonic-family gain and movement. V7 stress-tests one subtle automatic controller, but automation is no longer the research focus.
 
-V7 stress-tests the simple-by-default dynamics contract. With an experimental 1.5 dB automatic ceiling, the controller applied only 0.008 dB during an isolated transient, remained below 1.4 dB peak correction in deterministic stress cases, and showed much less control movement than a deliberately naive 4 dB detector-following baseline. In a separate 30-second randomized evidence stream, automatic reduction stayed below 0.952 dB while an explicitly user-enabled 4 dB mode reached 2.882 dB. These are controller tests, not listening proof.
+V8 directly compares four core strategies: broad static carve, conventional dynamic EQ, harmonic-family gain control, and relational state dynamics. In the deterministic matched case, broad carving produced the largest reduction in the simple collision proxy, but also caused more identity/energy change and more control motion. Harmonic-family control produced a smaller separation change while preserving source identity at 0.9998+ with much less motion. A 2,000-state randomized sweep reproduced the same tradeoff.
 
-None of these numbers establishes perceptual masking accuracy or audible superiority.
+These are engineering proxies, not perceptual masking, clarity, depth, or preference scores.
 
-## Decisions
-**Keep / strengthen:** excellent conventional EQ; transient/body-aware dynamics; onion-skin history; directional relationships; harmonic-family gain negotiation; bounded user intent; subtle automatic gain; stateful control smoothing; inspectable actions; explicit advanced dynamics.
+## Current decisions
+**PROMOTE:** excellent conventional EQ; conventional dynamic EQ as a required baseline; harmonic-family gain negotiation as the strongest distinctive mechanism currently supported by the synthetic evidence; directional user intent; transient/body-aware control; inspectable and reversible actions.
 
-**Revise:** the old symmetric masking score becomes raw interaction evidence, not a diagnosis. Dynamic EQ and compression become one shared control-law family rather than separate feature silos. Harmonic relatedness is a grouping descriptor, not an exemption from masking. Automatic dynamics should use persistence and conservative bounds rather than mirror detector level directly.
+**KEEP AS EXPLICIT TOOL:** broad EQ carving. It can be the correct choice when the user wants stronger separation. Its larger timbral change is not automatically a defect.
 
-**Retire as defaults:** unconstrained harmonic detuning; automatic 'fix the mix' behavior; hidden large gain changes; automatic phase/stereo motion; treating overlap as error; treating V1–V3 labels as ground truth; tuning thresholds to synthetic labels; exposing internal state math as mandatory user controls; magical future lookahead without explicit latency.
+**REVISE / EXPERIMENTAL:** relational state dynamics. Persistence, transient protection, user priority, resistance and return remain promising, but V8 does not justify making the entire state system the core. Split useful mechanisms out and retest independently.
+
+**RETIRED AS DEFAULT / OBJECTIVE:** unconstrained harmonic detuning; automatic phase/stereo movement; treating overlap as error; maximizing spectral separation as the sole score; tuning thresholds to synthetic labels; one giant opaque 'smart EQ' law; magical future lookahead without explicit latency.
 
 ## Research priority
-Read `V7_AUTO_DYNAMICS.md`, then `V6_HARMONIC_DEPTH.md`. Run `v7_auto_dynamics.py` for current automatic-dynamics guardrails and `v6_dynamic_harmonic_depth.py` for harmonic-family research. Next replace the simple collision proxy with a documented auditory-filter/excitation baseline, compare broad EQ / conventional multiband / harmonic-family dynamics / relational state control, and move to level-matched real stems with blinded labels for clarity, depth, punch, timbral damage and preference.
+Read `V8_CORE_COMPARISON.md` first. Run `v8_core_comparison.py` to reproduce the current four-way core comparison. `v8_core_comparison_scored.csv` contains the deterministic summary and `v8_monte_carlo_summary.csv` contains the 2,000-state randomized sweep summary.
+
+Next, replace the simple collision proxy with a documented auditory-filter / excitation-pattern baseline, then run the same four-way comparison on level-matched real stems. Listening labels must cover clarity, depth, punch, timbral damage and preference. Also measure CPU, latency, zippering, worst-case control movement, mono behavior and phase effects.
 
 ## Product integration
 Inspect current product master and existing EQ/dynamics interfaces before integration. Keep unrelated Monkey's Ear subsystems outside this research scope. Reconcile research-only GitHub `main` history with the product branch explicitly; do not force-push over either side. Use existing Lab/Code Prime ownership rather than a parallel rewrite.
@@ -45,16 +48,16 @@ Inspect current product master and existing EQ/dynamics interfaces before integr
 For live analysis and control, use bounded/preallocated work, timestamped data and supported VST3 processor/controller communication. No file/network/blocking/unbounded work on the audio callback. Corrective actions must remain automatable, reversible and recallable.
 
 ## Primary research record
-- `V7_AUTO_DYNAMICS.md` — current usability and dynamics guardrails
-- `v7_auto_dynamics.py` — deterministic automatic-dynamics stress simulation
-- `v7_auto_dynamics_metrics.csv` — V7 deterministic metrics
-- `V6_HARMONIC_DEPTH.md` — harmonic-depth design and evidence
-- `v6_dynamic_harmonic_depth.py` — harmonic-depth experiment
-- `v6_dynamic_harmonic_depth.csv` — V6 metrics
+- `V8_CORE_COMPARISON.md` — current core strategy decisions
+- `v8_core_comparison.py` — reproducible deterministic comparison
+- `v8_core_comparison_scored.csv` — deterministic metrics
+- `v8_monte_carlo_summary.csv` — randomized sweep summary
+- `V6_HARMONIC_DEPTH.md` — harmonic-depth precursor evidence
+- `V7_AUTO_DYNAMICS.md` — UX/automatic-dynamics side research, not current core priority
 - `prototype_v3.py`, V1–V5 CSVs — historical evidence only
 
 ## Durability rule
-A research idea does not stay active because it was once interesting. Promote it only when it improves a defined engineering objective without unacceptable damage or wins a level-matched listening task for a defined musical purpose. Otherwise revise it, move it to an explicitly creative/experimental lane, archive it as historical evidence, or remove it.
+Complexity is not progress. A mechanism remains active only if it wins a measured engineering tradeoff, wins a controlled listening task, or provides a clearly different user-controlled creative capability. Otherwise simplify it, revise it, move it to an explicit experimental lane, archive it as historical evidence, or remove it.
 
 ## Evidence status
 Synthetic engineering tests: active. Real-stem evaluation: pending. Blinded listening: pending. Perceptual masking validation: pending. Product integration: pending.
