@@ -87,23 +87,48 @@ When amplitudes were re-evaluated from the original envelope at the shifted harm
 
 Interpretation: formant/timbre preservation must remain structurally independent from pitch transposition. The next practical comparison should replace the oracle envelope with estimated LPC and cepstral/True-Envelope-style envelopes on the same source, then compare actual resynthesis families.
 
+## 2026-09-07 — resynthesis + practical envelope estimator v1
+
+Evidence state: **SYNTHETIC / FAILURE-PRESERVING BASELINE**. Added `experiments/resynthesis_formant_v1.py`, `resynthesis_v1_results.csv` and `envelope_estimator_v1_results.csv`.
+
+The resynthesis experiment uses deterministic synthetic /a/, /i/ and /u/-like source/filter vowels at 120 and 220 Hz, shifted by -5, +5 and +12 semitones. Both transformation families receive the same source and target ratio. The time-domain path is a deliberately minimal known-F0 PSOLA-style baseline. The frequency-domain path uses librosa's phase-vocoder-based pitch shifter as an external algorithmic baseline. Neither is promoted as production DSP.
+
+Against an oracle formant-preserved synthetic reference:
+- **PSOLA baseline:** median smoothed spectral-envelope RMSE 21.737 dB; mean formant-peak error 46.279 Hz.
+- **phase-vocoder baseline:** median smoothed spectral-envelope RMSE 18.528 dB; mean formant-peak error 158.022 Hz.
+
+The tradeoff is important: this crude PSOLA path often kept formant peak locations closer while producing larger overall envelope-shape error on many upward/high-F0 cases. The phase-vocoder baseline often reduced global envelope RMSE relative to the crude PSOLA path but moved formant peaks much more. The spread is large across conditions, so neither family wins and neither implementation should be integrated from this evidence.
+
+The same experiment replaced the previous oracle-only envelope assumption with practical estimators. Across /a/, /i/, /u/, F0 values 110/220/350 Hz and clean plus low-noise conditions:
+- **CEP40:** mean 3.471 dB, median 3.760 dB, max 4.736 dB log-envelope RMSE.
+- **LPC20:** mean 4.583 dB, median 4.465 dB, max 5.833 dB.
+- **CEP20:** mean 4.794 dB, median 4.934 dB, max 7.130 dB.
+- **LPC12:** mean 5.820 dB, median 6.130 dB, max 7.207 dB.
+
+In this synthetic corpus, a 40-coefficient cepstral envelope is the strongest of the four tested estimators, including the high-F0 subset. That is not yet a True Envelope implementation and does not prove superiority on real vocals. It does justify carrying a cepstral/True-Envelope-style candidate forward alongside LPC rather than treating LPC as the default.
+
+The experiment also writes four local synthetic WAV references when run: dry source, oracle formant-preserved +7 semitone reference, PSOLA-style +7 render and phase-vocoder +7 render. These are synthetic listening aids only and are not committed as production assets.
+
+Interpretation: gate 4 has now started with executable transformation evidence. The result does not identify a winner; instead it makes the next rewrite target clearer. The next transformation prototype should explicitly combine pitch transformation with independent envelope reconstruction, and phase locking/transient handling must be tested directly rather than inferred from a generic phase-vocoder baseline.
+
 ## Not yet proven
 
 - quality of any Monkey's Ear production pitch detector or resynthesis algorithm;
 - whether the local implementation already contains equivalent/better mechanisms;
 - real-time CPU/latency behavior;
 - F0 tracking robustness on Cody's real voice;
-- practical formant-envelope estimation quality;
+- practical formant-envelope estimation quality on real voice;
 - sibilant/unvoiced segmentation quality;
 - listening preference versus MAutoPitch, Melodyne or other available tools;
 - whether the synthetic contour advantage survives detector errors and real vocal resynthesis;
-- PSOLA versus phase-locked spectral transformation quality on identical target contours.
+- whether a proper production PSOLA or phase-locked spectral implementation materially outperforms these research baselines.
 
 ## Next evidence
 
 The next executable work should connect these pieces instead of adding more isolated prose:
 1. add candidate-level octave continuity/hysteresis and voiced/unvoiced transitions to detector testing;
 2. improve contour transition isolation and fast-band leakage on the randomized corpus;
-3. replace the oracle formant envelope with practical LPC and cepstral/True-Envelope-style estimates;
-4. drive at least two resynthesis families from the exact same target contour — pitch-synchronous/time-domain and phase-locked spectral — then measure transient, envelope and pitch error before controlled vocal listening;
-5. move to the same immutable real vocal and external-tool comparison before promoting any mechanism beyond synthetic evidence.
+3. implement independent envelope reconstruction around both transformation families, carrying LPC20 and cepstral/True-Envelope-style candidates;
+4. replace the generic frequency-domain baseline with an explicit phase-locked spectral prototype and add transient/onset tests;
+5. drive both transforms from the same time-varying target contour rather than constant semitone shifts;
+6. move to the same immutable real vocal and external-tool comparison before promoting any mechanism beyond synthetic evidence.
