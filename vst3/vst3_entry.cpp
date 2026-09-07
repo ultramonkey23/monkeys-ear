@@ -11,15 +11,22 @@
 using namespace Steinberg;
 using namespace Steinberg::Vst;
 
-// Component CID: 4D6F6E6B-6579-7345-6172-496E73747201 ("MonkeysEarInstr1")
+// Instrument Component CID: 4D6F6E6B-6579-7345-6172-496E73747201 ("MonkeysEarInstr1")
 static const TUID kMonkeysEarComponentCID = INLINE_UID(
     0x4D6F6E6B, 0x65797345, 0x6172496E, 0x73747201
+);
+
+// Audio FX Component CID: 4D6F6E6B-6579-7345-6172-467870726F01 ("MonkeysEarFxpro1")
+static const TUID kMonkeysEarFxComponentCID = INLINE_UID(
+    0x4D6F6E6B, 0x65797345, 0x61724678, 0x70726F01
 );
 
 // Controller CID: 4D6F6E6B-6579-7345-6172-4374726C7202 ("MonkeysEarCtrlr2")
 static const TUID kMonkeysEarControllerCID = INLINE_UID(
     0x4D6F6E6B, 0x65797345, 0x61724374, 0x726C7202
 );
+
+static constexpr int kNumParams = 19;
 
 // Helper to copy ASCII string to char16_t array
 static void copy_to_char16(char16* dest, const char* src, size_t max_len) {
@@ -33,46 +40,60 @@ static void copy_to_char16(char16* dest, const char* src, size_t max_len) {
 
 // ── Shared State between Component (DSP) and Controller (UI/Params) ───────
 struct SharedPluginState {
-    std::atomic<float> params[10];
-    std::atomic<bool> dirty[10];
+    std::atomic<float> params[kNumParams];
+    std::atomic<bool> dirty[kNumParams];
 
-    SharedPluginState() {
+    SharedPluginState(bool is_fx = false) {
         params[0].store(0.65f); // Cutoff
         params[1].store(0.25f); // Resonance
         params[2].store(0.30f); // Drive
         params[3].store(0.40f); // Body
         params[4].store(0.25f); // Delay
         params[5].store(0.35f); // Space
-        params[6].store(0.00f); // Mic Blend
+        params[6].store(is_fx ? 1.00f : 0.00f); // Mic Blend
         params[7].store(0.50f); // Character
-        params[8].store(0.85f); // Master Gain
-        params[9].store(0.00f); // Waveform
-        for (int i = 0; i < 10; ++i) dirty[i].store(false);
+        params[8].store(0.85f); // Master Gain (0dB)
+        params[9].store(0.00f); // Waveform (Saw)
+        params[10].store(0.00f); // Osc FM Depth
+        params[11].store(0.50f); // Osc 2 Semi (0 semi)
+        params[12].store(0.00f); // Osc Hard Sync (Off)
+        params[13].store(0.35f); // State Resistance
+        params[14].store(0.40f); // State Repulsion (Negative Gravity)
+        params[15].store(0.30f); // State Phase Coupling
+        params[16].store(0.50f); // State Persistence
+        params[17].store(1.00f); // State Mechanism Enable (1 = Stateful, 0 = Conventional)
+        params[18].store(is_fx ? 1.00f : 0.00f); // Input Route Mode (0: Synth, 0.5: Blend, 1.0: Ext Audio)
+        for (int i = 0; i < kNumParams; ++i) dirty[i].store(false);
     }
 };
 
 static std::mutex g_state_mutex;
 static std::shared_ptr<SharedPluginState> g_last_created_state = nullptr;
 
-// ── VST3 Component (Audio Processor & Synth Engine) ───────────────────────
+// ── VST3 Component (Shared DSP Engine for Instrument & FX) ────────────────
 class MonkeysEarComponent : public IComponent,
                             public IAudioProcessor,
                             public IConnectionPoint {
 public:
-    MonkeysEarComponent()
-        : ref_count_(1), active_(false), processing_(false) {
-        state_ = std::make_shared<SharedPluginState>();
+    explicit MonkeysEarComponent(bool is_fx = false)
+        : ref_count_(1), is_fx_(is_fx), active_(false), processing_(false) {
+        state_ = std::make_shared<SharedPluginState>(is_fx_);
         {
             std::lock_guard<std::mutex> lock(g_state_mutex);
             g_last_created_state = state_;
         }
         engine_.init(48000.0f, 512);
-        engine_.load_preset(monkeys_ear::PresetManager::create_factory_lead());
+        if (is_fx_) {
+            engine_.load_preset(monkeys_ear::PresetManager::create_factory_vocal_resonator());
+        } else {
+            engine_.load_preset(monkeys_ear::PresetManager::create_factory_lead());
+        }
     }
 
     virtual ~MonkeysEarComponent() = default;
 
     std::shared_ptr<SharedPluginState> get_state() const { return state_; }
+    bool is_fx() const { return is_fx_; }
 
     // ── FUnknown ─────────────────────────────────────────────────────────────
     tresult SMTG_STDCALL queryInterface(const TUID _iid, void** obj) override {
@@ -128,8 +149,12 @@ public:
 
     int32 SMTG_STDCALL getBusCount(MediaType type, BusDirection dir) override {
         if (type == kAudio) {
-            // Pure Virtual Instrument: 0 Audio In, 1 Stereo Audio Out
-            return (dir == kOutput) ? 1 : 0;
+            if (dir == kOutput) return 1; // 1 Main Stereo Out
+            if (dir == kInput) {
+                // Audio FX: 1 Main Stereo Audio In
+                // Pure VSTi: 0 Main Audio In (host categorizes as !!!VSTi)
+                return is_fx_ ? 1 : 0;
+            }
         } else if (type == kEvent) {
             return (dir == kInput) ? 1 : 0; // 1 MIDI In
         }
@@ -147,6 +172,10 @@ public:
         if (type == kAudio && dir == kOutput) {
             bus.channelCount = 2; // Stereo
             copy_to_char16(bus.name, "Main Out", 128);
+            return kResultOk;
+        } else if (type == kAudio && dir == kInput && is_fx_) {
+            bus.channelCount = 2; // Stereo Input for FX processing
+            copy_to_char16(bus.name, "Main In", 128);
             return kResultOk;
         } else if (type == kEvent && dir == kInput) {
             bus.channelCount = 16; // 16 MIDI Channels
@@ -183,13 +212,25 @@ public:
     // ── IAudioProcessor ──────────────────────────────────────────────────────
     tresult SMTG_STDCALL setBusArrangements(SpeakerArrangement* inputs, int32 numIns, SpeakerArrangement* outputs, int32 numOuts) override {
         if (numOuts > 0 && outputs[0] != SpeakerArr::kStereo) return kResultFalse;
-        if (numIns > 0 && inputs[0] != SpeakerArr::kEmpty) return kResultFalse;
+        if (is_fx_) {
+            if (numIns > 0 && inputs[0] != SpeakerArr::kStereo && inputs[0] != SpeakerArr::kMono) {
+                return kResultFalse;
+            }
+        } else {
+            if (numIns > 0 && inputs[0] != SpeakerArr::kEmpty) {
+                return kResultFalse;
+            }
+        }
         return kResultOk;
     }
 
     tresult SMTG_STDCALL getBusArrangement(BusDirection dir, int32 index, SpeakerArrangement& arr) override {
         if (index != 0) return kInvalidArgument;
         if (dir == kOutput) {
+            arr = SpeakerArr::kStereo;
+            return kResultOk;
+        }
+        if (dir == kInput && is_fx_) {
             arr = SpeakerArr::kStereo;
             return kResultOk;
         }
@@ -229,7 +270,7 @@ public:
                     ParamValue val = 0.0;
                     if (queue->getPoint(queue->getPointCount() - 1, sampleOffset, val) == kResultOk) {
                         apply_param_to_engine(id, static_cast<float>(val));
-                        if (id < 10 && state_) {
+                        if (id < kNumParams && state_) {
                             state_->params[id].store(static_cast<float>(val));
                             state_->dirty[id].store(false);
                         }
@@ -240,7 +281,7 @@ public:
 
         // 2. Apply UI / Controller Changes from shared state
         if (state_) {
-            for (int i = 0; i < 10; ++i) {
+            for (int i = 0; i < kNumParams; ++i) {
                 if (state_->dirty[i].exchange(false)) {
                     apply_param_to_engine(static_cast<ParamID>(i), state_->params[i].load());
                 }
@@ -266,12 +307,21 @@ public:
             }
         }
 
-        // 4. Synthesize Audio to Stereo Output
+        // 4. Resolve Input Audio Buffers (Causal routing of real external/recorded audio)
+        const float* in_l = nullptr;
+        const float* in_r = nullptr;
+        if (data.numInputs > 0 && data.inputs[0].channelBuffers32) {
+            if (data.inputs[0].numChannels > 0) in_l = data.inputs[0].channelBuffers32[0];
+            if (data.inputs[0].numChannels > 1) in_r = data.inputs[0].channelBuffers32[1];
+            else in_r = in_l;
+        }
+
+        // 5. Synthesize & Process through the Shared Engine
         if (data.numOutputs > 0 && data.outputs[0].numChannels >= 2) {
             float* out_l = data.outputs[0].channelBuffers32[0];
             float* out_r = data.outputs[0].channelBuffers32[1];
 
-            engine_.process_block(nullptr, nullptr, out_l, out_r, static_cast<size_t>(data.numSamples));
+            engine_.process_block(in_l, in_r, out_l, out_r, static_cast<size_t>(data.numSamples));
         }
 
         return kResultOk;
@@ -302,10 +352,31 @@ private:
         } else if (id == 9) {
             auto wf = static_cast<monkeys_ear::Waveform>(static_cast<int>(value * 3.99f));
             engine_.set_waveform(wf);
+        } else if (id == 10) {
+            engine_.set_osc_fm(value);
+        } else if (id == 11) {
+            int semi = static_cast<int>(std::round((value - 0.5f) * 48.0f));
+            engine_.set_osc2_semi(semi);
+        } else if (id == 12) {
+            engine_.set_osc_hard_sync(value >= 0.5f);
+        } else if (id == 13) {
+            engine_.set_state_resistance(value);
+        } else if (id == 14) {
+            engine_.set_state_repulsion(value);
+        } else if (id == 15) {
+            engine_.set_state_coupling(value);
+        } else if (id == 16) {
+            engine_.set_state_persistence(value);
+        } else if (id == 17) {
+            engine_.set_state_enabled(value >= 0.5f);
+        } else if (id == 18) {
+            int mode = static_cast<int>(value * 2.99f);
+            engine_.set_input_route_mode(mode);
         }
     }
 
     std::atomic<uint32> ref_count_;
+    bool is_fx_;
     bool active_;
     bool processing_;
     std::shared_ptr<SharedPluginState> state_;
@@ -387,11 +458,11 @@ public:
     }
 
     int32 SMTG_STDCALL getParameterCount() override {
-        return 10; // 8 Macros + Master Gain + Waveform
+        return kNumParams;
     }
 
     tresult SMTG_STDCALL getParameterInfo(int32 paramIndex, ParameterInfo& info) override {
-        if (paramIndex < 0 || paramIndex >= 10) return kInvalidArgument;
+        if (paramIndex < 0 || paramIndex >= kNumParams) return kInvalidArgument;
 
         info.id = static_cast<ParamID>(paramIndex);
         info.stepCount = 0; // Continuous
@@ -399,7 +470,7 @@ public:
         info.flags = kCanAutomate;
         info.defaultNormalizedValue = state_ ? state_->params[paramIndex].load() : 0.5;
 
-        static const char* titles[10] = {
+        static const char* titles[kNumParams] = {
             "Macro 1: Brightness (Cutoff)",
             "Macro 2: Bite (Resonance)",
             "Macro 3: Heat (Tube Drive)",
@@ -409,13 +480,26 @@ public:
             "Macro 7: Mic Blend (Live Input)",
             "Macro 8: Character (Cathode Sag)",
             "Master Gain",
-            "Synth Waveform"
+            "Synth Waveform",
+            "Osc: Cross-FM Depth",
+            "Osc 2: Tuning (Semitones)",
+            "Osc: Hard Sync Mode",
+            "State: Resistance (rho)",
+            "State: Repulsion (Neg-Gravity)",
+            "State: Phase Resonance Coupling",
+            "State: Macro Persistence",
+            "State: Mechanism Mode (A/B)",
+            "Audio Input Route Mode"
         };
-        static const char* shortTitles[10] = {
-            "Bright", "Bite", "Heat", "Body", "Echo", "Space", "MicMix", "Char", "Gain", "Wave"
+        static const char* shortTitles[kNumParams] = {
+            "Bright", "Bite", "Heat", "Body", "Echo", "Space", "MicMix", "Char",
+            "Gain", "Wave", "CrossFM", "Osc2Semi", "Sync", "Resist", "Repel", "Couple",
+            "Persist", "StateAB", "InRoute"
         };
-        static const char* units[10] = {
-            "Hz", "%", "%", "%", "%", "%", "%", "%", "dB", "type"
+        static const char* units[kNumParams] = {
+            "Hz", "%", "%", "%", "%", "%", "%", "%",
+            "dB", "type", "%", "semi", "mode", "%", "%", "%",
+            "%", "A/B", "mode"
         };
 
         copy_to_char16(info.title, titles[paramIndex], 128);
@@ -435,8 +519,19 @@ public:
             snprintf(buf, sizeof(buf), "%.1f dB", db);
         } else if (id == 9) {
             int wf = static_cast<int>(valueNormalized * 3.99);
-            const char* names[] = {"Sawtooth", "Square", "Triangle", "Sine"};
+            const char* names[] = {"Sawtooth", "Pulse", "Triangle", "Sine"};
             snprintf(buf, sizeof(buf), "%s", (wf >= 0 && wf <= 3) ? names[wf] : "Sawtooth");
+        } else if (id == 11) {
+            int semi = static_cast<int>(std::round((valueNormalized - 0.5) * 48.0));
+            snprintf(buf, sizeof(buf), "%+d st", semi);
+        } else if (id == 12) {
+            snprintf(buf, sizeof(buf), "%s", (valueNormalized >= 0.5) ? "Hard Sync On" : "Free Run");
+        } else if (id == 17) {
+            snprintf(buf, sizeof(buf), "%s", (valueNormalized >= 0.5) ? "ChronoState ON" : "Conventional Baseline");
+        } else if (id == 18) {
+            int m = static_cast<int>(valueNormalized * 2.99);
+            const char* modes[] = {"Synth Only", "Hybrid Blend", "External Audio"};
+            snprintf(buf, sizeof(buf), "%s", (m >= 0 && m <= 2) ? modes[m] : "Synth");
         } else {
             snprintf(buf, sizeof(buf), "%.1f %%", valueNormalized * 100.0);
         }
@@ -458,14 +553,14 @@ public:
     }
 
     ParamValue SMTG_STDCALL getParamNormalized(ParamID id) override {
-        if (id < 10 && state_) {
+        if (id < kNumParams && state_) {
             return state_->params[id].load();
         }
         return 0.0;
     }
 
     tresult SMTG_STDCALL setParamNormalized(ParamID id, ParamValue value) override {
-        if (id < 10 && state_) {
+        if (id < kNumParams && state_) {
             state_->params[id].store(static_cast<float>(value));
             state_->dirty[id].store(true);
             return kResultOk;
@@ -555,7 +650,10 @@ public:
     }
 
     int32 SMTG_STDCALL countClasses() override {
-        return 2; // Class 0: Instrument Component, Class 1: Edit Controller
+        // Class 0: Instrument Component (VST3i: 0 audio in, 2 audio out, MIDI in)
+        // Class 1: Audio FX Processor (VST3: 2 audio in, 2 audio out, MIDI in)
+        // Class 2: Edit Controller (All 19 parameters)
+        return 3;
     }
 
     tresult SMTG_STDCALL getClassInfo(int32 index, PClassInfo* info) override {
@@ -567,6 +665,12 @@ public:
             strncpy(info->name, "Monkey's Ear", sizeof(info->name) - 1);
             return kResultOk;
         } else if (index == 1) {
+            memcpy(info->cid, kMonkeysEarFxComponentCID, sizeof(TUID));
+            info->cardinality = 0x7FFFFFFF;
+            strncpy(info->category, "Audio Module Class", sizeof(info->category) - 1);
+            strncpy(info->name, "Monkey's Ear FX", sizeof(info->name) - 1);
+            return kResultOk;
+        } else if (index == 2) {
             memcpy(info->cid, kMonkeysEarControllerCID, sizeof(TUID));
             info->cardinality = 0x7FFFFFFF;
             strncpy(info->category, "Component Controller Class", sizeof(info->category) - 1);
@@ -586,10 +690,21 @@ public:
             info->classFlags = 0;
             strncpy(info->subCategories, "Instrument|Synth", sizeof(info->subCategories) - 1);
             strncpy(info->vendor, "Ultramonkeydog Studios", sizeof(info->vendor) - 1);
-            strncpy(info->version, "1.0.0", sizeof(info->version) - 1);
+            strncpy(info->version, "1.1.0", sizeof(info->version) - 1);
             strncpy(info->sdkVersion, "VST 3.7.0", sizeof(info->sdkVersion) - 1);
             return kResultOk;
         } else if (index == 1) {
+            memcpy(info->cid, kMonkeysEarFxComponentCID, sizeof(TUID));
+            info->cardinality = 0x7FFFFFFF;
+            strncpy(info->category, "Audio Module Class", sizeof(info->category) - 1);
+            strncpy(info->name, "Monkey's Ear FX", sizeof(info->name) - 1);
+            info->classFlags = 0;
+            strncpy(info->subCategories, "Fx|Filter|Synth|Delay", sizeof(info->subCategories) - 1);
+            strncpy(info->vendor, "Ultramonkeydog Studios", sizeof(info->vendor) - 1);
+            strncpy(info->version, "1.1.0", sizeof(info->version) - 1);
+            strncpy(info->sdkVersion, "VST 3.7.0", sizeof(info->sdkVersion) - 1);
+            return kResultOk;
+        } else if (index == 2) {
             memcpy(info->cid, kMonkeysEarControllerCID, sizeof(TUID));
             info->cardinality = 0x7FFFFFFF;
             strncpy(info->category, "Component Controller Class", sizeof(info->category) - 1);
@@ -597,7 +712,7 @@ public:
             info->classFlags = 0;
             info->subCategories[0] = 0;
             strncpy(info->vendor, "Ultramonkeydog Studios", sizeof(info->vendor) - 1);
-            strncpy(info->version, "1.0.0", sizeof(info->version) - 1);
+            strncpy(info->version, "1.1.0", sizeof(info->version) - 1);
             strncpy(info->sdkVersion, "VST 3.7.0", sizeof(info->sdkVersion) - 1);
             return kResultOk;
         }
@@ -606,7 +721,13 @@ public:
 
     tresult SMTG_STDCALL createInstance(const TUID cid, const TUID _iid, void** obj) override {
         if (memcmp(cid, kMonkeysEarComponentCID, sizeof(TUID)) == 0) {
-            auto* comp = new MonkeysEarComponent();
+            auto* comp = new MonkeysEarComponent(false); // Instrument
+            tresult res = comp->queryInterface(_iid, obj);
+            comp->release();
+            return res;
+        }
+        if (memcmp(cid, kMonkeysEarFxComponentCID, sizeof(TUID)) == 0) {
+            auto* comp = new MonkeysEarComponent(true); // Audio FX Processor
             tresult res = comp->queryInterface(_iid, obj);
             comp->release();
             return res;

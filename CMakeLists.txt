@@ -24,6 +24,8 @@ add_library(monkeys_ear_core STATIC
     src/safety_limiter.cpp
     src/latency_meter.cpp
     src/preset.cpp
+    src/chrono_state.cpp
+    src/lfo.cpp
     src/engine.cpp
 )
 
@@ -64,3 +66,13 @@ set_target_properties(monkeys_ear PROPERTIES
     SUFFIX ".vst3"
     PREFIX ""
 )
+
+# VST3 Host Verification Probe
+if(WIN32)
+    add_executable(monkeys_ear_host_probe
+        test/test_vst3_host_probe.cpp
+    )
+    target_include_directories(monkeys_ear_host_probe PRIVATE
+        ${CMAKE_CURRENT_SOURCE_DIR}/vst3
+    )
+endif()

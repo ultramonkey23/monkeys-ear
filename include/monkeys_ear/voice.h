@@ -6,14 +6,14 @@
 namespace monkeys_ear {
 
 enum class Waveform {
-    Saw,
+    Saw = 0,
     Pulse,
     Triangle,
     Sine
 };
 
 enum class EnvStage {
-    Idle,
+    Idle = 0,
     Attack,
     Decay,
     Sustain,
@@ -57,7 +57,11 @@ public:
     void set_pulse_width(float pw);
     void set_waveform(Waveform wf);
     void reset_phase();
+    void sync_reset();
+    bool has_wrapped() const { return wrapped_; }
+
     float process();
+    float process_with_pm(float phase_mod);
 
 private:
     float sample_rate_;
@@ -66,6 +70,7 @@ private:
     float phase_increment_;
     float pulse_width_;
     Waveform waveform_;
+    bool wrapped_;
 
     float poly_blep(float t, float dt) const;
     void update_increment();
@@ -82,6 +87,9 @@ public:
     void set_sub_mix(float sub_mix);
     void set_noise_mix(float noise_mix);
     void set_detune(float detune_cents);
+    void set_fm_amount(float fm);
+    void set_osc2_semi(int semi);
+    void set_hard_sync(bool sync);
     void set_env_parameters(float a, float d, float s, float r);
     void set_filter_env_parameters(float a, float d, float s, float r);
 
@@ -97,6 +105,9 @@ private:
     float base_frequency_;
     float pitch_bend_semitones_;
     float detune_cents_;
+    int osc2_semi_;
+    float fm_amount_;
+    bool hard_sync_;
     float sub_mix_;
     float noise_mix_;
     float age_;
@@ -126,6 +137,9 @@ public:
     void set_sub_mix(float sub_mix);
     void set_noise_mix(float noise_mix);
     void set_detune(float detune_cents);
+    void set_fm_amount(float fm);
+    void set_osc2_semi(int semi);
+    void set_hard_sync(bool sync);
     void set_amp_envelope(float a, float d, float s, float r);
     void set_filter_envelope(float a, float d, float s, float r);
 
@@ -136,6 +150,9 @@ private:
     float sample_rate_;
     std::array<SynthVoice, MAX_VOICES> voices_;
     float pitch_bend_;
+    float fm_amount_;
+    int osc2_semi_;
+    bool hard_sync_;
 
     int find_free_voice();
 };

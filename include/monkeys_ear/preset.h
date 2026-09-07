@@ -35,6 +35,19 @@ struct PresetData {
     float filter_release;
     float filter_env_amount;
 
+    // Advanced Sound Construction & Cody's Mathematical State
+    float osc_fm_amount;       // 0.0 to 1.0 (Phase Modulation cross-depth)
+    int osc2_semi;             // -24 to +24 semitones
+    bool osc_hard_sync;        // Sync Osc1 to Osc2
+    float state_resistance;    // 0.0 to 1.0 (rho: history & strain opposing force)
+    float state_repulsion;     // 0.0 to 1.0 (k_repel: negative-gravity soft-core repulsion)
+    float state_coupling;      // 0.0 to 1.0 (signed phase-resonance coupling)
+    float state_persistence;   // 0.0 to 1.0 (multiscale macro memory ratio)
+    bool state_enabled;        // true = stateful body active; false = conventional baseline
+    float lfo1_rate_hz;        // 0.05 to 30.0 Hz
+    float lfo1_depth;          // 0.0 to 1.0
+    int input_route_mode;      // 0 = Synth only, 1 = Blend, 2 = External audio direct
+
     PresetData();
     std::string serialize() const;
     bool deserialize(const std::string& data);
@@ -53,7 +66,9 @@ public:
 
     static PresetData create_factory_lead();
     static PresetData create_factory_bass();
+    static PresetData create_factory_stateful_bell();
     static PresetData create_factory_vocal_resonator();
+    static PresetData create_factory_guitar_processor();
 
 private:
     PresetData current_;

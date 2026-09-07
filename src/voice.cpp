@@ -1,5 +1,6 @@
 #include "monkeys_ear/voice.h"
 #include <cmath>
+#include <algorithm>
 
 namespace monkeys_ear {
 
@@ -99,7 +100,8 @@ PolyBLEPOscillator::PolyBLEPOscillator()
       phase_(0.0f),
       phase_increment_(0.0f),
       pulse_width_(0.5f),
-      waveform_(Waveform::Saw) {
+      waveform_(Waveform::Saw),
+      wrapped_(false) {
     update_increment();
 }
 
@@ -123,6 +125,11 @@ void PolyBLEPOscillator::set_waveform(Waveform wf) {
 
 void PolyBLEPOscillator::reset_phase() {
     phase_ = 0.0f;
+    wrapped_ = false;
+}
+
+void PolyBLEPOscillator::sync_reset() {
+    phase_ = 0.0f;
 }
 
 void PolyBLEPOscillator::update_increment() {
@@ -141,40 +148,49 @@ float PolyBLEPOscillator::poly_blep(float t, float dt) const {
 }
 
 float PolyBLEPOscillator::process() {
-    float out = 0.0f;
-    float dt = phase_increment_;
+    return process_with_pm(0.0f);
+}
 
+float PolyBLEPOscillator::process_with_pm(float phase_mod) {
+    float dt = phase_increment_;
+    float eff_phase = phase_ + phase_mod;
+    eff_phase = std::fmod(eff_phase, 1.0f);
+    if (eff_phase < 0.0f) eff_phase += 1.0f;
+
+    float out = 0.0f;
     switch (waveform_) {
         case Waveform::Sine:
-            out = std::sin(phase_ * TWO_PI);
+            out = std::sin(eff_phase * TWO_PI);
             break;
 
         case Waveform::Saw: {
-            out = (2.0f * phase_) - 1.0f;
-            out -= poly_blep(phase_, dt);
+            out = (2.0f * eff_phase) - 1.0f;
+            out -= poly_blep(eff_phase, dt);
             break;
         }
 
         case Waveform::Pulse: {
-            out = (phase_ < pulse_width_) ? 1.0f : -1.0f;
-            out += poly_blep(phase_, dt);
-            float p2 = phase_ - pulse_width_;
+            out = (eff_phase < pulse_width_) ? 1.0f : -1.0f;
+            out += poly_blep(eff_phase, dt);
+            float p2 = eff_phase - pulse_width_;
             if (p2 < 0.0f) p2 += 1.0f;
             out -= poly_blep(p2, dt);
             break;
         }
 
         case Waveform::Triangle: {
-            float saw = (2.0f * phase_) - 1.0f - poly_blep(phase_, dt);
-            // Leaky integration of square or polyblep saw derivation
+            float saw = (2.0f * eff_phase) - 1.0f - poly_blep(eff_phase, dt);
             out = 2.0f * std::abs(saw) - 1.0f;
             break;
         }
     }
 
     phase_ += phase_increment_;
-    while (phase_ >= 1.0f) {
+    if (phase_ >= 1.0f) {
         phase_ -= 1.0f;
+        wrapped_ = true;
+    } else {
+        wrapped_ = false;
     }
 
     return sanitize(out);
@@ -188,6 +204,9 @@ SynthVoice::SynthVoice()
       base_frequency_(440.0f),
       pitch_bend_semitones_(0.0f),
       detune_cents_(7.0f),
+      osc2_semi_(0),
+      fm_amount_(0.0f),
+      hard_sync_(false),
       sub_mix_(0.25f),
       noise_mix_(0.02f),
       age_(0.0f),
@@ -249,6 +268,19 @@ void SynthVoice::set_detune(float detune_cents) {
     update_frequencies();
 }
 
+void SynthVoice::set_fm_amount(float fm) {
+    fm_amount_ = clamp(fm, 0.0f, 1.0f);
+}
+
+void SynthVoice::set_osc2_semi(int semi) {
+    osc2_semi_ = clamp(semi, -24, 24);
+    update_frequencies();
+}
+
+void SynthVoice::set_hard_sync(bool sync) {
+    hard_sync_ = sync;
+}
+
 void SynthVoice::set_env_parameters(float a, float d, float s, float r) {
     amp_env_.set_parameters(a, d, s, r);
 }
@@ -260,8 +292,8 @@ void SynthVoice::set_filter_env_parameters(float a, float d, float s, float r) {
 void SynthVoice::update_frequencies() {
     float bend_factor = std::pow(2.0f, pitch_bend_semitones_ / 12.0f);
     float f1 = base_frequency_ * bend_factor;
-    float detune_factor = std::pow(2.0f, detune_cents_ / 1200.0f);
-    float f2 = f1 * detune_factor;
+    float f2_ratio = std::pow(2.0f, (static_cast<float>(osc2_semi_) + detune_cents_ / 100.0f) / 12.0f);
+    float f2 = f1 * f2_ratio;
     float f_sub = f1 * 0.5f; // 1 octave down
 
     osc1_.set_frequency(f1);
@@ -286,12 +318,26 @@ float SynthVoice::process(float& filter_env_out) {
 
     age_ += 1.0f / sample_rate_;
 
-    float s1 = osc1_.process();
+    // Modulator Oscillator (Osc 2)
     float s2 = osc2_.process();
+
+    // Hard sync: if enabled and master oscillator wrapped this sample, reset slave
+    if (hard_sync_ && osc2_.has_wrapped()) {
+        osc1_.sync_reset();
+    }
+
+    // Carrier Oscillator (Osc 1) with Cross-FM Phase Modulation
+    float pm_input = (fm_amount_ > 0.001f) ? (s2 * fm_amount_ * 3.5f) : 0.0f;
+    float s1 = osc1_.process_with_pm(pm_input);
+
     float s_sub = sub_osc_.process();
     float noise = next_noise();
 
-    float raw_voice = 0.5f * (s1 + s2) + sub_mix_ * s_sub + noise_mix_ * noise;
+    // Sum interacting sources
+    float carrier_level = 0.55f;
+    float mod_level = 0.45f * (1.0f - fm_amount_ * 0.35f);
+    float raw_voice = carrier_level * s1 + mod_level * s2 + sub_mix_ * s_sub + noise_mix_ * noise;
+
     float amp = amp_env_.process();
     filter_env_out = filter_env_.process();
 
@@ -301,7 +347,10 @@ float SynthVoice::process(float& filter_env_out) {
 // ── VoiceManager Implementation ────────────────────────────────────────
 VoiceManager::VoiceManager()
     : sample_rate_(48000.0f),
-      pitch_bend_(0.0f) {
+      pitch_bend_(0.0f),
+      fm_amount_(0.0f),
+      osc2_semi_(0),
+      hard_sync_(false) {
 }
 
 void VoiceManager::set_sample_rate(float sr) {
@@ -312,13 +361,11 @@ void VoiceManager::set_sample_rate(float sr) {
 }
 
 int VoiceManager::find_free_voice() {
-    // 1. Look for an idle voice
     for (size_t i = 0; i < MAX_VOICES; ++i) {
         if (!voices_[i].is_active()) {
             return static_cast<int>(i);
         }
     }
-    // 2. Look for voice stealing: oldest active voice
     int oldest_idx = 0;
     float max_age = -1.0f;
     for (size_t i = 0; i < MAX_VOICES; ++i) {
@@ -335,6 +382,9 @@ void VoiceManager::note_on(int note, float velocity) {
     if (idx >= 0 && idx < static_cast<int>(MAX_VOICES)) {
         voices_[idx].note_on(note, velocity);
         voices_[idx].set_pitch_bend(pitch_bend_);
+        voices_[idx].set_fm_amount(fm_amount_);
+        voices_[idx].set_osc2_semi(osc2_semi_);
+        voices_[idx].set_hard_sync(hard_sync_);
     }
 }
 
@@ -383,6 +433,27 @@ void VoiceManager::set_detune(float detune_cents) {
     }
 }
 
+void VoiceManager::set_fm_amount(float fm) {
+    fm_amount_ = clamp(fm, 0.0f, 1.0f);
+    for (auto& v : voices_) {
+        v.set_fm_amount(fm_amount_);
+    }
+}
+
+void VoiceManager::set_osc2_semi(int semi) {
+    osc2_semi_ = clamp(semi, -24, 24);
+    for (auto& v : voices_) {
+        v.set_osc2_semi(osc2_semi_);
+    }
+}
+
+void VoiceManager::set_hard_sync(bool sync) {
+    hard_sync_ = sync;
+    for (auto& v : voices_) {
+        v.set_hard_sync(hard_sync_);
+    }
+}
+
 void VoiceManager::set_amp_envelope(float a, float d, float s, float r) {
     for (auto& v : voices_) {
         v.set_env_parameters(a, d, s, r);
@@ -396,29 +467,28 @@ void VoiceManager::set_filter_envelope(float a, float d, float s, float r) {
 }
 
 float VoiceManager::process(float& out_filter_env) {
-    float mix = 0.0f;
-    float sum_filter_env = 0.0f;
+    float sum = 0.0f;
+    float env_sum = 0.0f;
     size_t active_count = 0;
 
     for (auto& v : voices_) {
         if (v.is_active()) {
             float f_env = 0.0f;
-            mix += v.process(f_env);
-            sum_filter_env += f_env;
+            sum += v.process(f_env);
+            env_sum += f_env;
             active_count++;
         }
     }
 
     if (active_count > 0) {
-        out_filter_env = sum_filter_env / static_cast<float>(active_count);
-        // Gain staging across polyphony
-        float scaling = 1.0f / std::sqrt(std::max(1.0f, static_cast<float>(active_count)));
-        mix *= scaling;
-    } else {
-        out_filter_env = 0.0f;
+        out_filter_env = env_sum / static_cast<float>(active_count);
+        // Polyphonic scaling to prevent harsh digital clipping
+        float headroom_scale = 1.0f / std::sqrt(static_cast<float>(active_count));
+        return sanitize(sum * headroom_scale);
     }
 
-    return sanitize(mix);
+    out_filter_env = 0.0f;
+    return 0.0f;
 }
 
 size_t VoiceManager::active_voice_count() const {

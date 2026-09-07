@@ -16,6 +16,8 @@ void MonkeysEarEngine::init(float sample_rate, size_t max_block_size) {
 
     voice_manager_.set_sample_rate(sample_rate_);
     audio_input_.set_sample_rate(sample_rate_);
+    chrono_body_.set_sample_rate(sample_rate_);
+    lfo1_.set_sample_rate(sample_rate_);
     filter_.set_sample_rate(sample_rate_);
     drive_tube_.set_sample_rate(sample_rate_);
     resonator_cab_.set_sample_rate(sample_rate_);
@@ -30,6 +32,8 @@ void MonkeysEarEngine::init(float sample_rate, size_t max_block_size) {
 void MonkeysEarEngine::reset() {
     voice_manager_.all_notes_off();
     audio_input_.reset();
+    chrono_body_.reset();
+    lfo1_.reset_phase();
     filter_.reset();
     drive_tube_.reset();
     resonator_cab_.reset();
@@ -86,12 +90,28 @@ void MonkeysEarEngine::apply_macros() {
     // Master volume from preset
     master_volume_ = std::pow(10.0f, p.master_gain_db / 20.0f) * 0.85f;
 
-    // Envelopes and waveforms
+    // Advanced Sound Construction: Oscillators
     voice_manager_.set_waveform(static_cast<Waveform>(p.synth_waveform));
     voice_manager_.set_sub_mix(p.sub_mix);
     voice_manager_.set_noise_mix(p.noise_mix);
+    voice_manager_.set_fm_amount(p.osc_fm_amount);
+    voice_manager_.set_osc2_semi(p.osc2_semi);
+    voice_manager_.set_hard_sync(p.osc_hard_sync);
     voice_manager_.set_amp_envelope(p.amp_attack, p.amp_decay, p.amp_sustain, p.amp_release);
     voice_manager_.set_filter_envelope(p.filter_attack, p.filter_decay, p.filter_sustain, p.filter_release);
+
+    // Cody's Chrono-Stateful Resonant Body
+    chrono_body_.set_resistance(p.state_resistance);
+    chrono_body_.set_repulsion(p.state_repulsion);
+    chrono_body_.set_coupling(p.state_coupling);
+    chrono_body_.set_memory_persistence(p.state_persistence);
+    chrono_body_.set_enabled(p.state_enabled);
+    chrono_body_.set_frequency(cutoff_hz * 0.75f); // Modal body tuned relative to cutoff
+    chrono_body_.set_mix(0.60f);
+
+    // Modulation
+    lfo1_.set_rate_hz(p.lfo1_rate_hz);
+    lfo1_.set_depth(p.lfo1_depth);
 }
 
 void MonkeysEarEngine::set_macro(MacroId id, float value) {
@@ -112,6 +132,84 @@ const PresetData& MonkeysEarEngine::get_current_preset() const {
     return preset_manager_.get_current();
 }
 
+void MonkeysEarEngine::set_master_gain_db(float db) {
+    auto p = preset_manager_.get_current();
+    p.master_gain_db = db;
+    load_preset(p);
+}
+
+void MonkeysEarEngine::set_waveform(Waveform wf) {
+    auto p = preset_manager_.get_current();
+    p.synth_waveform = static_cast<int>(wf);
+    load_preset(p);
+}
+
+void MonkeysEarEngine::set_osc_fm(float fm) {
+    auto p = preset_manager_.get_current();
+    p.osc_fm_amount = fm;
+    load_preset(p);
+}
+
+void MonkeysEarEngine::set_osc2_semi(int semi) {
+    auto p = preset_manager_.get_current();
+    p.osc2_semi = semi;
+    load_preset(p);
+}
+
+void MonkeysEarEngine::set_osc_hard_sync(bool sync) {
+    auto p = preset_manager_.get_current();
+    p.osc_hard_sync = sync;
+    load_preset(p);
+}
+
+void MonkeysEarEngine::set_state_resistance(float r) {
+    auto p = preset_manager_.get_current();
+    p.state_resistance = r;
+    load_preset(p);
+}
+
+void MonkeysEarEngine::set_state_repulsion(float k) {
+    auto p = preset_manager_.get_current();
+    p.state_repulsion = k;
+    load_preset(p);
+}
+
+void MonkeysEarEngine::set_state_coupling(float kappa) {
+    auto p = preset_manager_.get_current();
+    p.state_coupling = kappa;
+    load_preset(p);
+}
+
+void MonkeysEarEngine::set_state_persistence(float tau) {
+    auto p = preset_manager_.get_current();
+    p.state_persistence = tau;
+    load_preset(p);
+}
+
+void MonkeysEarEngine::set_state_enabled(bool en) {
+    auto p = preset_manager_.get_current();
+    p.state_enabled = en;
+    load_preset(p);
+}
+
+void MonkeysEarEngine::set_lfo1_rate(float hz) {
+    auto p = preset_manager_.get_current();
+    p.lfo1_rate_hz = hz;
+    load_preset(p);
+}
+
+void MonkeysEarEngine::set_lfo1_depth(float depth) {
+    auto p = preset_manager_.get_current();
+    p.lfo1_depth = depth;
+    load_preset(p);
+}
+
+void MonkeysEarEngine::set_input_route_mode(int mode) {
+    auto p = preset_manager_.get_current();
+    p.input_route_mode = mode;
+    load_preset(p);
+}
+
 void MonkeysEarEngine::handle_midi_note_on(int note, float velocity) {
     voice_manager_.note_on(note, velocity);
 }
@@ -125,12 +223,6 @@ void MonkeysEarEngine::handle_midi_pitch_bend(float semitones) {
 }
 
 void MonkeysEarEngine::handle_midi_cc(int cc_number, float value_0_to_1) {
-    // Map standard CCs to macros:
-    // CC 1 (Mod Wheel) -> Macro 1 (Cutoff Brightness)
-    // CC 74 (Brightness/Filter) -> Macro 1 (Cutoff)
-    // CC 71 (Resonance) -> Macro 2 (Resonance)
-    // CC 91 (Reverb) -> Macro 6 (Space)
-    // CC 93 (Chorus/Delay) -> Macro 5 (Delay)
     switch (cc_number) {
         case 1:  set_macro(MACRO_CUTOFF, value_0_to_1); break;
         case 74: set_macro(MACRO_CUTOFF, value_0_to_1); break;
@@ -152,7 +244,6 @@ void MonkeysEarEngine::process_block(
     float* output_r,
     size_t num_samples
 ) {
-    // Start real-time hardware block timer
     latency_meter_.set_block_size(num_samples);
     latency_meter_.start_block();
 
@@ -160,37 +251,58 @@ void MonkeysEarEngine::process_block(
     float env_amt = p.filter_env_amount;
 
     for (size_t i = 0; i < num_samples; ++i) {
-        // 1. MIDI / SOURCE
+        // 0. Modulation (LFO)
+        float lfo_val = lfo1_.process();
+
+        // 1. Synth Voices Generation
         float filter_env = 0.0f;
         float synth_sample = voice_manager_.process(filter_env);
 
-        // 2. LIVE AUDIO / MIC INPUT BLEND
-        float mic_sample = 0.0f;
+        // 2. Live External Audio Ingest & Preamp/Conditioning
+        float ext_sample = 0.0f;
         if (input_l != nullptr) {
-            mic_sample = (input_r != nullptr) ? 0.5f * (input_l[i] + input_r[i]) : input_l[i];
+            ext_sample = (input_r != nullptr) ? 0.5f * (input_l[i] + input_r[i]) : input_l[i];
         }
-        float pre_filter_source = audio_input_.process_sample(mic_sample, synth_sample);
+        float blended_ext = audio_input_.process_sample(ext_sample, synth_sample);
 
-        // 3. FILTER
-        float filtered = filter_.process(pre_filter_source, filter_env, env_amt);
+        // 3. Routing Mode Resolution
+        float exciter = 0.0f;
+        if (p.input_route_mode == 2) {
+            // Pure External Audio Processor (Guitar / Mic / Recorded Audio)
+            exciter = (input_l != nullptr) ? ext_sample : 0.0f;
+        } else if (p.input_route_mode == 1) {
+            // Hybrid Blend Mode
+            exciter = blended_ext;
+        } else {
+            // Synth Instrument Primary (if mic blend macro > 0, blend in external audio)
+            exciter = (p.macros[MACRO_MIC_BLEND] > 0.001f) ? blended_ext : synth_sample;
+        }
 
-        // 4. DRIVE / TUBE
+        // 4. Cody's Chrono-Stateful Resonant Body
+        // (Multiscale State -> Resistance -> Repulsion -> Signed Coupling)
+        float stateful_source = chrono_body_.process_sample(exciter);
+
+        // 5. State Variable Filter (with envelope and LFO modulation)
+        float mod_env = filter_env + lfo_val * 0.25f;
+        float filtered = filter_.process(stateful_source, mod_env, env_amt);
+
+        // 6. Tube Drive Stage (with dynamic cathode sag memory)
         float driven = drive_tube_.process(filtered);
 
-        // 5. CAB / RESONATOR
+        // 7. Modal Cabinet Resonator
         float resonated = resonator_cab_.process(driven);
 
-        // 6. DELAY (Mono-to-Stereo branching)
+        // 8. Stereo Ping-Pong Delay
         float delayed_l = 0.0f;
         float delayed_r = 0.0f;
         delay_.process(resonated, resonated, delayed_l, delayed_r);
 
-        // 7. FDN / ALGORITHMIC REVERB
+        // 9. FDN Algorithmic Reverb
         float reverbed_l = 0.0f;
         float reverbed_r = 0.0f;
         fdn_reverb_.process(delayed_l, delayed_r, reverbed_l, reverbed_r);
 
-        // 8. OUTPUT & SAFETY LIMITER
+        // 10. Master Gain & Zero-Latency Safety Limiter
         float out_l = reverbed_l * master_volume_;
         float out_r = reverbed_r * master_volume_;
         safety_limiter_.process(out_l, out_r);
@@ -199,7 +311,6 @@ void MonkeysEarEngine::process_block(
         output_r[i] = out_r;
     }
 
-    // Stop real-time timer
     latency_meter_.end_block();
 }
 

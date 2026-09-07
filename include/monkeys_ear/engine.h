@@ -11,6 +11,8 @@
 #include "monkeys_ear/safety_limiter.h"
 #include "monkeys_ear/latency_meter.h"
 #include "monkeys_ear/preset.h"
+#include "monkeys_ear/chrono_state.h"
+#include "monkeys_ear/lfo.h"
 
 namespace monkeys_ear {
 
@@ -19,11 +21,11 @@ public:
     MonkeysEarEngine();
     ~MonkeysEarEngine() = default;
 
-    // Initialization & lifecycle (called from UI / Host config thread)
+    // Initialization & lifecycle
     void init(float sample_rate, size_t max_block_size);
     void reset();
 
-    // Real-time Audio Callback (CALLED ON AUDIO THREAD - MUST BE ZERO ALLOC / LOCK FREE)
+    // Real-time Audio Callback (CALLED ON AUDIO THREAD - ZERO ALLOC / LOCK FREE)
     void process_block(
         const float* input_l,
         const float* input_r,
@@ -39,27 +41,33 @@ public:
     void handle_midi_cc(int cc_number, float value_0_to_1);
     void handle_all_notes_off();
 
-    // Macro & Preset Control
+    // Macro & Parameter Control
     void set_macro(MacroId id, float value);
     float get_macro(MacroId id) const;
     void load_preset(const PresetData& preset);
     const PresetData& get_current_preset() const;
-    void set_master_gain_db(float db) {
-        auto p = preset_manager_.get_current();
-        p.master_gain_db = db;
-        load_preset(p);
-    }
-    void set_waveform(Waveform wf) {
-        auto p = preset_manager_.get_current();
-        p.synth_waveform = static_cast<int>(wf);
-        load_preset(p);
-    }
+
+    void set_master_gain_db(float db);
+    void set_waveform(Waveform wf);
+    void set_osc_fm(float fm);
+    void set_osc2_semi(int semi);
+    void set_osc_hard_sync(bool sync);
+    void set_state_resistance(float r);
+    void set_state_repulsion(float k);
+    void set_state_coupling(float kappa);
+    void set_state_persistence(float tau);
+    void set_state_enabled(bool en);
+    void set_lfo1_rate(float hz);
+    void set_lfo1_depth(float depth);
+    void set_input_route_mode(int mode);
 
     // Latency & Real-time Metrics Query
     LatencyStats get_latency_stats() const;
+    void reset_latency_stats() { latency_meter_.reset(); }
     float get_mic_rms() const { return audio_input_.get_rms_level(); }
     float get_mic_peak() const { return audio_input_.get_peak_level(); }
     size_t get_active_voices() const { return voice_manager_.active_voice_count(); }
+    const ChronoStateVariables& get_chrono_state() const { return chrono_body_.get_state(); }
 
 private:
     float sample_rate_;
@@ -67,6 +75,8 @@ private:
 
     VoiceManager voice_manager_;
     AudioInputProcessor audio_input_;
+    ChronoStateBody chrono_body_;
+    LFO lfo1_;
     StateVariableFilter filter_;
     TubeDriveStage drive_tube_;
     CabinetResonator resonator_cab_;
