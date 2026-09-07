@@ -1,13 +1,23 @@
-# Monkey's Ear — EQ / spectral dynamics research
+# Monkey's Ear — EQ research
 
-This directory is the durable research area for the Monkey's Ear EQ, onion-skin interaction analysis, dynamic compression/control-law ideas, and harmonic depth experiments.
+This folder contains research for the **EQ / spectral-dynamics module only**. It does not define the full Monkey's Ear system.
 
-**Start with `START_HERE.md`.** The current design/evidence record is `V6_HARMONIC_DEPTH.md`.
+## Read order
 
-The product thesis has evolved from a masking-warning EQ into a **Dynamic Spectral Relationship Engine**: excellent conventional EQ underneath; temporal/history, transient/body, directional and harmonic evidence above it; user intent kept separate from measurement; bounded dynamic gain/compression as the primary action; optional phase/spatial/harmonic movement only when it earns its complexity.
+1. `ARCHITECTURE.md` — current design source of truth.
+2. `RESEARCH_HISTORY.md` — concise evidence/provenance ledger from V1–V9.
+3. Reproducible `.py` / `.csv` artifacts — experiments and measurements, not design authority.
 
-Historical V1–V5 CSVs and `prototype_v3.py` remain as provenance, not current truth. Their labels and thresholds are synthetic heuristics and must not be treated as perceptual masking validation. V6 is also synthetic engineering research, not listening proof.
+Do **not** treat old experiment names, synthetic thresholds, collision scores or ERB-overlap scores as product requirements or perceptual truth.
 
-Stale planning documents are intentionally removed when their useful content is folded into `START_HERE.md` or the current versioned research record. Raw historical evidence is retained when it still helps reproduce or audit how the design evolved.
+## Current direction
 
-Production integration is explicitly pending. Inspect current Monkey's Ear source first, preserve existing architecture and Lab/Code Prime ownership, and keep the MIDI-silence and Chrono-hum bugs as release blockers. Corrective actions must be bounded, opt-in, automatable, reversible, recallable and audio-thread safe.
+The EQ remains a high-quality conventional EQ first. Deeper research focuses on dynamic EQ/compression math, transient/body evidence, harmonic-family analysis, directional Preserve / Yield / Equal relationships, onion-skin history and **projected bounded action**: propose a small correction, evaluate it, and reject it if it does not help or violates protected structure.
+
+Automatic behavior is secondary. Advanced mechanisms must remain user-controllable, inspectable, bypassable, automatable, reversible and recallable.
+
+## Documentation rule
+
+Do not create a new permanent design document for every experiment generation. Update `ARCHITECTURE.md` when active design changes and append the durable result to `RESEARCH_HISTORY.md`. Keep executable evidence when useful for reproduction. Delete duplicated narrative once its surviving conclusions are consolidated.
+
+Complexity is not progress. New mechanisms must beat a simpler baseline for a defined task, win a controlled listening test, or provide a genuinely distinct creative capability.
