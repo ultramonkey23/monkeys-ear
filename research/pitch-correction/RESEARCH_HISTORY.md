@@ -58,17 +58,52 @@ Results:
 
 This result supports the existing replaceable-detector architecture and gives the next experiment a concrete target: candidate-level comparison plus temporal continuity/hysteresis on octave traps and voiced/unvoiced transitions.
 
+## 2026-09-07 — contour decomposition v1
+
+Evidence state: **SYNTHETIC**. This tests pitch-contour control logic only; no audio was transformed and no listening conclusion is allowed.
+
+Added `experiments/contour_decomposition_v1.py` plus a recorded aggregate summary. The deterministic Monte Carlo corpus contains 200 three-note phrases with randomized note intervals, center offsets, slow drift, vibrato rate/depth and 100–240 ms transition regions.
+
+The component estimator uses only the observed contour plus a chosen musical target trajectory. It estimates a slow residual with a 205 ms smoothing window, derives per-note center from stable note regions, treats the remaining slow component as drift and preserves the fast residual as modulation/vibrato. The requested experimental behavior is 100% center correction, 70% drift correction and 95% fast-modulation retention.
+
+Aggregate results over 200 phrases:
+- **component estimator v1:** mean 3.548 cents RMSE against the requested corrected component mix; worst case 6.002 cents; mean center residual 0.456 cents.
+- **hard snap:** mean 40.730 cents RMSE; worst case 80.886 cents.
+- **75% whole-contour pull:** mean 31.111 cents RMSE; worst case 62.113 cents.
+- Fast-modulation retention was 1.138 for the component estimator versus 0.238 for hard snap and 0.336 for whole-contour pull. The estimator slightly over-retained/contaminated the fast band, so the current 205 ms decomposition is useful but not finished.
+- Transition-region RMSE remained 24.652 cents for the component estimator, much lower than the two naive baselines but still too high to claim transparent transition preservation.
+
+Interpretation: separating center, drift, fast modulation and target transitions is strongly supported as an architecture direction in this synthetic contour model. The specific smoothing/decomposition constants are not promoted; transition isolation and vibrato-band leakage need further work.
+
+## 2026-09-07 — source/filter formant preservation v1
+
+Evidence state: **SYNTHETIC / ORACLE ENVELOPE**. This isolates spectral-envelope geometry and is intentionally easier than real formant estimation/resynthesis.
+
+Added `experiments/formant_preservation_v1.py` and recorded results for a synthetic three-formant vocal-tract envelope. Fundamental frequencies of 110, 180 and 260 Hz were shifted by -7, +5 and +12 semitones.
+
+When harmonic amplitudes remained attached to harmonic index as pitch moved, the effective formant envelope moved with pitch and produced 7.137–8.971 dB log-envelope RMSE against the original vocal-tract target, with a mean of approximately 7.909 dB across the nine cases.
+
+When amplitudes were re-evaluated from the original envelope at the shifted harmonic frequencies, envelope error was zero by construction. This is an oracle/reference result, not evidence that True Envelope, LPC or any practical estimator can achieve zero error.
+
+Interpretation: formant/timbre preservation must remain structurally independent from pitch transposition. The next practical comparison should replace the oracle envelope with estimated LPC and cepstral/True-Envelope-style envelopes on the same source, then compare actual resynthesis families.
+
 ## Not yet proven
 
 - quality of any Monkey's Ear production pitch detector or resynthesis algorithm;
 - whether the local implementation already contains equivalent/better mechanisms;
 - real-time CPU/latency behavior;
 - F0 tracking robustness on Cody's real voice;
-- formant preservation quality;
+- practical formant-envelope estimation quality;
 - sibilant/unvoiced segmentation quality;
 - listening preference versus MAutoPitch, Melodyne or other available tools;
-- whether center/drift/modulation separation provides a meaningful audible win in the final product.
+- whether the synthetic contour advantage survives detector errors and real vocal resynthesis;
+- PSOLA versus phase-locked spectral transformation quality on identical target contours.
 
 ## Next evidence
 
-The next durable evidence should remain executable: extend detector tests to candidate-level octave handling and voiced/unvoiced transitions, then move into contour decomposition and same-source resynthesis comparisons. Real vocal renders remain required before any detector or transformation family is promoted beyond synthetic evidence.
+The next executable work should connect these pieces instead of adding more isolated prose:
+1. add candidate-level octave continuity/hysteresis and voiced/unvoiced transitions to detector testing;
+2. improve contour transition isolation and fast-band leakage on the randomized corpus;
+3. replace the oracle formant envelope with practical LPC and cepstral/True-Envelope-style estimates;
+4. drive at least two resynthesis families from the exact same target contour — pitch-synchronous/time-domain and phase-locked spectral — then measure transient, envelope and pitch error before controlled vocal listening;
+5. move to the same immutable real vocal and external-tool comparison before promoting any mechanism beyond synthetic evidence.
