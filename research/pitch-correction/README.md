@@ -2,6 +2,12 @@
 
 This directory is the durable research area for Monkey's Ear pitch correction / pitch control.
 
+Read:
+- `ARCHITECTURE.md` — current pre-integration research direction.
+- `RESEARCH_HISTORY.md` — evidence, baselines, failures, and open questions.
+- `../TEST_PROTOCOL.md` — shared same-source comparison and listening protocol.
+- `../RESEARCH_SPINE.md` — product-wide laws and integration constraints.
+
 ## Source-of-truth warning
 
 The current GitHub repository is **not yet the complete Monkey's Ear product source**. A more complete local implementation existed before this GitHub repository was created, and that local code has not yet been imported and audited here. Therefore absence of code or features in GitHub must not be interpreted as proof that they do not exist in Monkey's Ear.
@@ -24,4 +30,4 @@ The goal is not to clone Auto-Tune. The goal is a controllable pitch-correction 
 
 ## Current state
 
-Research initialized. GitHub product-code coverage is incomplete and must not be treated as authoritative. Local implementation audit/import, product integration, recorded-track comparison, and listening validation are pending.
+Research initialized and reconciled with the Lab's existing audio-process knowledge. GitHub product-code coverage is still incomplete and must not be treated as authoritative. Local implementation audit/import, executable pitch simulations, same-track external-tool comparison, product integration, and listening validation are pending.
