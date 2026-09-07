@@ -1,6 +1,10 @@
+from pathlib import Path
 import numpy as np
 import pandas as pd
+from scipy.io import wavfile
 
+OUT = Path(__file__).resolve().parent / "v6_rendered"
+OUT.mkdir(exist_ok=True)
 SR = 48000
 DUR = 6.0
 CTRL_HZ = 200
@@ -48,6 +52,7 @@ def weighted_collision(a, b, cents_b=None):
     vals = []
     for n in range(N):
         distance = 0 if cents_b is None else abs(cents_b[n])
+        # Engineering neighborhood only; not an auditory-filter model.
         proximity = np.exp(-(distance / 25.0) ** 2)
         vals.append(min(a[n] / A0.max(), b[n] / B0.max()) * proximity)
     return float(np.mean(vals))
@@ -70,12 +75,42 @@ summary = pd.DataFrame([
     ['Dynamic harmonic gain', np.mean(coll_dyn), np.mean(idA), np.mean(idB), 0.0],
     ['Gain + bounded movement', np.mean(coll_move), np.mean(idA), np.mean(idB), np.max(np.abs(move_cents))],
 ], columns=['Strategy','Mean collision','Mean A identity','Mean B identity','Max movement cents'])
-
 for c in summary.columns[1:]:
     summary[c] = summary[c].astype(float).round(4)
+summary.to_csv(OUT / 'v6_dynamic_metrics.csv', index=False)
+
+at = np.arange(int(DUR * SR)) / SR
+idx = np.minimum((at * CTRL_HZ).astype(int), len(ct) - 1)
+
+def render(use_gain=False, use_move=False):
+    xa = np.zeros_like(at)
+    xb = np.zeros_like(at)
+    for n, h in enumerate(harm):
+        ga = 10 ** (A_gain_db[idx, n] / 20) if use_gain else 1.0
+        gb = 10 ** (B_gain_db[idx, n] / 20) if use_gain else 1.0
+        cb = move_cents[idx, n] if use_move else np.zeros_like(at)
+        fa = np.full_like(at, F0 * h)
+        fb = F0 * h * 2 ** (cb / 1200)
+        pha = 2 * np.pi * np.cumsum(fa) / SR
+        phb = 2 * np.pi * np.cumsum(fb) / SR + .31 * (n + 1)
+        xa += A0[n] * ga * np.sin(pha)
+        xb += B0[n] * gb * np.sin(phb)
+    mix = xa + xb
+    fade = np.minimum(1, np.arange(len(mix)) / (.02 * SR))
+    fade *= np.minimum(1, np.arange(len(mix))[::-1] / (.02 * SR))
+    mix *= fade
+    mix = .8 * mix / (np.max(np.abs(mix)) + 1e-12)
+    return (mix * 32767).astype(np.int16)
+
+wavfile.write(OUT / 'untouched.wav', SR, render(False, False))
+wavfile.write(OUT / 'dynamic_harmonic_gain.wav', SR, render(True, False))
+wavfile.write(OUT / 'gain_plus_bounded_movement.wav', SR, render(True, True))
+np.savez(OUT / 'v6_dynamic_control_data.npz', time=ct, priority=priority,
+         A_gain_db=A_gain_db, B_gain_db=B_gain_db, move_cents=move_cents)
 
 assert np.mean(coll_dyn) < np.mean(coll_u)
 assert np.mean(coll_move) <= np.mean(coll_dyn)
 assert np.max(np.abs(move_cents)) < 6.1
 assert min(np.mean(idA), np.mean(idB)) > .99
 print(summary.to_csv(index=False))
+print(f'Renders written to {OUT}')
