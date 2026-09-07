@@ -43,12 +43,27 @@ Use the same immutable dry recorded vocal as the primary A/B source for Monkey's
 
 See `../TEST_PROTOCOL.md`.
 
+## 2026-09-07 — detector baseline v1
+
+Evidence state: **SYNTHETIC**. This is executable detector evidence, not product or listening proof.
+
+Added `experiments/detector_baseline_v1.py` and its recorded CSV output. The experiment compares a straightforward YIN implementation with an NSDF/MPM-style implementation on six generated monophonic cases: stable pitch, vibrato, slide, strong second harmonic, noisy pitched content and breathy pitched content.
+
+Results:
+- MPM produced lower median absolute cents error than YIN on the stable, vibrato, slide and moderate-noise cases in this particular synthetic setup.
+- YIN remained robust on the deliberately adversarial strong-second-harmonic case, while the current MPM peak-selection rule locked one octave high: approximately 1203 cents median error and a 100% octave-error rate.
+- YIN also substantially outperformed the current MPM implementation on the breathier/noisier case.
+- Therefore neither detector is promoted as the universal production detector. MPM remains useful as an adversarial/secondary baseline, while YIN currently has the stronger failure behavior across this small corpus.
+- The main research opportunity is not to choose a winner prematurely, but to separate raw candidate generation from temporal/octave decision logic so strong harmonic traps can be rejected without giving up MPM's precision on easier frames.
+
+This result supports the existing replaceable-detector architecture and gives the next experiment a concrete target: candidate-level comparison plus temporal continuity/hysteresis on octave traps and voiced/unvoiced transitions.
+
 ## Not yet proven
 
-- quality of any Monkey's Ear pitch detector or resynthesis algorithm;
+- quality of any Monkey's Ear production pitch detector or resynthesis algorithm;
 - whether the local implementation already contains equivalent/better mechanisms;
 - real-time CPU/latency behavior;
-- F0 tracking robustness on Cody's voice;
+- F0 tracking robustness on Cody's real voice;
 - formant preservation quality;
 - sibilant/unvoiced segmentation quality;
 - listening preference versus MAutoPitch, Melodyne or other available tools;
@@ -56,4 +71,4 @@ See `../TEST_PROTOCOL.md`.
 
 ## Next evidence
 
-The next durable evidence should be executable rather than another design document: synthetic pitch-contour test data, detector comparisons, failure labels and then same-source audio renders. Add conclusions here only after those results exist.
+The next durable evidence should remain executable: extend detector tests to candidate-level octave handling and voiced/unvoiced transitions, then move into contour decomposition and same-source resynthesis comparisons. Real vocal renders remain required before any detector or transformation family is promoted beyond synthetic evidence.
