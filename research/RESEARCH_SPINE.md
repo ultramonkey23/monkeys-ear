@@ -4,7 +4,22 @@ Status: durable research guidance only. The GitHub repository is not yet the com
 
 ## Purpose
 
-This file prevents subsystem research from drifting into disconnected inventions. Each Monkey's Ear part may have its own focused research folder, but all work must obey the same product laws, evidence workflow, real-time constraints, and integration boundary.
+This file prevents subsystem research from drifting into disconnected inventions. Each Monkey's Ear part may have focused research, but all work must obey the same product laws, evidence workflow, real-time constraints and source-of-truth boundary.
+
+## Source-truth ladder
+
+Use the strongest available evidence. Weaker evidence never outranks stronger evidence:
+
+1. Cody's newest explicit direction.
+2. Imported/local Monkey's Ear implementation plus live runtime truth.
+3. Build logs, rendered audio, profiler output, host/device proof and reproducible runtime artifacts.
+4. Verified experiment outputs with scripts, settings, hashes and baselines.
+5. GitHub research architecture/history documents.
+6. Chat or agent recollection.
+
+GitHub is currently a research/proof surface, not the missing local product's authority. Absence in this repository is not evidence of absence in the local implementation.
+
+Machine-readable current status lives in `STATUS.json`. Experiment/outcome records should conform conceptually to `EVIDENCE_SCHEMA.json`.
 
 ## Product thesis
 
@@ -25,9 +40,27 @@ And every unusual mechanism must obey:
 3. **Candidate actions are bounded.** Where practical, proposed corrective actions should be evaluated before commitment rather than blindly following detectors.
 4. **Everything is automatable, recallable, bypassable and reversible.**
 5. **No mandatory cloud inference.** Local deterministic DSP remains authoritative; optional ML may assist outside hard real-time paths.
-6. **No hidden lookahead.** Any future information requires explicit buffering/latency or offline pre-analysis.
-7. **No monolithic smart engine.** Shared primitives may be reused across subsystems, but evidence models, candidate generation and actions remain replaceable.
+6. **No hidden lookahead.** Future information requires explicit buffering/latency or offline pre-analysis.
+7. **No monolithic smart engine.** Shared primitives may be reused, but evidence models, candidate generation and actions remain replaceable.
 8. **Do not duplicate Lab authority.** Code Prime remains the intentional mutation boundary; audio specialists are capabilities, not a parallel command structure.
+9. **Research does not silently become doctrine.** Hypotheses and synthetic wins may propose architecture changes, but durable guidance changes only after explicit promotion based on appropriate evidence.
+10. **Negative evidence is first-class.** Demotions, failures and regressions must stay discoverable enough to prevent rediscovery.
+
+## Evidence states and learning gate
+
+Use these states consistently:
+
+- **HYPOTHESIS** — idea or mechanism not yet tested.
+- **SYNTHETIC** — reproducible generated/simulated evidence only.
+- **MEASURED** — real audio/runtime engineering evidence exists.
+- **LISTENED** — controlled listening evidence exists.
+- **VERIFIED** — evidence is strong enough to alter durable guidance for its defined scope.
+- **DEMOTED** — evidence weakened a previously active idea.
+- **RETIRED** — keep provenance only; do not treat as active direction.
+
+Only VERIFIED evidence may silently feed future machine learning/routing decisions. Other states remain useful research context but require explicit human/architectural promotion. Old evidence should be rechecked when the implementation, corpus, algorithm family or external baseline materially changes.
+
+This borrows the Lab's useful separation between recording outcomes and allowing those outcomes to influence learning; it does not replicate the Lab's OutcomeJournal or Learning Gate implementation.
 
 ## Signal-chain model
 
@@ -54,37 +87,34 @@ The Lab already treats REAPER as the primary human workbench and favors a framew
 ## Cross-subsystem concepts worth preserving
 
 ### Microtonal / pitch law
-
-Frequency offset by cents follows `f' = f * 2^(c/1200)`. Independent partial tuning requires a representation that actually exposes partials (for example additive/modal structure); do not fake independent harmonic motion through a representation that cannot support it.
+Frequency offset by cents follows `f' = f * 2^(c/1200)`. Independent partial tuning requires a representation that actually exposes partials; do not fake independent harmonic motion through a representation that cannot support it.
 
 ### Phase-aware layering
-
-Useful controls may include oscillator phase/reset, polarity, sub lock, delay, all-pass/frequency-dependent phase, bounded coupling and stereo decorrelation. Validate mono compatibility, cancellation and transient integrity; phase changes are not automatically improvements.
+Useful controls may include oscillator phase/reset, polarity, sub lock, delay, all-pass/frequency-dependent phase, bounded coupling and stereo decorrelation. Validate mono compatibility, cancellation and transient integrity.
 
 ### Capture / profiling
-
 Static impulse responses capture linear time-invariant behavior only. Nonlinear/history-dependent devices require behavioral profiling or other state-aware representations. Store provenance and authorization for every captured source.
 
 ### SoundSpace
-
 Treat SoundSpace as an optional configurable source -> operator -> destination graph with bounded strength/timescale/bypass, not as an autonomous generative authority. It must remain inspectable and deterministic when used in production.
 
 ### WordMath
-
 Semantic mappings may expose useful high-level control, but semantic interpretation belongs outside hard real-time DSP. Mappings must resolve to inspectable parameter/control changes rather than hidden generative evolution.
 
 ## Research workflow for every subsystem
 
 1. **Inspect current truth** — local/imported code, interfaces, docs, tests and known bugs first.
-2. **Benchmark current practice** — establish what commercial/open tools already do so novelty is not confused with differentiation.
-3. **Define simple baselines** — conventional methods stay in every comparison.
-4. **Prototype competing mechanisms** — small, reproducible, independently removable experiments.
-5. **Try to break them** — randomized/adversarial cases, ablations and failure logging.
-6. **Evaluate real audio** — same source, level matched, identical routing where possible.
-7. **Listen blind when practical** — engineering proxies can reject ideas but cannot prove musical preference.
-8. **Promote/demote explicitly** — no feature survives because it once sounded clever.
-9. **Integrate only after local-source audit** — do not create parallel product implementations from research assumptions.
-10. **Consolidate docs** — one active architecture file + one concise research history per subsystem; keep scripts/data for reproducibility, not a stack of versioned design manifestos.
+2. **Form a research packet** — claim/question, provenance, source quality, mechanism extracted, formulas/candidates and known uncertainty.
+3. **Benchmark current practice** — establish what commercial/open tools already do so novelty is not confused with differentiation.
+4. **Define simple baselines** — conventional methods stay in every comparison.
+5. **Prototype competing mechanisms** — small, reproducible, independently removable experiments.
+6. **Try to break them** — randomized/adversarial cases, ablations and failure logging.
+7. **Evaluate real audio** — same source, level matched, identical routing where possible.
+8. **Listen blind when practical** — engineering proxies can reject ideas but cannot prove musical preference.
+9. **Record the outcome** — evidence state, proof strength, artifacts, failures and promotion effect.
+10. **Promote/demote explicitly** — no feature survives because it once sounded clever.
+11. **Integrate only after local-source audit** — do not create parallel product implementations from research assumptions.
+12. **Consolidate docs** — one active architecture file + one concise research history per subsystem; keep scripts/data for reproducibility, not versioned design manifestos.
 
 ## Current subsystem map
 
@@ -92,19 +122,15 @@ Active research:
 - `research/onion-skin-eq/` — EQ / spectral dynamics / relational evidence.
 - `research/pitch-correction/` — pitch correction / pitch control.
 
-Planned future research lanes (create only when work actually starts):
-- synthesis / voice engine;
-- sampling / resampling;
-- nonlinear / amplifier / physical-modeling behavior;
-- modulation;
-- routing / graph execution;
-- spatial / phase;
-- capture / profiling;
-- sequencing / timing;
-- SoundSpace;
-- semantic control / WordMath.
+Planned future research lanes (create only when work actually starts): synthesis/voice, sampling/resampling, nonlinear/amplifier/physical modeling, modulation, routing/graph execution, spatial/phase, capture/profiling, sequencing/timing, SoundSpace and WordMath.
 
 Do not create empty folders or speculative per-lane design files just to fill this list.
+
+## Lab integration boundary
+
+The Lab may provide research packets, source scoring, routing, Creator Memory context, Code Prime execution, receipts and verified learning. Monkey's Ear remains its own product/domain truth. Do not copy Lab organs into this repo or create a second outcome-learning authority.
+
+Useful information may cross the boundary: research findings, proven algorithms, failure cases, test assets with provenance, benchmark settings, runtime receipts and reusable DSP primitives. Product-specific architecture returns to the Lab as lessons/evidence only through explicit promotion, not silent coupling.
 
 ## Durability rule
 
