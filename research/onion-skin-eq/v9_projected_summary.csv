@@ -1,0 +1,2 @@
+strategy,mean_improvement_pct,p10_improvement_pct,p01_improvement_pct,zero_or_better_pct,mean_accepted_steps,p01_identity,min_low_identity,mean_energy_delta_db,p05_energy_delta_db
+Projected auditory harmonic,0.516392,0.0,0.0,100.0,4.259,0.998751,1.0,-0.004861,-0.027938
