@@ -2,6 +2,7 @@
 
 #include "monkeys_ear/types.h"
 #include "monkeys_ear/sound_space.h"
+#include "monkeys_ear/audio_input.h"
 #include <string>
 #include <array>
 #include <cstring>
@@ -120,6 +121,9 @@ struct PresetData {
     // Bounded Sound Space: independent local pitch/partial/modal freedom plus
     // four generic source -> destination relationships. Appended for recall compatibility.
     SoundSpaceControls sound_space;
+
+    // Appended vocal expression state preserves every legacy preset field.
+    VocalExpressionControls vocal_expression;
 
     PresetData();
     std::string serialize() const;

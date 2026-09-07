@@ -60,8 +60,8 @@ private:
 };
 
 // Causal, no-lookahead external-audio divider. It accepts stable monophonic
-// fundamentals from 45-500 Hz. Two positive crossings are required (roughly
-// 2-44 ms); ambiguous/polyphonic/noisy input fades the generated sub to zero.
+// fundamentals from 55-900 Hz. Two positive crossings are required (roughly
+// 1-36 ms); ambiguous/polyphonic/noisy input fades the generated sub to zero.
 class ExternalSubharmonic {
 public:
     void set_sample_rate(float sr);

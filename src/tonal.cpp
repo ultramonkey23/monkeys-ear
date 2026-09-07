@@ -131,7 +131,7 @@ float ExternalSubharmonic::process(float input) {
     if (previous_input_ <= 0.0f && input > 0.0f && envelope_ > 0.008f) {
         int period = samples_since_crossing_;
         float candidate = sample_rate_ / static_cast<float>(std::max(1, period));
-        if (candidate >= 45.0f && candidate <= 500.0f) {
+        if (candidate >= 55.0f && candidate <= 900.0f) {
             float stability = previous_period_ > 0
                 ? 1.0f - std::abs(static_cast<float>(period-previous_period_)) / static_cast<float>(previous_period_)
                 : 0.0f;

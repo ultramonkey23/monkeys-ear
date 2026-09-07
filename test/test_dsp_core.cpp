@@ -195,6 +195,19 @@ void test_external_audio_processor_causality() {
     std::cout << "PASS (External Audio Reaches DSP & All Controls Causally Shape It)\n";
 }
 
+void test_dual_layer_vocal_expression() {
+    std::cout << "[TEST] Causal Dual-Layer Vocal Expression... ";
+    constexpr float SR=48000.0f;
+    AudioInputProcessor vocal; vocal.set_sample_rate(SR);
+    VocalExpressionControls c{}; c.enabled=true;c.correction_strength=.9f;c.drift_retention=.15f;c.vibrato_retention=.8f;c.transition=.75f;c.formant_repair=.65f;c.spectral_residual_mix=.9f;c.character=.2f;c.mix=1.0f;
+    vocal.set_vocal_controls(c);
+    float peak=0.0f;
+    for(size_t i=0;i<48000;++i){float x=.45f*std::sin(TWO_PI*445.0f*static_cast<float>(i)/SR);float conditioned=vocal.process_sample(x,0.0f);float y=vocal.process_vocal_sample(conditioned,445.0f,0.96f);assert(std::isfinite(y));peak=std::max(peak,std::abs(y));}
+    const auto voiced=vocal.vocal_metrics(); assert(voiced.voiced&&voiced.voiced_mix>.9f);assert(std::abs(voiced.correction_cents)>1.0f);assert(voiced.residual_mix<=.25f);assert(peak>.02f);
+    float dry=.17f;float fallback=vocal.process_vocal_sample(dry,0.0f,0.0f);assert(std::abs(fallback-dry)<1e-6f);
+    std::cout<<"PASS (correction="<<voiced.correction_cents<<"c, residual="<<voiced.residual_mix<<")\n";
+}
+
 // ── Test 4: Parameter Causality ──────────────────────────────────────────
 void test_parameter_causality() {
     std::cout << "[TEST] Parameter Causality Verification (state + expanded automation)... ";
@@ -556,6 +569,7 @@ int main() {
         test_osc_cross_fm_and_sync();
         test_chrono_state_mathematics();
         test_external_audio_processor_causality();
+        test_dual_layer_vocal_expression();
         test_parameter_causality();
         test_weight_and_external_subharmonics();
         test_multipass_filter_and_eq();

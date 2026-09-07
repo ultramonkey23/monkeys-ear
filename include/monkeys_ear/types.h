@@ -61,6 +61,12 @@ public:
         return buffer_[idx];
     }
 
+    T read_interpolated(float lag) const {
+        lag = clamp(lag, 0.0f, static_cast<float>(Capacity - 2));
+        const size_t whole = static_cast<size_t>(lag);
+        return lerp(read(whole), read(whole + 1), lag - static_cast<float>(whole));
+    }
+
     size_t capacity() const { return Capacity; }
 
     void reset() {

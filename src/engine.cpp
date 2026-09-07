@@ -106,6 +106,7 @@ void MonkeysEarEngine::apply_macros() {
     // Macro 7: Mic Blend (0.0 = pure synth, 1.0 = pure mic)
     float m_mic = p.macros[MACRO_MIC_BLEND];
     audio_input_.set_mix(m_mic);
+    audio_input_.set_vocal_controls(p.vocal_expression);
 
     // Macro 8: Dynamic Character / Cathode Sag
     float m_char = p.macros[MACRO_CHARACTER];
@@ -254,6 +255,7 @@ void MonkeysEarEngine::set_parameter_normalized(int id, float v) {
       case 94:p.sound_space.pitch_mix=v;break;case 95:p.sound_space.harmonic_mix=v;break;case 96:p.sound_space.modal_mix=v;break;
       case 97:p.sound_space.spectral_depth_db=v*18.0f;break;case 98:p.sound_space.spectral_priority=v;break;
       case 99:p.sound_space.phase_offset_cycles=(v-.5f)*.5f;break;case 100:p.sound_space.phase_coupling=v;break;
+      case 113:p.vocal_expression.enabled=v>=.5f;break;case 114:p.vocal_expression.correction_strength=v;break;case 115:p.vocal_expression.drift_retention=v;break;case 116:p.vocal_expression.vibrato_retention=v;break;case 117:p.vocal_expression.transition=v;break;case 118:p.vocal_expression.formant_repair=v;break;case 119:p.vocal_expression.spectral_residual_mix=v;break;case 120:p.vocal_expression.character=v;break;case 121:p.vocal_expression.mix=v;break;
       default:
         if(id>=37&&id<=52){int b=(id-37)/4, f=(id-37)%4; if(f==0)p.eq_type[b]=static_cast<int>(v*5.99f);else if(f==1)p.eq_frequency_hz[b]=20.0f*std::pow(1000.0f,v);else if(f==2)p.eq_gain_db[b]=(v-.5f)*36.0f;else p.eq_q[b]=.15f*std::pow(80.0f,v);}
         else if(id>=101&&id<=112){int route=(id-101)/3,field=(id-101)%3;if(field==0)p.sound_space.routes[route].source=static_cast<int>(v*7.99f);else if(field==1)p.sound_space.routes[route].destination=static_cast<int>(v*7.99f);else p.sound_space.routes[route].depth=(v-.5f)*2.0f;}
@@ -324,9 +326,10 @@ void MonkeysEarEngine::process_block(
         if (input_l != nullptr) {
             ext_sample = (input_r != nullptr) ? 0.5f * (input_l[i] + input_r[i]) : input_l[i];
         }
-        float blended_ext = audio_input_.process_sample(ext_sample, synth_sample);
-        audio_envelope_ += (std::abs(ext_sample)-audio_envelope_) * (std::abs(ext_sample)>audio_envelope_?.02f:.0008f);
         float tracked_sub=external_sub_.process(ext_sample);
+        float blended_ext = audio_input_.process_sample(ext_sample, synth_sample);
+        blended_ext = audio_input_.process_vocal_sample(blended_ext, external_sub_.tracked_frequency_hz(), external_sub_.confidence());
+        audio_envelope_ += (std::abs(ext_sample)-audio_envelope_) * (std::abs(ext_sample)>audio_envelope_?.02f:.0008f);
 
         // 3. Routing Mode Resolution
         float exciter = 0.0f;

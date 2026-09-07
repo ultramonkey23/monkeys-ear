@@ -112,6 +112,8 @@ std::string PresetData::serialize() const {
     oss<<"SPACE_RATE="<<s.movement_hz<<"\nSPACE_ATTRACT="<<s.attraction<<"\nSPACE_RESIST="<<s.resistance<<"\nSPACE_REPEL="<<s.repulsion<<"\nSPACE_FREQ_FREEDOM="<<s.frequency_freedom<<"\nSPACE_ENERGY_WIDEN="<<s.energy_widen<<"\n";
     oss<<"SPACE_ATTACK="<<s.attack_freedom<<"\nSPACE_RELEASE="<<s.release_relaxation<<"\nSPACE_PITCH_MIX="<<s.pitch_mix<<"\nSPACE_HARM_MIX="<<s.harmonic_mix<<"\nSPACE_MODAL_MIX="<<s.modal_mix<<"\nSPACE_SPECTRAL_DB="<<s.spectral_depth_db<<"\nSPACE_PRIORITY="<<s.spectral_priority<<"\nSPACE_PHASE="<<s.phase_offset_cycles<<"\nSPACE_PHASE_COUPLE="<<s.phase_coupling<<"\n";
     for(size_t i=0;i<s.routes.size();++i)oss<<"SPACE_ROUTE"<<i<<"_SOURCE="<<s.routes[i].source<<"\nSPACE_ROUTE"<<i<<"_DEST="<<s.routes[i].destination<<"\nSPACE_ROUTE"<<i<<"_DEPTH="<<s.routes[i].depth<<"\n";
+    const auto& v=vocal_expression;
+    oss<<"VOCAL_ENABLED="<<(v.enabled?1:0)<<"\nVOCAL_CORRECTION="<<v.correction_strength<<"\nVOCAL_DRIFT="<<v.drift_retention<<"\nVOCAL_VIBRATO="<<v.vibrato_retention<<"\nVOCAL_TRANSITION="<<v.transition<<"\nVOCAL_FORMANT="<<v.formant_repair<<"\nVOCAL_RESIDUAL="<<v.spectral_residual_mix<<"\nVOCAL_CHARACTER="<<v.character<<"\nVOCAL_MIX="<<v.mix<<"\n";
     return oss.str();
 }
 
@@ -220,6 +222,15 @@ bool PresetData::deserialize(const std::string& data) {
         else if(key=="SPACE_PHASE")sound_space.phase_offset_cycles=std::stof(val_str);
         else if(key=="SPACE_PHASE_COUPLE")sound_space.phase_coupling=std::stof(val_str);
         else if(key.rfind("SPACE_ROUTE",0)==0){int i=key[11]-'0';if(i>=0&&i<4){auto suffix=key.substr(13);if(suffix=="SOURCE")sound_space.routes[i].source=std::stoi(val_str);else if(suffix=="DEST")sound_space.routes[i].destination=std::stoi(val_str);else if(suffix=="DEPTH")sound_space.routes[i].depth=std::stof(val_str);}}
+        else if(key=="VOCAL_ENABLED")vocal_expression.enabled=std::stoi(val_str)!=0;
+        else if(key=="VOCAL_CORRECTION")vocal_expression.correction_strength=std::stof(val_str);
+        else if(key=="VOCAL_DRIFT")vocal_expression.drift_retention=std::stof(val_str);
+        else if(key=="VOCAL_VIBRATO")vocal_expression.vibrato_retention=std::stof(val_str);
+        else if(key=="VOCAL_TRANSITION")vocal_expression.transition=std::stof(val_str);
+        else if(key=="VOCAL_FORMANT")vocal_expression.formant_repair=std::stof(val_str);
+        else if(key=="VOCAL_RESIDUAL")vocal_expression.spectral_residual_mix=std::stof(val_str);
+        else if(key=="VOCAL_CHARACTER")vocal_expression.character=std::stof(val_str);
+        else if(key=="VOCAL_MIX")vocal_expression.mix=std::stof(val_str);
     }
     return true;
 }
@@ -354,6 +365,7 @@ PresetData PresetManager::create_factory_vocal_resonator() {
     p.state_coupling = 0.50f;
     p.state_enabled = true;
     p.input_route_mode = 2; // External audio primary
+    p.vocal_expression={true,.72f,.62f,.82f,.68f,.58f,.10f,.24f,.88f};
     return p;
 }
 
