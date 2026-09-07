@@ -1,0 +1,5 @@
+strategy,mean_collision,mean_A_identity,mean_B_identity,mean_energy_delta_dB,worst_preserved_transient_delta_dB,control_motion_index,collision_improvement_pct,identity_floor
+Broad static carve,0.3141,0.9976,0.997,-0.16,0.0,0.75,4.58,0.997
+Conventional dynamic EQ,0.3202,0.9989,0.9985,-0.112,0.0,0.649,2.72,0.9985
+Harmonic-family control,0.3254,0.9998,0.9999,-0.06,0.0,0.154,1.14,0.9998
+Relational state dynamics,0.3262,0.9998,0.9998,-0.061,0.0,0.167,0.9,0.9998
