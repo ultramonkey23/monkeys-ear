@@ -1,14 +1,14 @@
 #pragma once
 
 #include "monkeys_ear/module_contract.h"
+#include "monkeys_ear/ecosystem_state.h"
 #include "monkeys_ear/audio_input.h"
 #include <cstdint>
 
 namespace monkeys_ear {
 
-// Thin standalone owner around the existing vocal DSP. It deliberately does
-// not duplicate pitch/resynthesis code: suite and standalone wrappers share
-// AudioInputProcessor as the single DSP implementation.
+// Vocal remains one Monkey's Ear ecosystem module. AudioInputProcessor is the
+// canonical vocal DSP; this boundary adds module lifecycle and evidence policy.
 class VocalModule final : public StandaloneModule {
 public:
     VocalModule() noexcept;
@@ -24,11 +24,15 @@ public:
     void set_controls(const VocalExpressionControls& controls) noexcept;
     const VocalExpressionControls& controls() const noexcept { return controls_; }
 
-    // Temporary detector-evidence boundary. A standalone VST3 wrapper still
-    // needs a causal detector feeding this call before REAPER-ready can be claimed.
+    // Local evidence keeps the plugin useful alone. A connected ecosystem may
+    // supply fresher/more-confident compatible evidence without replacing the
+    // local capability or creating a second DSP implementation.
+    void set_local_pitch_evidence(float tracked_hz, float confidence) noexcept;
+    void consume_ecosystem(const EcosystemSnapshot<32>& snapshot) noexcept;
+    void clear_ecosystem_evidence() noexcept;
+
     void process_block(const float* input_l, const float* input_r,
-                       float* output_l, float* output_r, uint32_t num_samples,
-                       float tracked_hz, float confidence) noexcept;
+                       float* output_l, float* output_r, uint32_t num_samples) noexcept;
 
     const VocalExpressionMetrics& metrics() const noexcept { return processor_.vocal_metrics(); }
     const VocalAnalysisFrame& analysis() const noexcept { return processor_.vocal_analysis(); }
@@ -40,6 +44,11 @@ private:
     ModuleHealth health_{};
     float sample_rate_ = 48000.0f;
     uint32_t max_block_size_ = 512;
+    float local_pitch_hz_ = 0.0f;
+    float local_pitch_confidence_ = 0.0f;
+    float shared_pitch_hz_ = 0.0f;
+    float shared_pitch_confidence_ = 0.0f;
+    bool shared_pitch_valid_ = false;
     bool bypass_ = false;
 };
 
