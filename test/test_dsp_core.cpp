@@ -8,6 +8,8 @@
 #include <iomanip>
 #include <numeric>
 #include <fstream>
+#include <limits>
+#include <string>
 
 using namespace monkeys_ear;
 
@@ -206,6 +208,72 @@ void test_dual_layer_vocal_expression() {
     const auto voiced=vocal.vocal_metrics(); assert(voiced.voiced&&voiced.voiced_mix>.9f);assert(voiced.source_type==VocalSourceType::Periodic);assert(voiced.periodic_mix>.65f);assert(std::abs(voiced.correction_cents)>1.0f);assert(voiced.residual_mix<=.25f);assert(peak>.02f);
     float dry=.17f;float fallback=vocal.process_vocal_sample(dry,0.0f,0.0f);assert(std::abs(fallback-dry)<1e-6f);
     std::cout<<"PASS (correction="<<voiced.correction_cents<<"c, residual="<<voiced.residual_mix<<")\n";
+}
+
+void test_vocal_reset_clears_all_causal_histories() {
+    std::cout << "[TEST] Vocal Reset Clears Both PSOLA Histories... ";
+    constexpr float SR = 48000.0f;
+    VocalExpressionControls c{};
+    c.enabled = true;
+    c.correction_strength = .82f;
+    c.drift_retention = .2f;
+    c.transition = .7f;
+    c.formant_repair = .5f;
+    c.mix = 1.0f;
+    c.sequential_stage_mix = 1.0f;
+
+    AudioInputProcessor restarted, fresh;
+    for (auto* processor : {&restarted, &fresh}) {
+        processor->set_sample_rate(SR);
+        processor->set_mix(1.0f);
+        processor->set_vocal_controls(c);
+    }
+
+    // Fill both causal PSOLA histories, then ensure reset produces exactly the
+    // same restart as a fresh processor. This catches a stale second-stage
+    // grain without adding latency, allocation, or a runtime branch.
+    for (size_t i = 0; i < 4096; ++i) {
+        const float x = .43f * std::sin(TWO_PI * 437.0f * static_cast<float>(i) / SR);
+        const float conditioned = restarted.process_sample(x, 0.0f);
+        restarted.process_vocal_sample(conditioned, 437.0f, .96f);
+    }
+    restarted.reset();
+
+    float max_restart_delta = 0.0f;
+    for (size_t i = 0; i < 512; ++i) {
+        const float x = .31f * std::sin(TWO_PI * 445.0f * static_cast<float>(i) / SR);
+        const float restarted_y = restarted.process_vocal_sample(
+            restarted.process_sample(x, 0.0f), 445.0f, .96f);
+        const float fresh_y = fresh.process_vocal_sample(
+            fresh.process_sample(x, 0.0f), 445.0f, .96f);
+        assert(std::isfinite(restarted_y) && std::isfinite(fresh_y));
+        max_restart_delta = std::max(max_restart_delta, std::abs(restarted_y - fresh_y));
+    }
+    assert(max_restart_delta < 1e-7f);
+    std::cout << "PASS (restart delta=" << max_restart_delta << ")\n";
+}
+
+void test_audio_input_extreme_finite_safety() {
+    std::cout << "[TEST] Audio Input Extreme-Finite Safety... ";
+    constexpr float SR = 48000.0f;
+    AudioInputProcessor input;
+    input.set_sample_rate(SR);
+    input.set_gain(24.0f);
+    input.set_mix(1.0f);
+    VocalExpressionControls c{};
+    c.enabled = true;
+    c.correction_strength = .7f;
+    c.mix = 1.0f;
+    input.set_vocal_controls(c);
+    for (size_t i = 0; i < 1024; ++i) {
+        const float hostile = (i & 1) ? std::numeric_limits<float>::max()
+                                       : -std::numeric_limits<float>::max();
+        const float conditioned = input.process_sample(hostile, 0.0f);
+        const float vocal = input.process_vocal_sample(conditioned, 440.0f, .96f);
+        assert(std::isfinite(conditioned) && std::isfinite(vocal));
+        assert(std::isfinite(input.read_ring_buffer(0)));
+    }
+    std::cout << "PASS (no non-finite history under max-finite input)\n";
 }
 
 void test_vocal_tuning_space_and_articulation() {
@@ -633,13 +701,21 @@ void run_ab_experiment_and_renders() {
     std::cout << "\n>>> ALL DETERMINISTIC DSP & REAL-TIME TESTS PASSED! <<<\n\n";
 }
 
-int main() {
+int main(int argc, char** argv) {
     try {
+        if (argc == 2 && std::string(argv[1]) == "--audio-input-safety") {
+            test_dual_layer_vocal_expression();
+            test_vocal_reset_clears_all_causal_histories();
+            test_audio_input_extreme_finite_safety();
+            return 0;
+        }
         test_polyblep_oscillator();
         test_osc_cross_fm_and_sync();
         test_chrono_state_mathematics();
         test_external_audio_processor_causality();
         test_dual_layer_vocal_expression();
+        test_vocal_reset_clears_all_causal_histories();
+        test_audio_input_extreme_finite_safety();
         test_vocal_tuning_space_and_articulation();
         test_time_varying_vocal_phrase();
         test_parameter_causality();
