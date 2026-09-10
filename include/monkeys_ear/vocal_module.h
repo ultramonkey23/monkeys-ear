@@ -24,8 +24,8 @@ public:
     void set_controls(const VocalExpressionControls& controls) noexcept;
     const VocalExpressionControls& controls() const noexcept { return controls_; }
 
-    // Host/pitch detector supplies causal F0 evidence. Stereo uses a shared
-    // analysis trajectory so left/right channels cannot select different notes.
+    // Temporary detector-evidence boundary. A standalone VST3 wrapper still
+    // needs a causal detector feeding this call before REAPER-ready can be claimed.
     void process_block(const float* input_l, const float* input_r,
                        float* output_l, float* output_r, uint32_t num_samples,
                        float tracked_hz, float confidence) noexcept;
