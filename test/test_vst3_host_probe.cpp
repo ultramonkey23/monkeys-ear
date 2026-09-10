@@ -5,6 +5,7 @@
 #include <cstring>
 #include <iomanip>
 #include <cmath>
+#include <string>
 #include "vst3_sdk_minimal.h"
 
 using namespace Steinberg;
@@ -38,8 +39,15 @@ int main() {
     std::cout << "  HOST VERIFICATION PROBE // VST3 BINARY INSPECTION\n";
     std::cout << "=======================================================\n\n";
 
-    const char* plugin_path = "C:\\Program Files\\Common Files\\VST3\\monkeys_ear.vst3";
-    HMODULE hMod = LoadLibraryA(plugin_path);
+    // Test the VST3 artifact produced by this exact build, not whichever prior
+    // binary happens to be installed globally.  The installed copy remains a
+    // separate DAW promotion surface.
+    char probe_path[MAX_PATH]{};
+    GetModuleFileNameA(nullptr, probe_path, MAX_PATH);
+    std::string plugin_path(probe_path);
+    const size_t separator = plugin_path.find_last_of("\\/");
+    plugin_path = (separator == std::string::npos ? std::string{} : plugin_path.substr(0, separator + 1)) + "monkeys_ear.vst3";
+    HMODULE hMod = LoadLibraryA(plugin_path.c_str());
     if (!hMod) {
         std::cerr << "[FAIL] Could not load VST3 DLL at " << plugin_path << "\n";
         return 1;
@@ -124,7 +132,7 @@ int main() {
 
     int32 paramCount = controller->getParameterCount();
     std::cout << "          Total Exposed Parameters: " << paramCount << "\n";
-    assert(paramCount == 122);
+    assert(paramCount == 124);
 
     std::cout << "\n[EXPOSED PARAMETERS ENUMERATION]:\n";
     for (int32 i = 0; i < paramCount; ++i) {
@@ -144,10 +152,10 @@ int main() {
                   << " (Default: " << valStringAscii << ")\n";
     }
 
-    // Component/controller state preserves 0..81 and appends Sound Space/Vocal IDs 82..121.
+    // Component/controller state preserves 0..81 and appends Sound Space/Vocal IDs 82..123.
     MemoryStream state_stream;
     assert(fx_comp->getState(&state_stream)==kResultOk);
-    assert(state_stream.bytes.size()==12u+122u*sizeof(float));
+    assert(state_stream.bytes.size()==12u+124u*sizeof(float));
     state_stream.pos=0;
     assert(controller->setComponentState(&state_stream)==kResultOk);
     std::cout << "[PASS] Versioned host preset state round-trip: "<<state_stream.bytes.size()<<" bytes\n";

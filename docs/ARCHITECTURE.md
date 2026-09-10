@@ -80,6 +80,10 @@ The bounded source-transform-destination layer is intentionally small. Sources c
 
 External pitch tracking is not polyphonic pitch detection. It accepts stable monophonic 45–500 Hz input, requires two positive crossings, and confidence-fades on invalid or stale periods. It reports zero host latency because it uses no lookahead; the musical acquisition delay is signal-dependent and explicitly not hidden.
 
+## 6. Vocal Pitch + Expression Evolution Surface
+
+`AudioInputProcessor` owns the live vocal path. It separates an estimated periodic component from a retained aperiodic component with a causal confidence/energy blend, so it can represent **periodic**, **mixed**, or **aperiodic** material instead of forcing a binary verdict. The primary renderer is trailing-grain PSOLA. An optional, fixed-history second PSOLA pass shares correction across two softer transformations; it is not a disguised hard renderer switch. A separately capped high-frequency residual and one broad envelope repair remain controllable. All stages have fixed memory, use no future sample, allocations, locks, I/O, or network, and their outcomes are currently synthetic/code evidence—not listening or release evidence.
+
 ## 5. Bounded Sound Space Contract
 
 `SoundSpaceProcessor` is a reusable source-transform-destination layer after the character/body path and before the production EQ. It has no allocations or locks in `process_block()`.

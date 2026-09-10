@@ -35,14 +35,15 @@ void AudioInputProcessor::set_highpass_enabled(bool en) {
 
 void AudioInputProcessor::reset() {
     ring_buffer_.reset();
+    vocal_stage_ring_buffer_.reset();
     hp_x1_ = 0.0f;
     hp_y1_ = 0.0f;
     rms_accumulator_ = 0.0f;
     rms_level_ = 0.0f;
     peak_level_ = 0.0f;
     rms_count_ = 0;
-    grain_phase_ = correction_cents_ = pitch_fast_cents_ = pitch_slow_cents_ = 0.0f;
-    source_envelope_ = shifted_envelope_ = residual_low_ = 0.0f;
+    grain_phase_ = secondary_grain_phase_ = correction_cents_ = pitch_fast_cents_ = pitch_slow_cents_ = 0.0f;
+    source_envelope_ = shifted_envelope_ = residual_low_ = analysis_low_ = periodic_energy_ = aperiodic_energy_ = 0.0f;
     vocal_metrics_ = {};
 }
 
@@ -54,9 +55,24 @@ float AudioInputProcessor::process_vocal_sample(float input, float tracked_hz, f
     const float hz = clamp(tracked_hz, 55.0f, 900.0f);
     const float conf = clamp(confidence, 0.0f, 1.0f);
     const bool voiced = tracked_hz >= 55.0f && tracked_hz <= 900.0f && conf > 0.35f;
-    const float voiced_mix = voiced ? clamp((conf - 0.35f) / 0.55f, 0.0f, 1.0f) : 0.0f;
+    const float confidence_mix = voiced ? clamp((conf - 0.35f) / 0.55f, 0.0f, 1.0f) : 0.0f;
+
+    // V2: classify a frame as periodic / mixed / aperiodic continuously.  This
+    // is intentionally a confidence-weighted estimate, not an overconfident
+    // voiced/unvoiced verdict.  The high-passed remainder is a cheap causal
+    // proxy for breath, sibilance, and consonant/transient participation.
+    const float analysis_alpha = 1.0f - std::exp(-TWO_PI * 1200.0f / sample_rate_);
+    analysis_low_ += (input - analysis_low_) * analysis_alpha;
+    const float analysis_alpha_energy = 1.0f - std::exp(-1.0f / (0.012f * sample_rate_));
+    periodic_energy_ += (std::abs(analysis_low_) - periodic_energy_) * analysis_alpha_energy;
+    aperiodic_energy_ += (std::abs(input - analysis_low_) - aperiodic_energy_) * analysis_alpha_energy;
+    const float tonal_balance = periodic_energy_ / std::max(0.0001f, periodic_energy_ + aperiodic_energy_);
+    const float periodic_mix = confidence_mix * clamp((tonal_balance - 0.12f) / 0.74f, 0.0f, 1.0f);
+    const float aperiodic_mix = 1.0f - periodic_mix;
+    const VocalSourceType source_type = periodic_mix > 0.65f ? VocalSourceType::Periodic
+        : (periodic_mix < 0.18f ? VocalSourceType::Aperiodic : VocalSourceType::Mixed);
     if (!voiced) {
-        vocal_metrics_ = {tracked_hz, conf, correction_cents_, 0.0f, 0.0f, false};
+        vocal_metrics_ = {tracked_hz, conf, correction_cents_, 0.0f, 0.0f, 0.0f, 1.0f, VocalSourceType::Aperiodic, false};
         return input;
     }
     float desired_cents = 0.0f;
@@ -75,16 +91,32 @@ float AudioInputProcessor::process_vocal_sample(float input, float tracked_hz, f
     const float correction_alpha = 1.0f - std::exp(-1.0f / (transition_ms * 0.001f * sample_rate_));
     correction_cents_ += (desired_cents - correction_cents_) * correction_alpha;
 
-    // Two 50%-overlapped trailing grains form a causal, pitch-synchronous
-    // PSOLA-like first layer. No future sample is read and all state is fixed.
+    // V1: two 50%-overlapped trailing grains form the primary causal,
+    // pitch-synchronous PSOLA layer. No future sample is read and all state is fixed.
     const float period = clamp(sample_rate_ / hz, 53.0f, 872.0f);
-    const float ratio = std::pow(2.0f, correction_cents_ / 1200.0f);
-    grain_phase_ -= ratio / period;
+    const float sequential_mix = clamp(c.sequential_stage_mix, 0.0f, 1.0f);
+    const float primary_cents = correction_cents_ * (1.0f - 0.5f * sequential_mix);
+    const float secondary_cents = correction_cents_ - primary_cents;
+    const float primary_ratio = std::pow(2.0f, primary_cents / 1200.0f);
+    grain_phase_ -= primary_ratio / period;
     if (grain_phase_ < 0.0f) grain_phase_ += 1.0f;
     const float phase_b = grain_phase_ < 0.5f ? grain_phase_ + 0.5f : grain_phase_ - 0.5f;
     const float base_lag = clamp(period * 1.15f, 64.0f, static_cast<float>(RING_BUFFER_SIZE - 900));
     const float wa = std::sin(PI * grain_phase_), wb = std::sin(PI * phase_b);
-    const float psola = ring_buffer_.read_interpolated(base_lag + grain_phase_ * period) * wa * wa + ring_buffer_.read_interpolated(base_lag + phase_b * period) * wb * wb;
+    const float psola_primary = ring_buffer_.read_interpolated(base_lag + grain_phase_ * period) * wa * wa + ring_buffer_.read_interpolated(base_lag + phase_b * period) * wb * wb;
+    vocal_stage_ring_buffer_.push(psola_primary);
+
+    // V3: a real optional second, softer causal PSOLA pass over the primary
+    // history.  At zero it is a true bypass; toward one, correction is shared
+    // approximately 50/50 between stages.  It is not called spectral mixing.
+    secondary_grain_phase_ -= std::pow(2.0f, secondary_cents / 1200.0f) / period;
+    if (secondary_grain_phase_ < 0.0f) secondary_grain_phase_ += 1.0f;
+    const float phase_second_b = secondary_grain_phase_ < 0.5f ? secondary_grain_phase_ + 0.5f : secondary_grain_phase_ - 0.5f;
+    const float ws0 = std::sin(PI * secondary_grain_phase_);
+    const float ws1 = std::sin(PI * phase_second_b);
+    const float psola_secondary = vocal_stage_ring_buffer_.read_interpolated(base_lag + secondary_grain_phase_ * period) * ws0 * ws0
+        + vocal_stage_ring_buffer_.read_interpolated(base_lag + phase_second_b * period) * ws1 * ws1;
+    const float psola = lerp(psola_primary, psola_secondary, sequential_mix);
 
     // One envelope/formant repair sits between the voiced layer and the bounded
     // aperiodic residual. It restores broad vocal energy, not a spectral clone.
@@ -94,10 +126,16 @@ float AudioInputProcessor::process_vocal_sample(float input, float tracked_hz, f
     const float repair = lerp(1.0f, clamp(source_envelope_ / std::max(0.015f, shifted_envelope_), 0.65f, 1.55f), clamp(c.formant_repair, 0.0f, 1.0f));
     const float repaired = psola * repair;
     residual_low_ += (input - residual_low_) * (1.0f - std::exp(-TWO_PI * 1700.0f / sample_rate_));
-    const float residual_mix = std::min(0.25f, clamp(c.spectral_residual_mix, 0.0f, 1.0f) * 0.25f) * (1.0f - voiced_mix * 0.35f);
-    const float dual_layer = repaired * voiced_mix + (input - residual_low_) * residual_mix + input * (1.0f - voiced_mix);
+    const float residual_request = std::min(0.25f, clamp(c.spectral_residual_mix, 0.0f, 1.0f) * 0.25f) * (1.0f - periodic_mix * 0.35f);
+    const float protected_aperiodic = aperiodic_mix * clamp(c.aperiodic_protection, 0.0f, 1.0f);
+    const float transform_mix = periodic_mix * (1.0f - protected_aperiodic * 0.82f);
+    // Treat the periodic transform, residual, and original component as a
+    // bounded partition.  An aggressive creative setting cannot turn the dry
+    // component negative or accidentally amplify the recombination.
+    const float residual_mix = std::min(residual_request, 1.0f - transform_mix);
+    const float dual_layer = repaired * transform_mix + (input - residual_low_) * residual_mix + input * (1.0f - transform_mix - residual_mix);
     const float colored = lerp(dual_layer, fast_tanh(dual_layer * (1.0f + clamp(c.character, 0.0f, 1.0f) * 2.5f)), clamp(c.character, 0.0f, 1.0f) * 0.35f);
-    vocal_metrics_ = {tracked_hz, conf, correction_cents_, voiced_mix, residual_mix, voiced};
+    vocal_metrics_ = {tracked_hz, conf, correction_cents_, confidence_mix, residual_mix, periodic_mix, aperiodic_mix, source_type, voiced};
     return sanitize(lerp(input, colored, clamp(c.mix, 0.0f, 1.0f)));
 }
 

@@ -113,7 +113,7 @@ std::string PresetData::serialize() const {
     oss<<"SPACE_ATTACK="<<s.attack_freedom<<"\nSPACE_RELEASE="<<s.release_relaxation<<"\nSPACE_PITCH_MIX="<<s.pitch_mix<<"\nSPACE_HARM_MIX="<<s.harmonic_mix<<"\nSPACE_MODAL_MIX="<<s.modal_mix<<"\nSPACE_SPECTRAL_DB="<<s.spectral_depth_db<<"\nSPACE_PRIORITY="<<s.spectral_priority<<"\nSPACE_PHASE="<<s.phase_offset_cycles<<"\nSPACE_PHASE_COUPLE="<<s.phase_coupling<<"\n";
     for(size_t i=0;i<s.routes.size();++i)oss<<"SPACE_ROUTE"<<i<<"_SOURCE="<<s.routes[i].source<<"\nSPACE_ROUTE"<<i<<"_DEST="<<s.routes[i].destination<<"\nSPACE_ROUTE"<<i<<"_DEPTH="<<s.routes[i].depth<<"\n";
     const auto& v=vocal_expression;
-    oss<<"VOCAL_ENABLED="<<(v.enabled?1:0)<<"\nVOCAL_CORRECTION="<<v.correction_strength<<"\nVOCAL_DRIFT="<<v.drift_retention<<"\nVOCAL_VIBRATO="<<v.vibrato_retention<<"\nVOCAL_TRANSITION="<<v.transition<<"\nVOCAL_FORMANT="<<v.formant_repair<<"\nVOCAL_RESIDUAL="<<v.spectral_residual_mix<<"\nVOCAL_CHARACTER="<<v.character<<"\nVOCAL_MIX="<<v.mix<<"\n";
+    oss<<"VOCAL_ENABLED="<<(v.enabled?1:0)<<"\nVOCAL_CORRECTION="<<v.correction_strength<<"\nVOCAL_DRIFT="<<v.drift_retention<<"\nVOCAL_VIBRATO="<<v.vibrato_retention<<"\nVOCAL_TRANSITION="<<v.transition<<"\nVOCAL_FORMANT="<<v.formant_repair<<"\nVOCAL_RESIDUAL="<<v.spectral_residual_mix<<"\nVOCAL_CHARACTER="<<v.character<<"\nVOCAL_MIX="<<v.mix<<"\nVOCAL_SEQUENTIAL="<<v.sequential_stage_mix<<"\nVOCAL_APERIODIC_PROTECTION="<<v.aperiodic_protection<<"\n";
     return oss.str();
 }
 
@@ -231,6 +231,8 @@ bool PresetData::deserialize(const std::string& data) {
         else if(key=="VOCAL_RESIDUAL")vocal_expression.spectral_residual_mix=std::stof(val_str);
         else if(key=="VOCAL_CHARACTER")vocal_expression.character=std::stof(val_str);
         else if(key=="VOCAL_MIX")vocal_expression.mix=std::stof(val_str);
+        else if(key=="VOCAL_SEQUENTIAL")vocal_expression.sequential_stage_mix=std::stof(val_str);
+        else if(key=="VOCAL_APERIODIC_PROTECTION")vocal_expression.aperiodic_protection=std::stof(val_str);
     }
     return true;
 }
@@ -365,7 +367,7 @@ PresetData PresetManager::create_factory_vocal_resonator() {
     p.state_coupling = 0.50f;
     p.state_enabled = true;
     p.input_route_mode = 2; // External audio primary
-    p.vocal_expression={true,.72f,.62f,.82f,.68f,.58f,.10f,.24f,.88f};
+    p.vocal_expression={true,.72f,.62f,.82f,.68f,.58f,.10f,.24f,.88f,.34f,.88f};
     return p;
 }
 

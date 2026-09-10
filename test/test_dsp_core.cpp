@@ -198,14 +198,39 @@ void test_external_audio_processor_causality() {
 void test_dual_layer_vocal_expression() {
     std::cout << "[TEST] Causal Dual-Layer Vocal Expression... ";
     constexpr float SR=48000.0f;
-    AudioInputProcessor vocal; vocal.set_sample_rate(SR);
+    AudioInputProcessor vocal; vocal.set_sample_rate(SR); vocal.set_mix(1.0f);
     VocalExpressionControls c{}; c.enabled=true;c.correction_strength=.9f;c.drift_retention=.15f;c.vibrato_retention=.8f;c.transition=.75f;c.formant_repair=.65f;c.spectral_residual_mix=.9f;c.character=.2f;c.mix=1.0f;
     vocal.set_vocal_controls(c);
     float peak=0.0f;
     for(size_t i=0;i<48000;++i){float x=.45f*std::sin(TWO_PI*445.0f*static_cast<float>(i)/SR);float conditioned=vocal.process_sample(x,0.0f);float y=vocal.process_vocal_sample(conditioned,445.0f,0.96f);assert(std::isfinite(y));peak=std::max(peak,std::abs(y));}
-    const auto voiced=vocal.vocal_metrics(); assert(voiced.voiced&&voiced.voiced_mix>.9f);assert(std::abs(voiced.correction_cents)>1.0f);assert(voiced.residual_mix<=.25f);assert(peak>.02f);
+    const auto voiced=vocal.vocal_metrics(); assert(voiced.voiced&&voiced.voiced_mix>.9f);assert(voiced.source_type==VocalSourceType::Periodic);assert(voiced.periodic_mix>.65f);assert(std::abs(voiced.correction_cents)>1.0f);assert(voiced.residual_mix<=.25f);assert(peak>.02f);
     float dry=.17f;float fallback=vocal.process_vocal_sample(dry,0.0f,0.0f);assert(std::abs(fallback-dry)<1e-6f);
     std::cout<<"PASS (correction="<<voiced.correction_cents<<"c, residual="<<voiced.residual_mix<<")\n";
+}
+
+void test_time_varying_vocal_phrase() {
+    std::cout << "[TEST] Time-Varying Vocal Phrase / Component Protection... ";
+    constexpr float SR=48000.0f;
+    VocalExpressionControls c{}; c.enabled=true;c.correction_strength=.72f;c.drift_retention=.38f;c.vibrato_retention=1.0f;c.transition=.84f;c.formant_repair=.58f;c.spectral_residual_mix=.12f;c.mix=1.0f;c.sequential_stage_mix=.62f;c.aperiodic_protection=.93f;
+    AudioInputProcessor staged; staged.set_sample_rate(SR); staged.set_mix(1.0f); staged.set_vocal_controls(c);
+    float last_cents=0.0f, max_cents_step=0.0f, peak=0.0f; bool saw_periodic=false,saw_mixed=false;
+    for(size_t i=0;i<static_cast<size_t>(SR*3.0f);++i){
+        float t=static_cast<float>(i)/SR;
+        float hz=220.0f;
+        float confidence=.96f;
+        float x=0.0f;
+        if(t<.55f){ hz=226.0f+5.0f*std::sin(TWO_PI*5.2f*t); x=.42f*std::sin(TWO_PI*hz*t); } // drift + vibrato
+        else if(t<1.10f){ float u=(t-.55f)/.55f;hz=226.0f+150.0f*u;x=.42f*std::sin(TWO_PI*(226.0f*t+.5f*150.0f*u*t)); } // slide
+        else if(t<1.65f){ hz=371.0f+12.0f*std::sin(TWO_PI*(4.0f+3.0f*(t-1.1f))*(t-1.1f));x=.38f*std::sin(TWO_PI*hz*t)+.14f*std::sin(TWO_PI*2.02f*hz*t); } // changing vibrato / harmonic ambiguity
+        else if(t<2.20f){ hz=300.0f;confidence=.68f;x=.24f*std::sin(TWO_PI*hz*t)+.12f*std::sin(TWO_PI*3800.0f*t); } // mixed aspiration
+        else { confidence=.0f;x=.13f*std::sin(TWO_PI*5100.0f*t); } // sibilant-like aperiodic release
+        float conditioned=staged.process_sample(x,0.0f); float y=staged.process_vocal_sample(conditioned,hz,confidence); assert(std::isfinite(y));peak=std::max(peak,std::abs(y));
+        const auto& m=staged.vocal_metrics(); max_cents_step=std::max(max_cents_step,std::abs(m.correction_cents-last_cents));last_cents=m.correction_cents;
+        saw_periodic|=m.source_type==VocalSourceType::Periodic;saw_mixed|=m.source_type==VocalSourceType::Mixed;
+        if(t>2.25f) assert(std::abs(y-conditioned)<1e-6f); // protected release remains direct.
+    }
+    assert(saw_periodic&&saw_mixed);assert(max_cents_step<1.5f);assert(peak>.02f);
+    std::cout<<"PASS (max control step="<<max_cents_step<<"c/sample, peak="<<peak<<")\n";
 }
 
 // ── Test 4: Parameter Causality ──────────────────────────────────────────
@@ -248,10 +273,14 @@ void test_parameter_causality() {
     engine.set_parameter_normalized(29, 0.42f);
     engine.set_parameter_normalized(45, 0.73f);
     engine.set_parameter_normalized(60, 0.88f);
+    engine.set_parameter_normalized(122, 0.66f);
+    engine.set_parameter_normalized(123, 0.91f);
     const auto& automated=engine.get_current_preset();
     assert(std::abs(automated.sub_mix-0.91f)<1e-5f);
     assert(automated.eq_frequency_hz[2]>20.0f);
     assert(automated.mod_lfo_fm>0.7f);
+    assert(std::abs(automated.vocal_expression.sequential_stage_mix-.66f)<1e-5f);
+    assert(std::abs(automated.vocal_expression.aperiodic_protection-.91f)<1e-5f);
     engine.set_parameter_normalized(79,0.67f);
     assert(engine.get_current_preset().name=="FERAL WOBBLE");
 
@@ -570,6 +599,7 @@ int main() {
         test_chrono_state_mathematics();
         test_external_audio_processor_causality();
         test_dual_layer_vocal_expression();
+        test_time_varying_vocal_phrase();
         test_parameter_causality();
         test_weight_and_external_subharmonics();
         test_multipass_filter_and_eq();
