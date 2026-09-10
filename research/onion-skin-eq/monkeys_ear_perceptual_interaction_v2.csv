@@ -1,0 +1,6 @@
+Scenario,Pair,Class,Peak score,Mean score,Persistence,Hotspot Hz,Dominance
+Kick+Bass_coexist,Kick ↔ Bass,Masking,0.738,0.033,0.256,77.5,Bass
+Guitars_compete,Guitar A ↔ Guitar B,Masking,0.953,0.079,1.0,451.7,Balanced
+Vocal_over_guitar,Vocal ↔ Guitar,Masking,0.874,0.061,0.751,244.9,Guitar
+Separated_sources,Sub ↔ Air,Coexistence,0.221,0.013,0.0,122.5,Balanced
+Brief_collision,Vocal ↔ Cymbal,Competition,0.622,0.005,0.059,2916.3,Vocal

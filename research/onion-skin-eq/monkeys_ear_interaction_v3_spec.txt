@@ -1,0 +1,36 @@
+Monkey's Ear Onion-Skin EQ — Interaction Model V3
+
+Core principle:
+Overlap is not an error. Competition is contextual and temporal.
+
+Per-band state:
+1. Occupancy: audible energy in a Bark-like critical band.
+2. Overlap: minimum occupancy of two sources.
+3. Level similarity: whether both are strong enough to plausibly interfere.
+4. Collision episodes: contiguous intervals of meaningful overlap.
+5. Longest collision duration: differentiates transient coexistence from sustained competition.
+6. Repetition: recurring collisions are tracked but cannot alone escalate to masking.
+7. Asymmetry: measures whether one source consistently dominates the shared band.
+8. Direction: identifies which source tends to dominate.
+9. Severity: band peak weighted primarily by continuity, then asymmetry, with weak repetition contribution.
+
+Advisory classes:
+- Coexistence: shared spectrum, no meaningful conflict.
+- Pressure: noticeable interaction, typically brief.
+- Competition: sustained or moderately strong conflict worth inspecting.
+- Masking: strong, sustained interaction likely to obscure one source.
+
+UI implication:
+The onion skin should show collision episodes, not just accumulated spectral heat.
+Short events appear as narrow ghost flashes.
+Persistent competition accumulates a stable warning skin.
+Warnings remain advisory.
+Automatic EQ moves must be opt-in, bounded, recallable, and reversible.
+
+Next experiments:
+- Real musical stems.
+- Mid/Side and stereo separation.
+- Harmonic relatedness.
+- Track priority (Preserve / Yield / Equal).
+- Multiple-track (>2) interaction graph.
+- Source-role priors only as optional hints, never hardcoded truth.

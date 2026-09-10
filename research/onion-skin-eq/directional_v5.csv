@@ -1,0 +1,7 @@
+Case,active,max_masker_minus_target_db
+Equal energy,True,0.0
+Masker +12 dB,True,12.0
+Masker -12 dB,True,-12.0
+Both -20 dB,True,0.0
+Silent target,False,
+Silent masker,False,

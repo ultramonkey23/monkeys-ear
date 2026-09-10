@@ -1,0 +1,7 @@
+scenario,auto_peak_GR_dB,naive_peak_GR_dB,auto_mean_abs_GR_dB,auto_chatter_dB_per_s,naive_chatter_dB_per_s,auto_transient_damage_dB,naive_transient_damage_dB,final_auto_GR_dB
+isolated_transient,0.079,4.0,0.008,0.040,2.003,0.008,4.0,-0.0000
+sustained_conflict,1.204,3.4,0.634,0.593,1.702,,, -0.0387
+repeated_hits,0.127,3.6,0.079,0.277,16.220,0.080,3.6,-0.0228
+level_step,1.400,3.8,0.653,0.676,1.902,,, -0.0970
+priority_disabled,1.301,3.6,0.432,0.651,1.802,,, -0.0006
+silence,0.000,0.0,0.000,0.000,0.000,,,0.0000

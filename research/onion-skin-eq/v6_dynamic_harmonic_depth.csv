@@ -1,0 +1,4 @@
+Strategy,Mean collision,Mean A identity,Mean B identity,Max movement cents
+Untouched,0.3342,1.0,1.0,0.0
+Dynamic harmonic gain,0.3293,0.9995,0.9994,0.0
+Gain + bounded movement,0.3291,0.9995,0.9994,2.1

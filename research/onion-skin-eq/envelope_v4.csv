@@ -1,0 +1,5 @@
+Case,Envelope overlap,Opposing-motion fraction,Interpretation
+Stable bass,0.09,0.0,Shared motion / steady source
+Bass yields,0.05,1.0,Complementary motion
+Bass follows,0.09,0.0,Shared motion / steady source
+Separated,0.0,0.0,No overlap

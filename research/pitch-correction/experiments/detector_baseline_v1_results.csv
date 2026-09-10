@@ -1,0 +1,13 @@
+case,algorithm,median_abs_cents,p95_abs_cents,octave_error_rate,mean_confidence
+stable_220,YIN,5.968,6.211,0.000,0.929
+stable_220,MPM,4.006,4.165,0.000,0.928
+vibrato,YIN,6.008,6.987,0.000,0.928
+vibrato,MPM,4.025,4.934,0.000,0.928
+slide,YIN,3.672,6.065,0.000,0.951
+slide,MPM,2.449,4.089,0.000,0.951
+strong_2nd_harmonic,YIN,3.203,3.302,0.000,0.896
+strong_2nd_harmonic,MPM,1202.844,1202.966,1.000,0.750
+noisy,YIN,8.940,23.964,0.000,0.901
+noisy,MPM,6.755,23.259,0.000,0.900
+breathy,YIN,13.320,31.301,0.000,0.730
+breathy,MPM,94.966,140.540,0.000,0.662
