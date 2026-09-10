@@ -21,6 +21,7 @@ add_library(monkeys_ear_core STATIC
     src/delay.cpp
     src/fdn_reverb.cpp
     src/audio_input.cpp
+    src/vocal_target.cpp
     src/safety_limiter.cpp
     src/latency_meter.cpp
     src/preset.cpp

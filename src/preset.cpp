@@ -1,6 +1,7 @@
 #include "monkeys_ear/preset.h"
 #include <sstream>
 #include <iomanip>
+#include <cstdio>
 
 namespace monkeys_ear {
 
@@ -114,6 +115,11 @@ std::string PresetData::serialize() const {
     for(size_t i=0;i<s.routes.size();++i)oss<<"SPACE_ROUTE"<<i<<"_SOURCE="<<s.routes[i].source<<"\nSPACE_ROUTE"<<i<<"_DEST="<<s.routes[i].destination<<"\nSPACE_ROUTE"<<i<<"_DEPTH="<<s.routes[i].depth<<"\n";
     const auto& v=vocal_expression;
     oss<<"VOCAL_ENABLED="<<(v.enabled?1:0)<<"\nVOCAL_CORRECTION="<<v.correction_strength<<"\nVOCAL_DRIFT="<<v.drift_retention<<"\nVOCAL_VIBRATO="<<v.vibrato_retention<<"\nVOCAL_TRANSITION="<<v.transition<<"\nVOCAL_FORMANT="<<v.formant_repair<<"\nVOCAL_RESIDUAL="<<v.spectral_residual_mix<<"\nVOCAL_CHARACTER="<<v.character<<"\nVOCAL_MIX="<<v.mix<<"\nVOCAL_SEQUENTIAL="<<v.sequential_stage_mix<<"\nVOCAL_APERIODIC_PROTECTION="<<v.aperiodic_protection<<"\n";
+    const auto& t=v.target;
+    oss<<"VOCAL_ARTICULATION="<<t.articulation<<"\nVOCAL_PORTAMENTO="<<t.portamento<<"\nVOCAL_TRANSITION_PRESERVATION="<<t.transition_preservation<<"\nVOCAL_TARGET_HYSTERESIS="<<t.target_hysteresis<<"\nVOCAL_ONSET_PROTECTION="<<t.onset_protection<<"\nVOCAL_DIRECTIONALITY="<<t.directionality<<"\n";
+    const auto& tuning=t.tuning;
+    oss<<"VOCAL_TUNING_BUILTIN="<<static_cast<int>(tuning.builtin)<<"\nVOCAL_TUNING_ROOT="<<tuning.root_cents<<"\nVOCAL_TUNING_PERIOD="<<tuning.period_cents<<"\nVOCAL_TUNING_COUNT="<<static_cast<int>(tuning.degree_count)<<"\nVOCAL_TUNING_LABEL="<<tuning.name()<<"\n";
+    for(uint8_t i=0;i<tuning.degree_count;++i){const auto& d=tuning.degrees[i];oss<<"VOCAL_DEGREE_"<<static_cast<int>(i)<<"="<<d.cents<<","<<d.gravity<<","<<d.ascending_gravity<<","<<d.descending_gravity<<","<<(d.enabled?1:0)<<","<<d.metadata<<"\n";}
     return oss.str();
 }
 
@@ -233,6 +239,19 @@ bool PresetData::deserialize(const std::string& data) {
         else if(key=="VOCAL_MIX")vocal_expression.mix=std::stof(val_str);
         else if(key=="VOCAL_SEQUENTIAL")vocal_expression.sequential_stage_mix=std::stof(val_str);
         else if(key=="VOCAL_APERIODIC_PROTECTION")vocal_expression.aperiodic_protection=std::stof(val_str);
+        else if(key=="VOCAL_ARTICULATION")vocal_expression.target.articulation=std::stof(val_str);
+        else if(key=="VOCAL_PORTAMENTO")vocal_expression.target.portamento=std::stof(val_str);
+        else if(key=="VOCAL_TRANSITION_PRESERVATION")vocal_expression.target.transition_preservation=std::stof(val_str);
+        else if(key=="VOCAL_TARGET_HYSTERESIS")vocal_expression.target.target_hysteresis=std::stof(val_str);
+        else if(key=="VOCAL_ONSET_PROTECTION")vocal_expression.target.onset_protection=std::stof(val_str);
+        else if(key=="VOCAL_DIRECTIONALITY")vocal_expression.target.directionality=std::stof(val_str);
+        else if(key=="VOCAL_TUNING_BUILTIN")vocal_expression.target.tuning.builtin=static_cast<VocalBuiltinTuning>(std::stoi(val_str));
+        else if(key=="VOCAL_TUNING_ROOT")vocal_expression.target.tuning.root_cents=std::stof(val_str);
+        else if(key=="VOCAL_TUNING_PERIOD")vocal_expression.target.tuning.period_cents=std::max(1.0f,std::stof(val_str));
+        else if(key=="VOCAL_TUNING_COUNT")vocal_expression.target.tuning.degree_count=0;
+        else if(key=="VOCAL_TUNING_LABEL"){vocal_expression.target.tuning.label.fill(0);std::strncpy(vocal_expression.target.tuning.label.data(),val_str.c_str(),vocal_expression.target.tuning.label.size()-1);}
+        else if(key.rfind("VOCAL_DEGREE_",0)==0){float cents=0,gravity=1,up=1,down=1;int enabled=1;unsigned metadata=0;if(std::sscanf(val_str.c_str(),"%f,%f,%f,%f,%d,%u",&cents,&gravity,&up,&down,&enabled,&metadata)==6&&vocal_expression.target.tuning.add_degree_cents(cents,gravity,up,down)){vocal_expression.target.tuning.degrees[vocal_expression.target.tuning.degree_count-1].enabled=enabled!=0;vocal_expression.target.tuning.degrees[vocal_expression.target.tuning.degree_count-1].metadata=metadata;}
+        }
     }
     return true;
 }

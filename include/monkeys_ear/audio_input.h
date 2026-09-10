@@ -1,6 +1,7 @@
 #pragma once
 
 #include "monkeys_ear/types.h"
+#include "monkeys_ear/vocal_target.h"
 
 namespace monkeys_ear {
 
@@ -23,6 +24,9 @@ struct VocalExpressionControls {
     // keeps uncertain breath/consonant energy anchored to the original signal.
     float sequential_stage_mix = 0.0f;
     float aperiodic_protection = 1.0f;
+    // Targeting is separate from center/drift/vibrato controls.  It supports
+    // scale, custom cents/ratio spaces, direction and pitch articulation.
+    VocalTargetControls target{};
 };
 
 enum class VocalSourceType : uint8_t { Aperiodic, Mixed, Periodic };
@@ -35,6 +39,9 @@ struct VocalExpressionMetrics {
     float residual_mix = 0.0f;
     float periodic_mix = 0.0f;
     float aperiodic_mix = 1.0f;
+    float selected_target_cents = 0.0f;
+    float target_trajectory_cents = 0.0f;
+    int selected_degree = -1;
     VocalSourceType source_type = VocalSourceType::Aperiodic;
     bool voiced = false;
 };
@@ -48,7 +55,7 @@ public:
     void set_gain(float gain_db);     // -24dB to +24dB
     void set_mix(float mix);         // 0.0 (synth only) to 1.0 (mic only)
     void set_highpass_enabled(bool en);
-    void set_vocal_controls(const VocalExpressionControls& controls) { vocal_controls_ = controls; }
+    void set_vocal_controls(const VocalExpressionControls& controls);
     void reset();
 
     // Process one input frame: updates ring buffer, measures levels, returns blended signal
@@ -94,6 +101,9 @@ private:
     float analysis_low_ = 0.0f;
     float periodic_energy_ = 0.0f;
     float aperiodic_energy_ = 0.0f;
+    float onset_fast_ = 0.0f;
+    float onset_slow_ = 0.0f;
+    VocalTargetEngine vocal_target_{};
 };
 
 } // namespace monkeys_ear

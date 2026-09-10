@@ -208,6 +208,47 @@ void test_dual_layer_vocal_expression() {
     std::cout<<"PASS (correction="<<voiced.correction_cents<<"c, residual="<<voiced.residual_mix<<")\n";
 }
 
+void test_vocal_tuning_space_and_articulation() {
+    std::cout << "[TEST] Vocal Tuning Space / Gravity / Articulation... ";
+    constexpr float SR=48000.0f;
+    assert(std::abs(TuningSpace::ratio_to_cents(3.0f,2.0f)-701.955f)<.02f);
+    assert(std::abs(TuningSpace::cents_to_ratio(701.955f)-1.5f)<.001f);
+
+    VocalTargetControls c{};c.tuning.clear();c.tuning.add_degree_cents(0.0f);c.tuning.add_degree_ratio(3.0f,2.0f,.85f);
+    VocalTargetEngine target;target.set_sample_rate(SR);target.set_controls(c);target.reset();
+    target.process(688.0f,0.0f,.95f,1.0f);assert(std::abs(target.metrics().selected_cents-701.955f)<.03f);
+
+    // A strong anchor wins over a weak passing degree even when the latter is closer.
+    c.tuning.clear();c.tuning.add_degree_cents(0.0f,1.0f);c.tuning.add_degree_cents(100.0f,.15f);c.articulation=.5f;c.transition_preservation=0;
+    target.set_controls(c);target.reset();target.process(86.0f,0.0f,.95f,1.0f);assert(target.metrics().selected_degree==0);
+
+    // Direction is part of target selection, not a post-target glide convention.
+    c.tuning.clear();c.tuning.add_degree_cents(0.0f,.8f,.1f,1.0f);c.tuning.add_degree_cents(100.0f,.8f,1.0f,.1f);c.directionality=1.0f;
+    target.set_controls(c);target.reset();target.process(50.0f,120.0f,.95f,1.0f);assert(target.metrics().selected_degree==1);
+    target.reset();target.process(50.0f,-120.0f,.95f,1.0f);assert(target.metrics().selected_degree==0);
+
+    // Hysteresis prevents vibrato around a degree boundary from target chatter.
+    c.tuning.clear();c.tuning.add_degree_cents(0);c.tuning.add_degree_cents(100);c.articulation=-.7f;c.target_hysteresis=.9f;
+    target.set_controls(c);target.reset();target.process(20.0f,0.0f,.95f,0.0f);for(int i=0;i<600;++i)target.process(50.0f+11.0f*std::sin(TWO_PI*i/47.0f),0.0f,.95f,0.0f);assert(target.metrics().switch_count==0);
+
+    // Legato keeps center correction available but carries its target as a trajectory;
+    // staccato onset deliberately reacquires the next target instead.
+    c.tuning.clear();c.tuning.add_degree_cents(0);c.tuning.add_degree_cents(300);c.transition_preservation=.9f;c.portamento=.8f;c.articulation=-1.0f;c.target_hysteresis=.2f;
+    target.set_controls(c);target.reset();target.process(0,0,.95f,1);target.process(300,140,.95f,0);assert(target.metrics().selected_cents>299&&target.metrics().trajectory_cents<1.0f);
+    c.articulation=1.0f;target.set_controls(c);target.reset();target.process(0,0,.95f,1);for(int i=0;i<500;++i)target.process(300,140,.95f,1);assert(target.metrics().trajectory_cents>100.0f);
+
+    c.tuning.set_builtin(VocalBuiltinTuning::BohlenPierce13);assert(c.tuning.period_cents>1800.0f&&c.tuning.degree_count==13);
+    target.set_controls(c);target.reset();target.process(720.0f,0,.95f,1);assert(std::abs(target.metrics().selected_cents-731.521f)<.1f);
+    for(int i=0;i<static_cast<int>(VocalBuiltinTuning::Count);++i){TuningSpace library;library.set_builtin(static_cast<VocalBuiltinTuning>(i));assert(library.degree_count>0&&library.period_cents>0.0f&&library.name()[0]);}
+
+    // Custom cents/ratio spaces are data, and retain their targeting semantics on recall.
+    PresetData custom;custom.vocal_expression.target=c;custom.vocal_expression.target.articulation=-.37f;custom.vocal_expression.target.tuning.clear();
+    custom.vocal_expression.target.tuning.root_cents=17.0f;custom.vocal_expression.target.tuning.add_degree_cents(0,.95f);custom.vocal_expression.target.tuning.add_degree_ratio(7,6,.42f,.8f,.3f);
+    PresetData restored;assert(restored.deserialize(custom.serialize()));const auto& recalled=restored.vocal_expression.target;
+    assert(recalled.tuning.degree_count==2&&std::abs(recalled.tuning.root_cents-17.0f)<.01f&&std::abs(recalled.tuning.degrees[1].cents-TuningSpace::ratio_to_cents(7,6))<.02f&&std::abs(recalled.articulation+.37f)<.01f);
+    std::cout << "PASS (JI, gravity, direction, hysteresis, articulation, non-octave)\n";
+}
+
 void test_time_varying_vocal_phrase() {
     std::cout << "[TEST] Time-Varying Vocal Phrase / Component Protection... ";
     constexpr float SR=48000.0f;
@@ -599,6 +640,7 @@ int main() {
         test_chrono_state_mathematics();
         test_external_audio_processor_causality();
         test_dual_layer_vocal_expression();
+        test_vocal_tuning_space_and_articulation();
         test_time_varying_vocal_phrase();
         test_parameter_causality();
         test_weight_and_external_subharmonics();

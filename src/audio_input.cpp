@@ -18,6 +18,12 @@ AudioInputProcessor::AudioInputProcessor()
 
 void AudioInputProcessor::set_sample_rate(float sr) {
     sample_rate_ = std::max(1000.0f, sr);
+    vocal_target_.set_sample_rate(sample_rate_);
+}
+
+void AudioInputProcessor::set_vocal_controls(const VocalExpressionControls& controls) {
+    vocal_controls_ = controls;
+    vocal_target_.set_controls(vocal_controls_.target);
 }
 
 void AudioInputProcessor::set_gain(float gain_db) {
@@ -43,7 +49,8 @@ void AudioInputProcessor::reset() {
     peak_level_ = 0.0f;
     rms_count_ = 0;
     grain_phase_ = secondary_grain_phase_ = correction_cents_ = pitch_fast_cents_ = pitch_slow_cents_ = 0.0f;
-    source_envelope_ = shifted_envelope_ = residual_low_ = analysis_low_ = periodic_energy_ = aperiodic_energy_ = 0.0f;
+    source_envelope_ = shifted_envelope_ = residual_low_ = analysis_low_ = periodic_energy_ = aperiodic_energy_ = onset_fast_ = onset_slow_ = 0.0f;
+    vocal_target_.reset();
     vocal_metrics_ = {};
 }
 
@@ -72,7 +79,7 @@ float AudioInputProcessor::process_vocal_sample(float input, float tracked_hz, f
     const VocalSourceType source_type = periodic_mix > 0.65f ? VocalSourceType::Periodic
         : (periodic_mix < 0.18f ? VocalSourceType::Aperiodic : VocalSourceType::Mixed);
     if (!voiced) {
-        vocal_metrics_ = {tracked_hz, conf, correction_cents_, 0.0f, 0.0f, 0.0f, 1.0f, VocalSourceType::Aperiodic, false};
+        vocal_metrics_ = {tracked_hz, conf, correction_cents_, 0.0f, 0.0f, 0.0f, 1.0f, 0.0f, 0.0f, -1, VocalSourceType::Aperiodic, false};
         return input;
     }
     float desired_cents = 0.0f;
@@ -83,9 +90,15 @@ float AudioInputProcessor::process_vocal_sample(float input, float tracked_hz, f
         pitch_fast_cents_ += (input_cents - pitch_fast_cents_) * fast_alpha;
         pitch_slow_cents_ += (pitch_fast_cents_ - pitch_slow_cents_) * slow_alpha;
         const float vibrato = pitch_fast_cents_ - pitch_slow_cents_;
-        const float snapped = std::round(pitch_slow_cents_ / 100.0f) * 100.0f;
+        const float onset_fast_alpha = 1.0f - std::exp(-1.0f / (0.003f * sample_rate_));
+        const float onset_slow_alpha = 1.0f - std::exp(-1.0f / (0.035f * sample_rate_));
+        onset_fast_ += (std::abs(input) - onset_fast_) * onset_fast_alpha;
+        onset_slow_ += (std::abs(input) - onset_slow_) * onset_slow_alpha;
+        const float onset = clamp((onset_fast_ - onset_slow_) / std::max(0.02f, onset_slow_ * 1.5f), 0.0f, 1.0f);
+        const float motion = (pitch_fast_cents_ - pitch_slow_cents_) / 0.110f;
+        const float target = vocal_target_.process(pitch_slow_cents_, motion, conf, onset);
         const float retained_pitch = pitch_slow_cents_ + vibrato * clamp(c.vibrato_retention, 0.0f, 1.0f);
-        desired_cents = (snapped - retained_pitch) * clamp(c.correction_strength, 0.0f, 1.0f) * (1.0f - clamp(c.drift_retention, 0.0f, 1.0f));
+        desired_cents = (target - retained_pitch) * clamp(c.correction_strength, 0.0f, 1.0f) * (1.0f - clamp(c.drift_retention, 0.0f, 1.0f));
     }
     const float transition_ms = 2.0f + (1.0f - clamp(c.transition, 0.0f, 1.0f)) * 58.0f;
     const float correction_alpha = 1.0f - std::exp(-1.0f / (transition_ms * 0.001f * sample_rate_));
@@ -135,7 +148,8 @@ float AudioInputProcessor::process_vocal_sample(float input, float tracked_hz, f
     const float residual_mix = std::min(residual_request, 1.0f - transform_mix);
     const float dual_layer = repaired * transform_mix + (input - residual_low_) * residual_mix + input * (1.0f - transform_mix - residual_mix);
     const float colored = lerp(dual_layer, fast_tanh(dual_layer * (1.0f + clamp(c.character, 0.0f, 1.0f) * 2.5f)), clamp(c.character, 0.0f, 1.0f) * 0.35f);
-    vocal_metrics_ = {tracked_hz, conf, correction_cents_, confidence_mix, residual_mix, periodic_mix, aperiodic_mix, source_type, voiced};
+    const auto& target_metrics = vocal_target_.metrics();
+    vocal_metrics_ = {tracked_hz, conf, correction_cents_, confidence_mix, residual_mix, periodic_mix, aperiodic_mix, target_metrics.selected_cents, target_metrics.trajectory_cents, target_metrics.selected_degree, source_type, voiced};
     return sanitize(lerp(input, colored, clamp(c.mix, 0.0f, 1.0f)));
 }
 
