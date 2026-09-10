@@ -6,9 +6,6 @@
 
 namespace monkeys_ear {
 
-// LIVE vocal semantics: correction is optional, never a claim of exact pitch.
-// The voiced stage is causal and pitch-synchronous; unvoiced/noisy material
-// stays direct except for the explicitly capped residual character layer.
 struct VocalExpressionControls {
     bool enabled = false;
     float correction_strength = 0.0f;
@@ -60,15 +57,31 @@ public:
     float get_peak_level() const { return peak_level_; }
     float read_ring_buffer(size_t lag) const { return ring_buffer_.read(lag); }
     const VocalExpressionMetrics& vocal_metrics() const { return vocal_metrics_; }
-    // Shared evidence is descriptive. Consumers must not reinterpret motion
-    // residual as proven vibrato until a classifier establishes that evidence.
     const VocalAnalysisFrame& vocal_analysis() const { return vocal_analysis_; }
 
 private:
+    struct RuntimeVocalControls {
+        float correction_strength = 0.0f;
+        float drift_retention = 1.0f;
+        float vibrato_retention = 1.0f;
+        float transition = 0.5f;
+        float formant_repair = 0.0f;
+        float spectral_residual_mix = 0.0f;
+        float character = 0.0f;
+        float mix = 1.0f;
+        float sequential_stage_mix = 0.0f;
+        float aperiodic_protection = 1.0f;
+    } runtime_vocal_{};
+
+    static VocalExpressionControls sanitize_vocal_controls(const VocalExpressionControls& controls) noexcept;
+    void snap_runtime_vocal_controls() noexcept;
+    void advance_runtime_vocal_controls() noexcept;
+
     float sample_rate_;
     float gain_linear_;
     float mix_;
     bool highpass_enabled_;
+    bool runtime_vocal_initialized_ = false;
 
     LockFreeRingBuffer<float, RING_BUFFER_SIZE> ring_buffer_;
     LockFreeRingBuffer<float, RING_BUFFER_SIZE> vocal_stage_ring_buffer_;
