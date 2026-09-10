@@ -73,9 +73,11 @@ LatencyStats LatencyMeter::get_stats() const {
     std::vector<float> sorted(history_us_.begin(), history_us_.begin() + sample_count_);
     std::sort(sorted.begin(), sorted.end());
 
+    size_t idx50 = static_cast<size_t>(0.50f * (sample_count_ - 1));
     size_t idx95 = static_cast<size_t>(0.95f * (sample_count_ - 1));
     size_t idx99 = static_cast<size_t>(0.99f * (sample_count_ - 1));
 
+    stats.p50_us = sorted[idx50];
     stats.p95_us = sorted[idx95];
     stats.p99_us = sorted[idx99];
     stats.max_us = sorted.back();

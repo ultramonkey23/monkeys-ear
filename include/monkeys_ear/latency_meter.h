@@ -9,6 +9,7 @@ namespace monkeys_ear {
 
 struct LatencyStats {
     float avg_us;
+    float p50_us;
     float p95_us;
     float p99_us;
     float max_us;
