@@ -1,6 +1,7 @@
 #pragma once
 
 #include "monkeys_ear/types.h"
+#include "monkeys_ear/vocal_analysis.h"
 #include "monkeys_ear/vocal_target.h"
 
 namespace monkeys_ear {
@@ -18,14 +19,8 @@ struct VocalExpressionControls {
     float spectral_residual_mix = 0.0f;
     float character = 0.0f;
     float mix = 1.0f;
-    // Advanced controls retain the simple workhorse surface above.  The first
-    // moves correction through two causal PSOLA stages instead of demanding
-    // that one regraining operation carry the whole displacement.  The second
-    // keeps uncertain breath/consonant energy anchored to the original signal.
     float sequential_stage_mix = 0.0f;
     float aperiodic_protection = 1.0f;
-    // Targeting is separate from center/drift/vibrato controls.  It supports
-    // scale, custom cents/ratio spaces, direction and pitch articulation.
     VocalTargetControls target{};
 };
 
@@ -52,13 +47,12 @@ public:
 
     AudioInputProcessor();
     void set_sample_rate(float sr);
-    void set_gain(float gain_db);     // -24dB to +24dB
-    void set_mix(float mix);         // 0.0 (synth only) to 1.0 (mic only)
+    void set_gain(float gain_db);
+    void set_mix(float mix);
     void set_highpass_enabled(bool en);
     void set_vocal_controls(const VocalExpressionControls& controls);
     void reset();
 
-    // Process one input frame: updates ring buffer, measures levels, returns blended signal
     float process_sample(float mic_in, float synth_in);
     float process_vocal_sample(float input, float tracked_hz, float confidence);
 
@@ -66,6 +60,9 @@ public:
     float get_peak_level() const { return peak_level_; }
     float read_ring_buffer(size_t lag) const { return ring_buffer_.read(lag); }
     const VocalExpressionMetrics& vocal_metrics() const { return vocal_metrics_; }
+    // Shared evidence is descriptive. Consumers must not reinterpret motion
+    // residual as proven vibrato until a classifier establishes that evidence.
+    const VocalAnalysisFrame& vocal_analysis() const { return vocal_analysis_; }
 
 private:
     float sample_rate_;
@@ -74,15 +71,10 @@ private:
     bool highpass_enabled_;
 
     LockFreeRingBuffer<float, RING_BUFFER_SIZE> ring_buffer_;
-    // Fixed causal intermediate history makes the optional second transform a
-    // real sequential stage rather than a cosmetic ratio split.
     LockFreeRingBuffer<float, RING_BUFFER_SIZE> vocal_stage_ring_buffer_;
 
-    // DC-block / highpass filter
     float hp_x1_;
     float hp_y1_;
-
-    // Envelope followers for live feedback
     float rms_accumulator_;
     float rms_level_;
     float peak_level_;
@@ -90,6 +82,7 @@ private:
 
     VocalExpressionControls vocal_controls_{};
     VocalExpressionMetrics vocal_metrics_{};
+    VocalAnalysisFrame vocal_analysis_{};
     float grain_phase_ = 0.0f;
     float secondary_grain_phase_ = 0.0f;
     float correction_cents_ = 0.0f;
