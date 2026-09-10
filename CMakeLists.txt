@@ -12,7 +12,8 @@ else()
     add_compile_options(-O3 -ffast-math -Wall -Wextra -Wno-unused-parameter)
 endif()
 
-# Core DSP static library
+# Core DSP static library. Standalone module processors live here so the suite
+# and individual VST3 wrappers share one DSP implementation.
 add_library(monkeys_ear_core STATIC
     src/voice.cpp
     src/filter.cpp
@@ -22,6 +23,7 @@ add_library(monkeys_ear_core STATIC
     src/fdn_reverb.cpp
     src/audio_input.cpp
     src/vocal_target.cpp
+    src/vocal_module.cpp
     src/safety_limiter.cpp
     src/latency_meter.cpp
     src/preset.cpp
@@ -50,7 +52,8 @@ target_link_libraries(monkeys_ear_test_runner PRIVATE
     monkeys_ear_core
 )
 
-# VST3 Plugin Target (Shared Library / DLL)
+# Legacy combined VST3. Individual standalone wrappers are added beside this
+# target as they satisfy the standalone module gate; do not duplicate DSP.
 add_library(monkeys_ear SHARED
     vst3/vst3_entry.cpp
 )
@@ -63,7 +66,6 @@ target_link_libraries(monkeys_ear PRIVATE
     monkeys_ear_core
 )
 
-# Set plugin output name and extension
 set_target_properties(monkeys_ear PROPERTIES
     OUTPUT_NAME "monkeys_ear"
     SUFFIX ".vst3"
