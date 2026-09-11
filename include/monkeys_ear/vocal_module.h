@@ -3,6 +3,7 @@
 #include "monkeys_ear/module_contract.h"
 #include "monkeys_ear/ecosystem_state.h"
 #include "monkeys_ear/audio_input.h"
+#include "monkeys_ear/tonal.h"
 #include <cstdint>
 
 namespace monkeys_ear {
@@ -48,6 +49,7 @@ private:
     float local_pitch_confidence_ = 0.0f;
     float shared_pitch_hz_ = 0.0f;
     float shared_pitch_confidence_ = 0.0f;
+    ExternalSubharmonic local_pitch_tracker_{};
     bool shared_pitch_valid_ = false;
     bool bypass_ = false;
 };

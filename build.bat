@@ -17,7 +17,7 @@ if %ERRORLEVEL% neq 0 (
     exit /b %ERRORLEVEL%
 )
 
-echo [NINJA] Compiling core, test runner, and VST3 plugin...
+echo [NINJA] Compiling core, test runner, and standalone VST3 modules...
 cmake --build build --config Release
 if %ERRORLEVEL% neq 0 (
     echo [ERROR] Build failed!
@@ -28,5 +28,6 @@ echo.
 echo [SUCCESS] Monkey's Ear build completed!
 echo   - Core Library:  build\libmonkeys_ear_core.a
 echo   - Test Runner:   build\monkeys_ear_test_runner.exe
-echo   - VST3 Plugin:   build\monkeys_ear.vst3
+echo   - Full VST3:      build\monkeys_ear.vst3
+echo   - Vocal VST3:     build\monkeys_ear_vocal.vst3
 echo =======================================================

@@ -49,7 +49,16 @@ target_include_directories(monkeys_ear PRIVATE ${CMAKE_CURRENT_SOURCE_DIR}/vst3)
 target_link_libraries(monkeys_ear PRIVATE monkeys_ear_core)
 set_target_properties(monkeys_ear PROPERTIES OUTPUT_NAME "monkeys_ear" SUFFIX ".vst3" PREFIX "")
 
+# Standalone-useful ecosystem module: intentionally a separate binary, not a
+# hidden mode in the full instrument/FX bundle.
+add_library(monkeys_ear_vocal SHARED vst3/vocal_vst3_entry.cpp)
+target_include_directories(monkeys_ear_vocal PRIVATE ${CMAKE_CURRENT_SOURCE_DIR}/vst3)
+target_link_libraries(monkeys_ear_vocal PRIVATE monkeys_ear_core)
+set_target_properties(monkeys_ear_vocal PROPERTIES OUTPUT_NAME "monkeys_ear_vocal" SUFFIX ".vst3" PREFIX "")
+
 if(WIN32)
     add_executable(monkeys_ear_host_probe test/test_vst3_host_probe.cpp)
     target_include_directories(monkeys_ear_host_probe PRIVATE ${CMAKE_CURRENT_SOURCE_DIR}/vst3)
+    add_executable(monkeys_ear_vocal_host_probe test/test_vocal_vst3_probe.cpp)
+    target_include_directories(monkeys_ear_vocal_host_probe PRIVATE ${CMAKE_CURRENT_SOURCE_DIR}/vst3)
 endif()

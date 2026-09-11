@@ -1,5 +1,6 @@
 #include "monkeys_ear/engine.h"
 #include "monkeys_ear/chrono_state.h"
+#include "monkeys_ear/vocal_module.h"
 #include "wav_writer.h"
 #include <iostream>
 #include <vector>
@@ -22,6 +23,26 @@ static float estimate_frequency(const std::vector<float>& x, float sr, size_t be
     int crossings=0; size_t first=0,last=0;
     for(size_t i=std::max<size_t>(begin,1);i<x.size();++i) if(x[i-1]<=0&&x[i]>0){if(crossings==0)first=i;last=i;++crossings;}
     return crossings>1 ? sr*static_cast<float>(crossings-1)/static_cast<float>(last-first) : 0.0f;
+}
+
+void test_standalone_vocal_module() {
+    std::cout << "[TEST] Standalone Vocal Module Local Tracking / Bypass... ";
+    constexpr size_t N=64; constexpr float SR=48000.0f;
+    VocalModule vocal; vocal.prepare(SR,N);
+    VocalExpressionControls controls=vocal.controls();
+    controls.enabled=true; controls.correction_strength=.90f; controls.drift_retention=.05f;
+    controls.vibrato_retention=.15f; controls.mix=1.0f; vocal.set_controls(controls);
+    std::array<float,N> in{},out_l{},out_r{}; double changed=0.0;
+    for(size_t block=0;block<180;++block){
+        for(size_t i=0;i<N;++i){float t=float(block*N+i)/SR;in[i]=.35f*std::sin(TWO_PI*433.0f*t);}
+        vocal.process_block(in.data(),in.data(),out_l.data(),out_r.data(),N);
+        for(size_t i=0;i<N;++i){assert(std::isfinite(out_l[i])&&std::isfinite(out_r[i]));if(block>120){float d=out_l[i]-in[i];changed+=d*d;}}
+    }
+    assert(vocal.analysis().pitch_confidence>0.35f);
+    assert(changed>1e-5);
+    vocal.set_bypass(true); vocal.process_block(in.data(),in.data(),out_l.data(),out_r.data(),N);
+    for(size_t i=0;i<N;++i){assert(out_l[i]==in[i]&&out_r[i]==in[i]);}
+    std::cout << "PASS (local confidence=" << vocal.analysis().pitch_confidence << ")\n";
 }
 
 // ── Test 1: PolyBLEP Oscillator & Cross-FM / Sync ────────────────────────
@@ -719,6 +740,7 @@ int main(int argc, char** argv) {
         test_osc_cross_fm_and_sync();
         test_chrono_state_mathematics();
         test_external_audio_processor_causality();
+        test_standalone_vocal_module();
         test_dual_layer_vocal_expression();
         test_vocal_reset_clears_all_causal_histories();
         test_audio_input_extreme_finite_safety();

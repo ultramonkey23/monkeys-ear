@@ -100,4 +100,5 @@ The limiter is a bounded signal-protection stage. It is not a hearing-safety gua
 - `build\libmonkeys_ear_core.a` — Static C++20 DSP Core Engine
 - `build\monkeys_ear_test_runner.exe` — Deterministic Test Suite & Offline Audio Renderer
 - `build\monkeys_ear.vst3` — Native VST3 Plugin Bundle for REAPER / DAWs
+- `build\monkeys_ear_vocal.vst3` — Standalone Vocal effect: local causal pitch tracking and the established dual-layer Vocal mechanism only
 - Installed to `C:\Program Files\Common Files\VST3\monkeys_ear.vst3`
