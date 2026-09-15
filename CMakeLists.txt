@@ -42,6 +42,11 @@ add_executable(monkeys_ear_test_runner test/test_dsp_core.cpp)
 target_include_directories(monkeys_ear_test_runner PRIVATE ${CMAKE_CURRENT_SOURCE_DIR}/test)
 target_link_libraries(monkeys_ear_test_runner PRIVATE monkeys_ear_core)
 
+# Small isolated characterization harness for the pitch evidence layer. Keep it
+# separate from the large DSP suite so adversarial tracker work stays bounded.
+add_executable(monkeys_ear_vocal_tracker_probe test/test_vocal_tracker_probe.cpp)
+target_link_libraries(monkeys_ear_vocal_tracker_probe PRIVATE monkeys_ear_core)
+
 # Legacy combined VST3 remains during migration. Standalone wrappers sit beside
 # it and link the same core; no DSP fork is permitted.
 add_library(monkeys_ear SHARED vst3/vst3_entry.cpp)
