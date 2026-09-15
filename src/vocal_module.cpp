@@ -35,7 +35,12 @@ void VocalModule::prepare(float sample_rate, uint32_t max_block_size) noexcept {
 
 void VocalModule::reset() noexcept { processor_.reset(); local_pitch_tracker_.reset(); clear_ecosystem_evidence(); health_.finite_output=true; }
 void VocalModule::set_controls(const VocalExpressionControls& controls) noexcept {
-    controls_=controls; processor_.set_vocal_controls(controls_);
+    controls_=controls;
+    auto processor_controls=controls_;
+    // The module owns the plugin-level dry/wet contract. Keep the inner vocal
+    // processor fully wet so Mix=0 can return the original input exactly.
+    processor_controls.mix=1.0f;
+    processor_.set_vocal_controls(processor_controls);
 }
 
 void VocalModule::set_local_pitch_evidence(float tracked_hz, float confidence) noexcept {
@@ -79,7 +84,9 @@ void VocalModule::process_block(const float* input_l,const float* input_r,float*
         const float confidence=use_shared?shared_pitch_confidence_:local_confidence;
         const float conditioned=processor_.process_sample(mid,0.0f);
         const float wet_mid=processor_.process_vocal_sample(conditioned,tracked_hz,confidence);
-        float out_l=sanitize(wet_mid+side),out_r=sanitize(wet_mid-side);
+        const float module_mix=clamp(sanitize(controls_.mix),0.0f,1.0f);
+        const float mixed_mid=lerp(mid,wet_mid,module_mix);
+        float out_l=sanitize(mixed_mid+side),out_r=sanitize(mixed_mid-side);
         if(!std::isfinite(out_l)||!std::isfinite(out_r)){out_l=l;out_r=r;health_.finite_output=false;}
         output_l[i]=out_l;output_r[i]=out_r;
     }
