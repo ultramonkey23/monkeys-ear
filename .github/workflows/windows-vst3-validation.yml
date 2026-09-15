@@ -1,0 +1,35 @@
+name: Windows VST3 Validation
+
+on:
+  push:
+    branches: [master]
+  pull_request:
+    branches: [master]
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  windows-vst3:
+    runs-on: windows-latest
+    timeout-minutes: 20
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Configure
+        run: cmake -S . -B build -A x64
+
+      - name: Build
+        run: cmake --build build --config Release --parallel
+
+      - name: Run DSP core tests
+        run: .\build\Release\monkeys_ear_test_runner.exe
+
+      - name: Run combined VST3 host probe
+        run: .\build\Release\monkeys_ear_host_probe.exe
+
+      - name: Run standalone Vocal VST3 host and automation probe
+        run: .\build\Release\monkeys_ear_vocal_host_probe.exe
