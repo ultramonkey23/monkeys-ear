@@ -28,6 +28,9 @@ jobs:
       - name: Run DSP core tests
         run: .\build\Release\monkeys_ear_test_runner.exe
 
+      - name: Run Vocal tracker characterization
+        run: .\build\Release\monkeys_ear_vocal_tracker_probe.exe
+
       - name: Run combined VST3 host probe
         run: .\build\Release\monkeys_ear_host_probe.exe
 
