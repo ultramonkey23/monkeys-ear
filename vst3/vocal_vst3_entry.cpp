@@ -64,8 +64,10 @@ public:
     tresult SMTG_STDCALL canProcessSampleSize(int32 size) override{return size==0?kResultOk:kResultFalse;} uint32 SMTG_STDCALL getLatencySamples() override{return 0;}
     tresult SMTG_STDCALL setupProcessing(ProcessSetup& setup) override{module_.prepare(static_cast<float>(setup.sampleRate),static_cast<uint32>(std::max(1,setup.maxSamplesPerBlock)));apply_controls();return kResultOk;} tresult SMTG_STDCALL setProcessing(bool) override{return kResultOk;}
     tresult SMTG_STDCALL process(ProcessData& data) override {
-        if(data.inputParameterChanges){for(int32 q=0;q<data.inputParameterChanges->getParameterCount();++q){auto* queue=data.inputParameterChanges->getParameterData(q);if(!queue||!queue->getPointCount())continue;int32 offset=0;ParamValue value=0; if(queue->getPoint(queue->getPointCount()-1,offset,value)==kResultOk){const ParamID id=queue->getParameterId();if(id<kParamCount){state_->values[id].store(std::clamp(static_cast<float>(value),0.0f,1.0f));state_->dirty[id].store(false);}}}}
-        bool changed=false;for(int i=0;i<kParamCount;++i)changed=state_->dirty[i].exchange(false)||changed;if(changed)apply_controls();
+        bool changed=false;
+        if(data.inputParameterChanges){for(int32 q=0;q<data.inputParameterChanges->getParameterCount();++q){auto* queue=data.inputParameterChanges->getParameterData(q);if(!queue||!queue->getPointCount())continue;int32 offset=0;ParamValue value=0; if(queue->getPoint(queue->getPointCount()-1,offset,value)==kResultOk){const ParamID id=queue->getParameterId();if(id<kParamCount){state_->values[id].store(std::clamp(static_cast<float>(value),0.0f,1.0f));changed=true;}}}}
+        for(int i=0;i<kParamCount;++i)changed=state_->dirty[i].exchange(false)||changed;
+        if(changed)apply_controls();
         if(data.numSamples<=0||data.numInputs<1||data.numOutputs<1||!data.inputs[0].channelBuffers32||!data.outputs[0].channelBuffers32)return kResultOk;
         auto* in=data.inputs[0].channelBuffers32;auto* out=data.outputs[0].channelBuffers32;if(data.inputs[0].numChannels<2||data.outputs[0].numChannels<2)return kResultFalse;module_.process_block(in[0],in[1],out[0],out[1],static_cast<uint32>(data.numSamples));return kResultOk;
     }
@@ -100,7 +102,6 @@ VocalFactory* g_factory=nullptr;
 extern "C" {
 SMTG_EXPORT_SYMBOL IPluginFactory* SMTG_STDCALL GetPluginFactory(){if(!g_factory)g_factory=new VocalFactory();else g_factory->addRef();return g_factory;}
 #if defined(_WIN32)
-SMTG_EXPORT_SYMBOL bool SMTG_STDCALL InitDll(){return true;}
-SMTG_EXPORT_SYMBOL bool SMTG_STDCALL ExitDll(){return true;}
+BOOL APIENTRY DllMain(HMODULE,DWORD,LPVOID){return TRUE;}
 #endif
 }
