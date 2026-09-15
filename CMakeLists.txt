@@ -62,7 +62,9 @@ target_link_libraries(monkeys_ear_vocal PRIVATE monkeys_ear_core)
 set_target_properties(monkeys_ear_vocal PROPERTIES OUTPUT_NAME "monkeys_ear_vocal" SUFFIX ".vst3" PREFIX "")
 # vocal_vst3_entry.cpp uses the Windows DLL entrypoint types. Force the platform
 # declarations for MSVC without coupling the cross-platform DSP core to Win32.
+# NOMINMAX keeps windows.h from replacing std::min/std::max in DSP headers.
 if(MSVC)
+    target_compile_definitions(monkeys_ear_vocal PRIVATE NOMINMAX)
     target_compile_options(monkeys_ear_vocal PRIVATE /FIwindows.h)
 endif()
 
