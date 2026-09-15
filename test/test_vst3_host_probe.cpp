@@ -2,9 +2,7 @@
 #include <windows.h>
 #include <iostream>
 #include <vector>
-#include <cassert>
 #include <cstring>
-#include <iomanip>
 #include <cmath>
 #include <string>
 #include "vst3_sdk_minimal.h"
@@ -13,6 +11,8 @@ using namespace Steinberg;
 using namespace Steinberg::Vst;
 
 typedef IPluginFactory* (SMTG_STDCALL *GetPluginFactoryProc)();
+
+#define CHECK_STAGE(condition, stage) do { if (!(condition)) { std::cerr << "[FAIL] " << stage << "\n"; return 1; } else { std::cout << "[PASS] " << stage << "\n"; } } while (0)
 
 class OneEventList final : public IEventList {
 public:
@@ -36,68 +36,74 @@ public:
 };
 
 int main() {
-    std::cout << "=======================================================\n";
-    std::cout << "  HOST VERIFICATION PROBE // VST3 BINARY INSPECTION\n";
-    std::cout << "=======================================================\n\n";
+    std::cout << "=======================================================\n  HOST VERIFICATION PROBE // VST3 BINARY INSPECTION\n=======================================================\n" << std::flush;
 
     char probe_path[MAX_PATH]{};
-    GetModuleFileNameA(nullptr, probe_path, MAX_PATH);
+    const DWORD path_len=GetModuleFileNameA(nullptr,probe_path,MAX_PATH);
+    CHECK_STAGE(path_len>0 && path_len<MAX_PATH,"resolve probe executable path");
     std::string plugin_path(probe_path);
-    const size_t separator = plugin_path.find_last_of("\\/");
-    plugin_path = (separator == std::string::npos ? std::string{} : plugin_path.substr(0, separator + 1)) + "monkeys_ear.vst3";
-    HMODULE hMod = LoadLibraryA(plugin_path.c_str());
-    if (!hMod) { std::cerr << "[FAIL] Could not load VST3 DLL at " << plugin_path << "\n"; return 1; }
-    std::cout << "[PASS] Successfully loaded VST3 module: monkeys_ear.vst3\n";
+    const size_t separator=plugin_path.find_last_of("\\/");
+    plugin_path=(separator==std::string::npos?std::string{}:plugin_path.substr(0,separator+1))+"monkeys_ear.vst3";
+    std::cout << "[INFO] Loading " << plugin_path << "\n" << std::flush;
+    HMODULE hMod=LoadLibraryA(plugin_path.c_str());
+    if(!hMod){std::cerr<<"[FAIL] load monkeys_ear.vst3 (Win32 error "<<GetLastError()<<")\n";return 1;}
+    std::cout<<"[PASS] load monkeys_ear.vst3\n";
 
-    FARPROC proc = GetProcAddress(hMod, "GetPluginFactory");
-    if (!proc) { std::cerr << "[FAIL] GetPluginFactory export not found!\n"; return 1; }
-    auto getFactory = reinterpret_cast<GetPluginFactoryProc>(reinterpret_cast<void(*)()>(proc));
-    std::cout << "[PASS] Found exported symbol GetPluginFactory()\n";
+    FARPROC proc=GetProcAddress(hMod,"GetPluginFactory");
+    CHECK_STAGE(proc!=nullptr,"find GetPluginFactory export");
+    auto getFactory=reinterpret_cast<GetPluginFactoryProc>(reinterpret_cast<void(*)()>(proc));
+    IPluginFactory* factory=getFactory();
+    CHECK_STAGE(factory!=nullptr,"create plugin factory");
+    IPluginFactory2* factory2=nullptr;
+    tresult res=factory->queryInterface(IPluginFactory2_iid,(void**)&factory2);
+    CHECK_STAGE(res==kResultOk && factory2!=nullptr,"factory implements IPluginFactory2");
+    CHECK_STAGE(factory2->countClasses()==3,"factory exposes 3 classes");
 
-    IPluginFactory* factory = getFactory(); assert(factory != nullptr);
-    IPluginFactory2* factory2 = nullptr;
-    tresult res = factory->queryInterface(IPluginFactory2_iid, (void**)&factory2); assert(res == kResultOk && factory2 != nullptr);
-    std::cout << "[PASS] Factory implements IPluginFactory2\n";
-    int32 numClasses = factory2->countClasses(); assert(numClasses == 3);
+    PClassInfo2 info0{};
+    CHECK_STAGE(factory2->getClassInfo2(0,&info0)==kResultOk,"read instrument class info");
+    CHECK_STAGE(std::string(info0.name)=="Monkey's Ear" && std::string(info0.subCategories)=="Instrument|Synth","instrument class identity");
+    IComponent* instr_comp=nullptr; res=factory2->createInstance(info0.cid,IComponent_iid,(void**)&instr_comp);
+    CHECK_STAGE(res==kResultOk && instr_comp!=nullptr,"create instrument component");
+    CHECK_STAGE(instr_comp->getBusCount(kAudio,kInput)==0 && instr_comp->getBusCount(kAudio,kOutput)==1 && instr_comp->getBusCount(kEvent,kInput)==1,"instrument bus topology");
 
-    PClassInfo2 info0{}; factory2->getClassInfo2(0, &info0);
-    assert(std::string(info0.name) == "Monkey's Ear"); assert(std::string(info0.subCategories) == "Instrument|Synth");
-    IComponent* instr_comp = nullptr; res = factory2->createInstance(info0.cid, IComponent_iid, (void**)&instr_comp); assert(res == kResultOk && instr_comp != nullptr);
-    assert(instr_comp->getBusCount(kAudio, kInput) == 0); assert(instr_comp->getBusCount(kAudio, kOutput) == 1); assert(instr_comp->getBusCount(kEvent, kInput) == 1);
+    PClassInfo2 info1{};
+    CHECK_STAGE(factory2->getClassInfo2(1,&info1)==kResultOk,"read FX class info");
+    CHECK_STAGE(std::string(info1.name)=="Monkey's Ear FX" && std::string(info1.category)=="Audio Module Class","FX class identity");
+    IComponent* fx_comp=nullptr; res=factory2->createInstance(info1.cid,IComponent_iid,(void**)&fx_comp);
+    CHECK_STAGE(res==kResultOk && fx_comp!=nullptr,"create FX component");
+    CHECK_STAGE(fx_comp->getBusCount(kAudio,kInput)==1 && fx_comp->getBusCount(kAudio,kOutput)==1 && fx_comp->getBusCount(kEvent,kInput)==1,"FX bus topology");
 
-    PClassInfo2 info1{}; factory2->getClassInfo2(1, &info1);
-    assert(std::string(info1.name) == "Monkey's Ear FX"); assert(std::string(info1.category) == "Audio Module Class");
-    IComponent* fx_comp = nullptr; res = factory2->createInstance(info1.cid, IComponent_iid, (void**)&fx_comp); assert(res == kResultOk && fx_comp != nullptr);
-    assert(fx_comp->getBusCount(kAudio, kInput) == 1); assert(fx_comp->getBusCount(kAudio, kOutput) == 1); assert(fx_comp->getBusCount(kEvent, kInput) == 1);
+    PClassInfo2 info2{};
+    CHECK_STAGE(factory2->getClassInfo2(2,&info2)==kResultOk,"read controller class info");
+    IEditController* controller=nullptr; res=factory2->createInstance(info2.cid,IEditController_iid,(void**)&controller);
+    CHECK_STAGE(res==kResultOk && controller!=nullptr,"create edit controller");
+    CHECK_STAGE(controller->getParameterCount()==124,"controller exposes 124 parameters");
+    for(int32 i=0;i<124;++i){ParameterInfo pInfo{};CHECK_STAGE(controller->getParameterInfo(i,pInfo)==kResultOk,"read parameter info");}
 
-    PClassInfo2 info2{}; factory2->getClassInfo2(2, &info2);
-    IEditController* controller = nullptr; res = factory2->createInstance(info2.cid, IEditController_iid, (void**)&controller); assert(res == kResultOk && controller != nullptr);
-    int32 paramCount = controller->getParameterCount(); assert(paramCount == 124);
-    for (int32 i = 0; i < paramCount; ++i) { ParameterInfo pInfo{}; controller->getParameterInfo(i, pInfo); }
+    MemoryStream state_stream;
+    CHECK_STAGE(fx_comp->getState(&state_stream)==kResultOk,"serialize FX state");
+    CHECK_STAGE(state_stream.bytes.size()==12u+124u*sizeof(float),"serialized state size");
+    state_stream.pos=0; CHECK_STAGE(controller->setComponentState(&state_stream)==kResultOk,"controller accepts component state");
+    IMidiMapping* midi_map=nullptr; CHECK_STAGE(controller->queryInterface(IMidiMapping_iid,(void**)&midi_map)==kResultOk && midi_map!=nullptr,"controller exposes MIDI mapping");
+    ParamID bend_id=0,pressure_id=0;
+    CHECK_STAGE(midi_map->getMidiControllerAssignment(0,0,129,bend_id)==kResultOk && bend_id==80,"pitch-bend mapping");
+    CHECK_STAGE(midi_map->getMidiControllerAssignment(0,0,130,pressure_id)==kResultOk && pressure_id==81,"pressure mapping"); midi_map->release();
 
-    MemoryStream state_stream; assert(fx_comp->getState(&state_stream)==kResultOk); assert(state_stream.bytes.size()==12u+124u*sizeof(float));
-    state_stream.pos=0; assert(controller->setComponentState(&state_stream)==kResultOk);
-    IMidiMapping* midi_map=nullptr; assert(controller->queryInterface(IMidiMapping_iid,(void**)&midi_map)==kResultOk);
-    ParamID bend_id=0,pressure_id=0; assert(midi_map->getMidiControllerAssignment(0,0,129,bend_id)==kResultOk&&bend_id==80); assert(midi_map->getMidiControllerAssignment(0,0,130,pressure_id)==kResultOk&&pressure_id==81); midi_map->release();
-
-    IAudioProcessor* instr_proc=nullptr; assert(instr_comp->queryInterface(IAudioProcessor_iid,(void**)&instr_proc)==kResultOk);
-    ProcessSetup instr_setup{}; instr_setup.sampleRate=48000; instr_setup.maxSamplesPerBlock=128; instr_proc->setupProcessing(instr_setup); instr_comp->setActive(true);
+    IAudioProcessor* instr_proc=nullptr; CHECK_STAGE(instr_comp->queryInterface(IAudioProcessor_iid,(void**)&instr_proc)==kResultOk && instr_proc!=nullptr,"instrument exposes audio processor");
+    ProcessSetup instr_setup{}; instr_setup.sampleRate=48000; instr_setup.maxSamplesPerBlock=128;
+    CHECK_STAGE(instr_proc->setupProcessing(instr_setup)==kResultOk,"instrument setupProcessing"); CHECK_STAGE(instr_comp->setActive(true)==kResultOk,"activate instrument");
     std::vector<float> instr_l(128),instr_r(128); float* instr_channels[]={instr_l.data(),instr_r.data()}; AudioBusBuffers instr_out{}; instr_out.numChannels=2; instr_out.channelBuffers32=instr_channels;
     OneEventList notes; notes.event.type=kNoteOnEvent; notes.event.noteOn.pitch=48; notes.event.noteOn.velocity=.9f;
     ProcessData instr_data{}; instr_data.numSamples=128; instr_data.numOutputs=1; instr_data.outputs=&instr_out; instr_data.inputEvents=&notes;
-    assert(instr_proc->process(instr_data)==kResultOk); float instr_peak=0; for(float v:instr_l) instr_peak=std::max(instr_peak,std::abs(v)); assert(instr_peak>.001f);
+    CHECK_STAGE(instr_proc->process(instr_data)==kResultOk,"process instrument note"); float instr_peak=0; for(float v:instr_l)instr_peak=std::max(instr_peak,std::abs(v)); CHECK_STAGE(instr_peak>.001f,"instrument produces audio");
     instr_comp->setActive(false); instr_proc->release();
 
-    IAudioProcessor* fx_proc = nullptr; res = fx_comp->queryInterface(IAudioProcessor_iid, (void**)&fx_proc); assert(res == kResultOk && fx_proc != nullptr);
-    ProcessSetup setup{}; setup.sampleRate = 48000.0; setup.maxSamplesPerBlock = 128; setup.processMode = 0; fx_proc->setupProcessing(setup); fx_comp->setActive(true);
-    constexpr int32 N = 128; std::vector<float> in_buf_l(N), in_buf_r(N), out_buf_l(N, 0.0f), out_buf_r(N, 0.0f);
-    for (int32 i = 0; i < N; ++i) { float s = 0.5f * std::sin(6.2831853f * 440.0f * (static_cast<float>(i) / 48000.0f)); in_buf_l[i] = s; in_buf_r[i] = s; }
-    float* in_channels[] = { in_buf_l.data(), in_buf_r.data() }; float* out_channels[] = { out_buf_l.data(), out_buf_r.data() };
-    AudioBusBuffers inBuses[1]; inBuses[0].numChannels = 2; inBuses[0].channelBuffers32 = in_channels;
-    AudioBusBuffers outBuses[1]; outBuses[0].numChannels = 2; outBuses[0].channelBuffers32 = out_channels;
-    ProcessData procData{}; procData.numSamples = N; procData.numInputs = 1; procData.inputs = inBuses; procData.numOutputs = 1; procData.outputs = outBuses;
-    assert(fx_proc->process(procData) == kResultOk); float max_val = 0.0f; for (int32 i = 0; i < N; ++i) max_val = std::max(max_val, std::abs(out_buf_l[i])); assert(max_val > 0.01f);
+    IAudioProcessor* fx_proc=nullptr; res=fx_comp->queryInterface(IAudioProcessor_iid,(void**)&fx_proc); CHECK_STAGE(res==kResultOk && fx_proc!=nullptr,"FX exposes audio processor");
+    ProcessSetup setup{}; setup.sampleRate=48000.0; setup.maxSamplesPerBlock=128; setup.processMode=0; CHECK_STAGE(fx_proc->setupProcessing(setup)==kResultOk,"FX setupProcessing"); CHECK_STAGE(fx_comp->setActive(true)==kResultOk,"activate FX");
+    constexpr int32 N=128; std::vector<float> in_l(N),in_r(N),out_l(N,0.0f),out_r(N,0.0f); for(int32 i=0;i<N;++i){float s=.5f*std::sin(6.2831853f*440.0f*(static_cast<float>(i)/48000.0f));in_l[i]=s;in_r[i]=s;}
+    float* in_channels[]={in_l.data(),in_r.data()}; float* out_channels[]={out_l.data(),out_r.data()}; AudioBusBuffers inBuses[1]{}; inBuses[0].numChannels=2; inBuses[0].channelBuffers32=in_channels; AudioBusBuffers outBuses[1]{}; outBuses[0].numChannels=2; outBuses[0].channelBuffers32=out_channels;
+    ProcessData data{}; data.numSamples=N; data.numInputs=1; data.inputs=inBuses; data.numOutputs=1; data.outputs=outBuses; CHECK_STAGE(fx_proc->process(data)==kResultOk,"process FX audio"); float max_val=0; for(float v:out_l)max_val=std::max(max_val,std::abs(v)); CHECK_STAGE(max_val>.01f,"FX produces audio");
 
     fx_comp->setActive(false); fx_proc->release(); fx_comp->release(); instr_comp->release(); controller->release(); factory2->release(); factory->release(); FreeLibrary(hMod);
-    std::cout << ">>> ALL VST3 HOST BINARY CHECKS PASSED! <<<\n"; return 0;
+    std::cout<<">>> ALL VST3 HOST BINARY CHECKS PASSED! <<<\n"; return 0;
 }
