@@ -60,6 +60,11 @@ add_library(monkeys_ear_vocal SHARED vst3/vocal_vst3_entry.cpp)
 target_include_directories(monkeys_ear_vocal PRIVATE ${CMAKE_CURRENT_SOURCE_DIR}/vst3)
 target_link_libraries(monkeys_ear_vocal PRIVATE monkeys_ear_core)
 set_target_properties(monkeys_ear_vocal PROPERTIES OUTPUT_NAME "monkeys_ear_vocal" SUFFIX ".vst3" PREFIX "")
+# vocal_vst3_entry.cpp uses the Windows DLL entrypoint types. Force the platform
+# declarations for MSVC without coupling the cross-platform DSP core to Win32.
+if(MSVC)
+    target_compile_options(monkeys_ear_vocal PRIVATE /FIwindows.h)
+endif()
 
 if(WIN32)
     add_executable(monkeys_ear_host_probe test/test_vst3_host_probe.cpp)
