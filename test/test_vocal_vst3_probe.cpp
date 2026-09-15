@@ -68,7 +68,8 @@ int main() {
     // Host-style process-time automation must reach the DSP, not merely update stored state.
     // Mix=0 is dry by contract; Mix=1 exercises the active vocal path after warm-up.
     for(int block_size : {32,64,128,256}) {
-        processor->setupProcessing(ProcessSetup{0,0,block_size,48000.0});
+        ProcessSetup block_setup{};block_setup.sampleRate=48000.0;block_setup.maxSamplesPerBlock=block_size;
+        assert(processor->setupProcessing(block_setup)==kResultOk);
         OneParameterChange dry_mix(8,0.0); float dry_delta=0.0f;
         process_block(processor,block_size,&dry_mix,0.0f,&dry_delta);
         assert(dry_delta < 1.0e-5f);
