@@ -1,5 +1,4 @@
 #include <windows.h>
-#include <cassert>
 #include <cmath>
 #include <iostream>
 #include <string>
@@ -8,6 +7,8 @@
 using namespace Steinberg;
 using namespace Steinberg::Vst;
 using GetPluginFactoryProc = IPluginFactory* (SMTG_STDCALL*)();
+
+#define CHECK_STAGE(condition, stage) do { if (!(condition)) { std::cerr << "[FAIL] " << stage << "\n"; return 1; } else { std::cout << "[PASS] " << stage << "\n"; } } while (0)
 
 namespace {
 class OnePointQueue final : public IParamValueQueue {
@@ -34,50 +35,69 @@ public:
 private: OnePointQueue queue_;
 };
 
-void process_block(IAudioProcessor* processor, int block_size, IParameterChanges* changes, float phase, float* rms_out) {
+bool process_block(IAudioProcessor* processor, int block_size, IParameterChanges* changes, float phase, float* rms_out) {
+    if (!processor || !rms_out || block_size<=0 || block_size>256) return false;
     float in_l[256]{},in_r[256]{},out_l[256]{},out_r[256]{};
-    assert(block_size<=256);
     for(int i=0;i<block_size;++i){const float t=phase+static_cast<float>(i);in_l[i]=in_r[i]=0.35f*std::sin(2.0f*3.14159265358979323846f*220.0f*t/48000.0f);}
     float* in_ch[2]{in_l,in_r};float* out_ch[2]{out_l,out_r};
     AudioBusBuffers inputs{};inputs.numChannels=2;inputs.channelBuffers32=in_ch;
     AudioBusBuffers outputs{};outputs.numChannels=2;outputs.channelBuffers32=out_ch;
     ProcessData data{};data.numSamples=block_size;data.numInputs=1;data.numOutputs=1;data.inputs=&inputs;data.outputs=&outputs;data.inputParameterChanges=changes;
-    assert(processor->process(data)==kResultOk);
+    if (processor->process(data)!=kResultOk) return false;
     double sum=0.0;for(int i=0;i<block_size;++i){const double d=out_l[i]-in_l[i];sum+=d*d;}*rms_out=static_cast<float>(std::sqrt(sum/block_size));
+    return std::isfinite(*rms_out);
 }
 }
 
 int main() {
-    char exe[MAX_PATH]{}; GetModuleFileNameA(nullptr, exe, MAX_PATH);
-    std::string path(exe); path=path.substr(0,path.find_last_of("\\/")+1)+"monkeys_ear_vocal.vst3";
-    HMODULE module=LoadLibraryA(path.c_str()); assert(module);
-    auto factory_proc=reinterpret_cast<GetPluginFactoryProc>(reinterpret_cast<void(*)()>(GetProcAddress(module,"GetPluginFactory"))); assert(factory_proc);
-    IPluginFactory* factory=factory_proc(); assert(factory);
-    IPluginFactory2* factory2=nullptr; assert(factory->queryInterface(IPluginFactory2_iid,reinterpret_cast<void**>(&factory2))==kResultOk);
-    assert(factory2->countClasses()==2);
-    PClassInfo2 component_info{}; assert(factory2->getClassInfo2(0,&component_info)==kResultOk);
-    assert(std::string(component_info.name)=="Monkey's Ear Vocal"); assert(std::string(component_info.subCategories)=="Fx|Pitch Shift");
-    IComponent* component=nullptr; assert(factory2->createInstance(component_info.cid,IComponent_iid,reinterpret_cast<void**>(&component))==kResultOk);
-    assert(component->getBusCount(kAudio,kInput)==1 && component->getBusCount(kAudio,kOutput)==1);
-    IAudioProcessor* processor=nullptr; assert(component->queryInterface(IAudioProcessor_iid,reinterpret_cast<void**>(&processor))==kResultOk);
-    ProcessSetup setup{}; setup.sampleRate=48000;setup.maxSamplesPerBlock=256; assert(processor->setupProcessing(setup)==kResultOk);assert(processor->getLatencySamples()==0);
-    PClassInfo2 controller_info{}; assert(factory2->getClassInfo2(1,&controller_info)==kResultOk);
-    IEditController* controller=nullptr; assert(factory2->createInstance(controller_info.cid,IEditController_iid,reinterpret_cast<void**>(&controller))==kResultOk);
-    assert(controller->getParameterCount()==11); ParameterInfo info{}; assert(controller->getParameterInfo(1,info)==kResultOk);assert(info.title[0]=='V' && info.title[7]=='C');
+    std::cout << "=======================================================\n  STANDALONE VOCAL HOST/AUTOMATION PROBE\n=======================================================\n" << std::flush;
+    char exe[MAX_PATH]{};
+    const DWORD path_len=GetModuleFileNameA(nullptr,exe,MAX_PATH);
+    CHECK_STAGE(path_len>0 && path_len<MAX_PATH,"resolve probe executable path");
+    std::string path(exe); const size_t separator=path.find_last_of("\\/");
+    CHECK_STAGE(separator!=std::string::npos,"resolve Vocal VST3 directory");
+    path=path.substr(0,separator+1)+"monkeys_ear_vocal.vst3";
+    std::cout << "[INFO] Loading " << path << "\n" << std::flush;
+    HMODULE module=LoadLibraryA(path.c_str());
+    if(!module){std::cerr<<"[FAIL] load monkeys_ear_vocal.vst3 (Win32 error "<<GetLastError()<<")\n";return 1;}
+    std::cout << "[PASS] load monkeys_ear_vocal.vst3\n";
+    FARPROC proc=GetProcAddress(module,"GetPluginFactory");
+    CHECK_STAGE(proc!=nullptr,"find GetPluginFactory export");
+    auto factory_proc=reinterpret_cast<GetPluginFactoryProc>(reinterpret_cast<void(*)()>(proc));
+    IPluginFactory* factory=factory_proc(); CHECK_STAGE(factory!=nullptr,"create Vocal plugin factory");
+    IPluginFactory2* factory2=nullptr; CHECK_STAGE(factory->queryInterface(IPluginFactory2_iid,reinterpret_cast<void**>(&factory2))==kResultOk && factory2!=nullptr,"factory implements IPluginFactory2");
+    CHECK_STAGE(factory2->countClasses()==2,"factory exposes component and controller");
+    PClassInfo2 component_info{}; CHECK_STAGE(factory2->getClassInfo2(0,&component_info)==kResultOk,"read Vocal component class info");
+    CHECK_STAGE(std::string(component_info.name)=="Monkey's Ear Vocal" && std::string(component_info.subCategories)=="Fx|Pitch Shift","Vocal component identity");
+    IComponent* component=nullptr; CHECK_STAGE(factory2->createInstance(component_info.cid,IComponent_iid,reinterpret_cast<void**>(&component))==kResultOk && component!=nullptr,"create Vocal component");
+    CHECK_STAGE(component->getBusCount(kAudio,kInput)==1 && component->getBusCount(kAudio,kOutput)==1,"Vocal stereo FX bus topology");
+    IAudioProcessor* processor=nullptr; CHECK_STAGE(component->queryInterface(IAudioProcessor_iid,reinterpret_cast<void**>(&processor))==kResultOk && processor!=nullptr,"Vocal component exposes audio processor");
+    ProcessSetup setup{}; setup.sampleRate=48000;setup.maxSamplesPerBlock=256; CHECK_STAGE(processor->setupProcessing(setup)==kResultOk,"Vocal setupProcessing");
+    CHECK_STAGE(processor->getLatencySamples()==0,"Vocal reports zero plugin latency");
+    PClassInfo2 controller_info{}; CHECK_STAGE(factory2->getClassInfo2(1,&controller_info)==kResultOk,"read Vocal controller class info");
+    IEditController* controller=nullptr; CHECK_STAGE(factory2->createInstance(controller_info.cid,IEditController_iid,reinterpret_cast<void**>(&controller))==kResultOk && controller!=nullptr,"create Vocal edit controller");
+    CHECK_STAGE(controller->getParameterCount()==11,"Vocal controller exposes 11 parameters");
+    ParameterInfo info{}; CHECK_STAGE(controller->getParameterInfo(1,info)==kResultOk,"read Vocal parameter info");
+    CHECK_STAGE(info.title[0]=='V' && info.title[7]=='C',"Vocal parameter schema identity");
 
-    // Host-style process-time automation must reach the DSP, not merely update stored state.
-    // Mix=0 is dry by contract; Mix=1 exercises the active vocal path after warm-up.
     for(int block_size : {32,64,128,256}) {
         ProcessSetup block_setup{};block_setup.sampleRate=48000.0;block_setup.maxSamplesPerBlock=block_size;
-        assert(processor->setupProcessing(block_setup)==kResultOk);
+        CHECK_STAGE(processor->setupProcessing(block_setup)==kResultOk,"automation block setupProcessing");
         OneParameterChange dry_mix(8,0.0); float dry_delta=0.0f;
-        process_block(processor,block_size,&dry_mix,0.0f,&dry_delta);
-        assert(dry_delta < 1.0e-5f);
+        CHECK_STAGE(process_block(processor,block_size,&dry_mix,0.0f,&dry_delta),"process dry automation block");
+        if(!(dry_delta < 1.0e-5f)){std::cerr<<"[FAIL] Mix=0 dry contract at block "<<block_size<<" (delta="<<dry_delta<<")\n";return 1;}
+        std::cout<<"[PASS] Mix=0 dry contract at block "<<block_size<<" (delta="<<dry_delta<<")\n";
         OneParameterChange wet_mix(8,1.0); float wet_delta=0.0f;
-        for(int b=0;b<16;++b) process_block(processor,block_size,b==0?static_cast<IParameterChanges*>(&wet_mix):nullptr,static_cast<float>((b+1)*block_size),&wet_delta);
-        assert(wet_delta > 1.0e-5f);
+        for(int b=0;b<16;++b) {
+            if(!process_block(processor,block_size,b==0?static_cast<IParameterChanges*>(&wet_mix):nullptr,static_cast<float>((b+1)*block_size),&wet_delta)){
+                std::cerr<<"[FAIL] process wet automation block at size "<<block_size<<", warmup block "<<b<<"\n";return 1;
+            }
+        }
+        if(!(wet_delta > 1.0e-5f)){std::cerr<<"[FAIL] Mix=1 reaches active Vocal DSP at block "<<block_size<<" (delta="<<wet_delta<<")\n";return 1;}
+        std::cout<<"[PASS] Mix=1 reaches active Vocal DSP at block "<<block_size<<" (delta="<<wet_delta<<")\n";
     }
 
-    std::cout<<"PASS standalone Vocal VST3: stereo FX, 0 samples latency, 11 Vocal controls, host automation reaches DSP at 32/64/128/256 frames\n";
+    std::cout<<">>> ALL STANDALONE VOCAL VST3 HOST/AUTOMATION CHECKS PASSED! <<<\n";
     controller->release();processor->release();component->release();factory2->release();factory->release();FreeLibrary(module);
+    return 0;
 }
