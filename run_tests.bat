@@ -10,12 +10,12 @@ set "PATH=%TOOLCHAIN_BIN%;%PATH%"
 
 if not exist build\monkeys_ear_test_runner.exe (
     echo [INFO] Binaries not found, triggering build...
-    call build.bat
+    call .\build.bat
     if %ERRORLEVEL% neq 0 exit /b %ERRORLEVEL%
 )
 
 cd build
-monkeys_ear_test_runner.exe
+.\monkeys_ear_test_runner.exe
 set "RUNNER_ERR=%ERRORLEVEL%"
 cd ..
 

@@ -66,6 +66,9 @@ set_target_properties(monkeys_ear_vocal PROPERTIES OUTPUT_NAME "monkeys_ear_voca
 if(MSVC)
     target_compile_definitions(monkeys_ear_vocal PRIVATE NOMINMAX)
     target_compile_options(monkeys_ear_vocal PRIVATE /FIwindows.h)
+elseif(WIN32)
+    target_compile_definitions(monkeys_ear_vocal PRIVATE NOMINMAX)
+    target_compile_options(monkeys_ear_vocal PRIVATE -include windows.h)
 endif()
 
 if(WIN32)
