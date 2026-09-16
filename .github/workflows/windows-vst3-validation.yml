@@ -36,3 +36,13 @@ jobs:
 
       - name: Run standalone Vocal VST3 host and automation probe
         run: .\build\Release\monkeys_ear_vocal_host_probe.exe
+
+      - name: Preserve validated Windows VST3 binaries
+        uses: actions/upload-artifact@v4
+        with:
+          name: monkeys-ear-windows-vst3-${{ github.sha }}
+          path: |
+            build/Release/monkeys_ear.vst3
+            build/Release/monkeys_ear_vocal.vst3
+          if-no-files-found: error
+          retention-days: 14
