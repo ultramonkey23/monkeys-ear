@@ -37,6 +37,24 @@ jobs:
       - name: Run standalone Vocal VST3 host and automation probe
         run: .\build\Release\monkeys_ear_vocal_host_probe.exe
 
+      - name: Assemble and verify tester-facing Voice/Vocal bundle
+        shell: pwsh
+        run: |
+          .\packaging\package_voice_vocal.ps1 `
+            -Binary .\build\Release\monkeys_ear_vocal.vst3 `
+            -OutputDirectory .\dist `
+            -Commit "${{ github.sha }}"
+
+      - name: Preserve tester-facing Voice/Vocal bundle
+        uses: actions/upload-artifact@v4
+        with:
+          name: monkeys-ear-voice-vocal-validation-${{ github.sha }}
+          path: |
+            dist/*.zip
+            dist/*.sha256
+          if-no-files-found: error
+          retention-days: 14
+
       - name: Preserve validated Windows VST3 binaries
         uses: actions/upload-artifact@v4
         with:
