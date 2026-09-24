@@ -45,7 +45,15 @@ tresult read_state(IBStream* stream,const std::shared_ptr<VocalState>& state) {
     uint32 magic=0,version=0,count=0;
     if(!read_stream(stream,&magic,4)||!read_stream(stream,&version,4)||!read_stream(stream,&count,4))return kInternalError;
     if(magic!=kStateMagic||version>kStateVersion||count>kParamCount)return kResultFalse;
-    for(uint32 i=0;i<count;++i){float value=0;if(!read_stream(stream,&value,4))return kInternalError;state->values[i].store(std::clamp(value,0.0f,1.0f));state->dirty[i].store(true);}return kResultOk;
+    std::array<float,kParamCount> restored{};
+    for(uint32 i=0;i<count;++i){
+        float value=0;
+        if(!read_stream(stream,&value,4))return kInternalError;
+        if(!std::isfinite(value))return kResultFalse;
+        restored[i]=std::clamp(value,0.0f,1.0f);
+    }
+    for(uint32 i=0;i<count;++i){state->values[i].store(restored[i]);state->dirty[i].store(true);}
+    return kResultOk;
 }
 
 class VocalComponent final : public IComponent, public IAudioProcessor {
