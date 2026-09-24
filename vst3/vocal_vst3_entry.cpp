@@ -4,6 +4,7 @@
 #include <atomic>
 #include <algorithm>
 #include <cmath>
+#include <cstdint>
 #include <cstdio>
 #include <cstring>
 #include <memory>
@@ -22,6 +23,12 @@ static const TUID kVocalControllerCID = INLINE_UID(0x4D6F6E6B, 0x65794561, 0x725
 void copy16(char16* dst, const char* src) { size_t i=0; while(src[i] && i<127){dst[i]=static_cast<char16>(src[i]);++i;} dst[i]=0; }
 bool write_stream(IBStream* s, void* data, int32 bytes) { int32 done=0; return s && s->write(data,bytes,&done)==kResultOk && done==bytes; }
 bool read_stream(IBStream* s, void* data, int32 bytes) { int32 done=0; return s && s->read(data,bytes,&done)==kResultOk && done==bytes; }
+bool serialized_float_is_finite(float value) {
+    std::uint32_t bits=0;
+    static_assert(sizeof(bits)==sizeof(value));
+    std::memcpy(&bits,&value,sizeof(bits));
+    return (bits&0x7f800000u)!=0x7f800000u;
+}
 
 struct VocalState {
     std::array<std::atomic<float>,kParamCount> values;
@@ -49,7 +56,7 @@ tresult read_state(IBStream* stream,const std::shared_ptr<VocalState>& state) {
     for(uint32 i=0;i<count;++i){
         float value=0;
         if(!read_stream(stream,&value,4))return kInternalError;
-        if(!std::isfinite(value))return kResultFalse;
+        if(!serialized_float_is_finite(value))return kResultFalse;
         restored[i]=std::clamp(value,0.0f,1.0f);
     }
     for(uint32 i=0;i<count;++i){state->values[i].store(restored[i]);state->dirty[i].store(true);}
