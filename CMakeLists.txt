@@ -75,5 +75,8 @@ if(WIN32)
     add_executable(monkeys_ear_host_probe test/test_vst3_host_probe.cpp)
     target_include_directories(monkeys_ear_host_probe PRIVATE ${CMAKE_CURRENT_SOURCE_DIR}/vst3)
     add_executable(monkeys_ear_vocal_host_probe test/test_vocal_vst3_probe.cpp)
-    target_include_directories(monkeys_ear_vocal_host_probe PRIVATE ${CMAKE_CURRENT_SOURCE_DIR}/vst3)
+    target_include_directories(monkeys_ear_vocal_host_probe PRIVATE
+        ${CMAKE_CURRENT_SOURCE_DIR}/vst3
+        ${CMAKE_CURRENT_SOURCE_DIR}/include
+    )
 endif()

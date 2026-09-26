@@ -11,6 +11,7 @@
 #include <utility>
 #include <vector>
 #include "vst3_sdk_minimal.h"
+#include "monkeys_ear/vocal_product_version.h"
 
 using namespace Steinberg;
 using namespace Steinberg::Vst;
@@ -129,6 +130,7 @@ int main() {
     CHECK_STAGE(factory2->countClasses()==2,"factory exposes component and controller");
     PClassInfo2 component_info{}; CHECK_STAGE(factory2->getClassInfo2(0,&component_info)==kResultOk,"read Vocal component class info");
     CHECK_STAGE(std::string(component_info.name)=="Monkey's Ear Vocal" && std::string(component_info.subCategories)=="Fx|Pitch Shift","Vocal component identity");
+    CHECK_STAGE(std::string(component_info.version)==monkeys_ear::kVocalProductVersion,"Vocal product version identity");
     IComponent* component=nullptr; CHECK_STAGE(factory2->createInstance(component_info.cid,IComponent_iid,reinterpret_cast<void**>(&component))==kResultOk && component!=nullptr,"create Vocal component");
     CHECK_STAGE(component->getBusCount(kAudio,kInput)==1 && component->getBusCount(kAudio,kOutput)==1,"Vocal stereo FX bus topology");
     IAudioProcessor* processor=nullptr; CHECK_STAGE(component->queryInterface(IAudioProcessor_iid,reinterpret_cast<void**>(&processor))==kResultOk && processor!=nullptr,"Vocal component exposes audio processor");

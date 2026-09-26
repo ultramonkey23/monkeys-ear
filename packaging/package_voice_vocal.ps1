@@ -17,8 +17,26 @@ if (-not (Test-Path -LiteralPath $Binary -PathType Leaf)) {
     throw "Voice/Vocal binary not found: $Binary"
 }
 
+$repositoryRoot = Split-Path -Parent $PSScriptRoot
+$versionHeader = Join-Path $repositoryRoot 'include\monkeys_ear\vocal_product_version.h'
+$changelog = Join-Path $repositoryRoot 'docs\VOICE_VOCAL_CHANGELOG.md'
+if (-not (Test-Path -LiteralPath $versionHeader -PathType Leaf)) {
+    throw "Voice/Vocal version owner not found: $versionHeader"
+}
+if (-not (Test-Path -LiteralPath $changelog -PathType Leaf)) {
+    throw "Voice/Vocal changelog not found: $changelog"
+}
+$versionMatch = [regex]::Match(
+    (Get-Content -LiteralPath $versionHeader -Raw),
+    '#define\s+MONKEYS_EAR_VOCAL_PRODUCT_VERSION\s+"([0-9]+\.[0-9]+\.[0-9]+-[0-9A-Za-z.-]+)"'
+)
+if (-not $versionMatch.Success) {
+    throw 'Voice/Vocal product version is missing or is not an explicit pre-release version'
+}
+$productVersion = $versionMatch.Groups[1].Value
+
 New-Item -ItemType Directory -Force -Path $OutputDirectory | Out-Null
-$bundleName = "monkeys-ear-voice-vocal-validation-$Commit"
+$bundleName = "monkeys-ear-voice-vocal-$productVersion-windows-x64-validation-$Commit"
 $stage = Join-Path $OutputDirectory $bundleName
 $zipPath = Join-Path $OutputDirectory "$bundleName.zip"
 $zipHashPath = "$zipPath.sha256"
@@ -37,6 +55,7 @@ Copy-Item -LiteralPath $Binary -Destination $pluginPath
 MONKEY'S EAR VOICE/VOCAL — VALIDATION CANDIDATE
 
 Commit: $Commit
+Voice/Vocal version: $productVersion
 Platform: Windows x64
 Format: VST3 effect
 Purpose: bounded REAPER and musician evaluation
@@ -46,6 +65,9 @@ automated DSP, tracker, host-load, and automation probes before packaging.
 Those probes do not prove REAPER compatibility, project recall, listening
 quality, musical usefulness, or broad host support.
 "@ | Set-Content -LiteralPath (Join-Path $stage 'BUILD.txt') -Encoding ascii
+
+$productVersion | Set-Content -LiteralPath (Join-Path $stage 'VERSION.txt') -Encoding ascii
+Copy-Item -LiteralPath $changelog -Destination (Join-Path $stage 'CHANGELOG.md')
 
 @'
 INSTALL (WINDOWS x64)
@@ -105,7 +127,7 @@ $verify = Join-Path $OutputDirectory '_verify_voice_vocal'
 Remove-Item -LiteralPath $verify -Recurse -Force -ErrorAction SilentlyContinue
 Expand-Archive -LiteralPath $zipPath -DestinationPath $verify
 
-$expected = @('BUILD.txt', 'INSTALL_REMOVE.txt', 'KNOWN_LIMITS.txt', 'SHA256SUMS.txt', $pluginName)
+$expected = @('BUILD.txt', 'CHANGELOG.md', 'INSTALL_REMOVE.txt', 'KNOWN_LIMITS.txt', 'SHA256SUMS.txt', 'VERSION.txt', $pluginName)
 $actual = @(Get-ChildItem -LiteralPath $verify -File | Select-Object -ExpandProperty Name | Sort-Object)
 $delta = Compare-Object ($expected | Sort-Object) $actual
 if ($delta) {
@@ -117,6 +139,10 @@ $recordedHash = ((Get-Content -LiteralPath (Join-Path $verify 'SHA256SUMS.txt') 
 $verifiedHash = (Get-FileHash -LiteralPath $verifiedPlugin -Algorithm SHA256).Hash.ToLowerInvariant()
 if ($recordedHash -ne $verifiedHash) {
     throw 'Packaged plug-in checksum does not match SHA256SUMS.txt'
+}
+$verifiedVersion = (Get-Content -LiteralPath (Join-Path $verify 'VERSION.txt') -Raw).Trim()
+if ($verifiedVersion -ne $productVersion) {
+    throw 'Packaged Voice/Vocal version does not match the canonical product version'
 }
 
 $zipHash = (Get-FileHash -LiteralPath $zipPath -Algorithm SHA256).Hash.ToLowerInvariant()

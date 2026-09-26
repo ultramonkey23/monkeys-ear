@@ -102,3 +102,6 @@ The limiter is a bounded signal-protection stage. It is not a hearing-safety gua
 - `build\monkeys_ear.vst3` — Native VST3 Plugin Bundle for REAPER / DAWs
 - `build\monkeys_ear_vocal.vst3` — Standalone Vocal effect: local causal pitch tracking and the established dual-layer Vocal mechanism only
 - Installed to `C:\Program Files\Common Files\VST3\monkeys_ear.vst3`
+
+Voice/Vocal has its own pre-release identity and changelog, independent of the
+unfinished suite. See [`docs/VOICE_VOCAL_CHANGELOG.md`](docs/VOICE_VOCAL_CHANGELOG.md).
