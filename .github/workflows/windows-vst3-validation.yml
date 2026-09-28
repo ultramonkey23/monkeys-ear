@@ -1,11 +1,24 @@
 name: Windows VST3 Validation
 
+# Windows minutes bill at 2x. Bursts of pushes each ran a full build to
+# completion (27 on 2026-09-10), which helped exhaust the account's Actions
+# minutes. A newer push now cancels the superseded run: the tester bundle still
+# tracks the latest master. Docs/receipt-only pushes skip the build.
 on:
   push:
     branches: [master]
+    paths-ignore:
+      - 'docs/**'
+      - 'receipts/**'
+      - 'research/**'
+      - '**/*.md'
   pull_request:
     branches: [master]
   workflow_dispatch:
+
+concurrency:
+  group: windows-vst3-${{ github.ref }}
+  cancel-in-progress: true
 
 permissions:
   contents: read
