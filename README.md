@@ -105,3 +105,4 @@ The limiter is a bounded signal-protection stage. It is not a hearing-safety gua
 
 Voice/Vocal has its own pre-release identity and changelog, independent of the
 unfinished suite. See [`docs/VOICE_VOCAL_CHANGELOG.md`](docs/VOICE_VOCAL_CHANGELOG.md).
+The current Itch-ready copy draft lives at [`docs/VOICE_VOCAL_STOREFRONT_COPY.md`](docs/VOICE_VOCAL_STOREFRONT_COPY.md). It is a productization artifact, not evidence that the preview has cleared its remaining host/listening/release gates.
