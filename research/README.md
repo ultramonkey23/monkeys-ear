@@ -1,6 +1,6 @@
 # Monkey's Ear research
 
-This repository is currently a **research shell**, not yet the complete Monkey's Ear product source. A more complete local implementation predates this GitHub repository and must be imported/audited before product-integration decisions.
+**Research subsystem guide, not a claim that the repository contains research only.** As inspected on `master` (2026-10-04), this same repository already contains a buildable-source *structure* for the native C++ audio engine (`src/`, `include/`), VST3 entry wrappers (`vst3/`), host/deterministic test sources (`test/`), CMake build definitions, presets, and vocal packaging. Their presence establishes source implementation, **not** a newly executed host build or evidence that every feature from Cody's earlier local implementation has been imported. That historical-source completeness remains UNKNOWN pending direct comparison.
 
 ## Read first
 
@@ -41,12 +41,13 @@ Ultramonkeydog Lab already contains reusable audio-process knowledge: determinis
 
 Monkey's Ear should reuse those capabilities and concepts rather than create a parallel audio authority. `EVIDENCE_SCHEMA.json` is deliberately small so future Lab tooling can ingest/translate research outcomes without Monkey's Ear cloning OutcomeJournal or Learning Gate.
 
-## Integration rule
+## Research-to-product integration rule
 
-When the local Monkey's Ear source arrives:
-1. inspect/import current truth;
-2. map existing implementations to the research hypotheses;
-3. preserve working code rather than replacing it from assumptions;
-4. dogfood the shared test corpus through real builds;
-5. translate verified evidence into implementation tasks through the existing Lab/Code Prime ownership path;
-6. promote only changes that survive engineering and listening evidence.
+1. Start from **current native product source in this repository** plus the exact canonical branch/HEAD and real evidence, rather than treating this checkout as an empty research shell.
+2. Compare a proposed research mechanism against the existing processor, parameter host surface, preset compatibility, VST3 wrapper, tests, and any relevant older local implementation **when that source is available**. Do not assume the older local body has been completely imported.
+3. Preserve functioning processing and host automation/parameter IDs; do not silently fork the product DSP to accommodate a research experiment.
+4. Evaluate hypotheses with reproducible measurement and meaningful listening in REAPER or the relevant DAW, with clear evidence/unknown labels. Test presence is not sound-quality acceptance.
+5. Route implementation through the existing Lab/Code Prime ownership when developing under the Lab, but keep native product code and canon owned by Monkey's Ear; research candidates do not auto-promote.
+6. Keep `research/STATUS.json` and research architecture pages aligned with *source-observable research status* and separate legacy-import completeness from implementation presence.
+
+**Branch truth at inspection:** `master` is the declared production branch in root `AGENTS.md`. At the sampled time GitHub's default `main` branch trailed `master` by two commits (master `8d58504d0b1f...`, main `d85357388c25...`). Before treating a GitHub default-branch page as fresh product evidence, resolve branch ancestry and actual current refs; do not invent a different branch policy or assume the two are synchronized.
