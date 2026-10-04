@@ -1,8 +1,8 @@
 {
   "schema": "monkeys_ear_research_status_v1",
-  "repository_role": "research_shell",
-  "local_product_imported": false,
-  "warning": "GitHub absence is not evidence that a feature is absent from the pre-existing local Monkey's Ear implementation.",
+  "repository_role": "native_product_and_research",
+  "local_product_imported": null,
+  "warning": "Earlier research-shell description has been superseded: native product source is present in this repo. `local_product_imported=null` means whether the entire older local implementation was imported is UNKNOWN, not false. Keep research progress distinct from tested product readiness and verify canonical master/main branch alignment separately.",
   "active_subsystems": {
     "onion-skin-eq": {
       "status": "ACTIVE_RESEARCH",
@@ -37,5 +37,20 @@
     "wordmath"
   ],
   "creation_rule": "Do not create a future subsystem folder until real research or imported product work begins.",
-  "promotion_rule": "A mechanism is durable only after appropriate evidence and explicit promotion; negative evidence can demote previously promoted ideas."
+  "promotion_rule": "A mechanism is durable only after appropriate evidence and explicit promotion; negative evidence can demote previously promoted ideas.",
+  "historical_local_source_import_completeness": "UNKNOWN_NEEDS_DIRECT_COMPARISON",
+  "product_source_presence": {
+    "classification": "SOURCE_PRESENT_NOT_RUNTIME_VERIFIED",
+    "inspected_date": "2026-10-04",
+    "paths": [
+      "CMakeLists.txt",
+      "src/engine.cpp",
+      "include/monkeys_ear/engine.h",
+      "vst3/vst3_entry.cpp",
+      "vst3/vocal_vst3_entry.cpp",
+      "test/test_dsp_core.cpp",
+      "packaging/package_voice_vocal.ps1"
+    ],
+    "claim_ceiling": "Native product source, VST3 wrappers, test harness and packaging paths exist. Full historical local import, current native build, live REAPER use and musical acceptance were not proven by this inspection."
+  }
 }
