@@ -1,6 +1,6 @@
 # Monkey's Ear — product-wide research spine
 
-Status: durable research guidance only. The GitHub repository is not yet the complete Monkey's Ear product source; a more complete local implementation predates this repository and must be imported/audited before product-integration decisions.
+Status: durable research guidance only. As inspected on 2026-10-04, the canonical `master` tree **does** contain Monkey's Ear native engine, VST3 wrappers, tests, host integration sources, presets and packaging. Whether it contains **every** feature of an older, separately maintained local implementation is UNKNOWN without a direct comparison. This research guide does not establish host/play/listening proof and must not be interpreted as a directive to re-create source already present.
 
 ## Purpose
 
@@ -113,7 +113,7 @@ Semantic mappings may expose useful high-level control, but semantic interpretat
 8. **Listen blind when practical** — engineering proxies can reject ideas but cannot prove musical preference.
 9. **Record the outcome** — evidence state, proof strength, artifacts, failures and promotion effect.
 10. **Promote/demote explicitly** — no feature survives because it once sounded clever.
-11. **Integrate only after local-source audit** — do not create parallel product implementations from research assumptions.
+11. **Integrate against live product source** — inspect the existing native owners, consumer chain, host parameters, preset contracts and test/DAW evidence in this repository first. If older local work becomes available, compare it explicitly; do not assume it is already complete or entirely absent. Avoid parallel product implementations created from research assumptions.
 12. **Consolidate docs** — one active architecture file + one concise research history per subsystem; keep scripts/data for reproducibility, not versioned design manifestos.
 
 ## Current subsystem map
