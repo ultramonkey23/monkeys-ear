@@ -111,10 +111,27 @@ The experiment also writes four local synthetic WAV references when run: dry sou
 
 Interpretation: gate 4 has now started with executable transformation evidence. The result does not identify a winner; instead it makes the next rewrite target clearer. The next transformation prototype should explicitly combine pitch transformation with independent envelope reconstruction, and phase locking/transient handling must be tested directly rather than inferred from a generic phase-vocoder baseline.
 
+## 2026-10-11 — local source audit (product vs research decomposition)
+
+Evidence state: MEASURED (source inspection). Full mapping in `LOCAL_SOURCE_AUDIT_20261011.md`.
+
+The product pitch path is now known at source level: `VocalTargetEngine` (tuning-space intent,
+gravity/capture scoring, onset protection, hysteresis, glide) feeding a two-stage
+pitch-synchronous grain/PSOLA-style shifter with envelope repair, 1700 Hz residual injection,
+and aperiodic protection (`AudioInputProcessor::process_vocal_sample`). Pitch authority resolves
+monotonically by confidence: local tracker -> manual evidence -> shared ecosystem evidence.
+
+Consequences: the detector-side gaps the research plan names (candidate octave continuity,
+V/UV probability, onset evidence) are genuinely absent from product code — the hard voiced
+threshold `conf>.35` is the product seam where a candidate-based detector would land. The
+product two-stage grain chain is the correct in-product baseline for transformation experiments;
+no phase-locked spectral or WORLD-style reference exists in product. Research "Next evidence"
+items 1, 4 and 5 stay open and non-redundant.
+
 ## Not yet proven
 
 - quality of any Monkey's Ear production pitch detector or resynthesis algorithm;
-- whether the local implementation already contains equivalent/better mechanisms;
+- whether the product mechanisms outperform research baselines (the 2026-10-11 source audit maps what EXISTS but proves no quality ordering);
 - real-time CPU/latency behavior;
 - F0 tracking robustness on Cody's real voice;
 - practical formant-envelope estimation quality on real voice;

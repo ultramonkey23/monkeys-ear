@@ -15,8 +15,9 @@
       "status": "ACTIVE_RESEARCH",
       "architecture": "research/pitch-correction/ARCHITECTURE.md",
       "history": "research/pitch-correction/RESEARCH_HISTORY.md",
-      "evidence_level": "HYPOTHESIS_RESEARCH",
-      "product_integration": "PENDING_LOCAL_AUDIT"
+   "evidence_level": "HYPOTHESIS_RESEARCH",
+   "product_integration": "LOCAL_SOURCE_AUDIT_20261011_MAPPED",
+   "local_source_audit": "research/pitch-correction/LOCAL_SOURCE_AUDIT_20261011.md"
     }
   },
   "shared": {
