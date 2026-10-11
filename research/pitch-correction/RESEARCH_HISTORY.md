@@ -154,6 +154,23 @@ Measured (synthetic characterization; no quality claims): (a) the persistent bia
 
 Maps to Next evidence item 1: harmonic/energy disambiguation now has synthetic evidence; onset re-entry slip control remains, with the persistence-gated evidence hybrid (adopt an evidence register only after N consecutive agreeing frames) as the named next candidate. Still not proven: everything in "Not yet proven" below.
 
+## 2026-10-11 — persistence-gated evidence register tested (continuity item 1 remainder)
+
+Evidence state: SYNTHETIC. Experiment: `experiments/detector_octave_persistence_v1.py`, results CSV `experiments/detector_octave_persistence_v1_results.csv`. Direct follow-up to the harmonic-evidence experiment above: its measured cost was onset re-entry slip (~1.25 register slips/s on gap episodes) from single frames after silence/noise misleading the visibility rule. This experiment gates evidence ADOPTION on persistence: the per-frame evidence claim (unchanged harmonic rule) only updates a pending register + run counter; the adopted register changes only after N consecutive identical claims (declared primary N=3 a priori, matching RESYNC_FRAMES convention; N=2 and N=5 reported as sensitivity). Selection then tracks the estimator hypothesis inside the adopted register (f0 * 2^adopted) — the persistence gate is the ONLY octave-change authority.
+
+Negative result preserved (first mechanism): the first version kept the harmonic layer's per-frame cost competition between raw and evidence as a second gate (`persistence_cost3_resync` layer, kept in the CSV). It removed onset slips but NEVER repaired the persistent bias (MPM strong_2nd_harmonic stayed 1202.89c): the adopted register change is a 1200-cent move from the previous selection and hysteresis (cost_ev - cost_raw > OCTAVE_MARGIN_CENTS) vetoed exactly the repair the gate had approved. In the harmonic layer the repair had come from the un-gated first voiced frame (prev_sel=None -> follow evidence) — the same path that produced the onset flips. Lesson: one authority per decision; once persistence proves a register claim, a one-frame hysteresis must not veto it.
+
+Measured (synthetic characterization; no quality claims) on the v2 adoption-gated layers (persistence2/3/5):
+(a) the persistent bias repair survives the gate — MPM strong_2nd_harmonic 1202.89c -> 2.89c at N=2, 3, and 5;
+(b) the declared primary N=3 does NOT achieve the hypothesized onset-slip control — gap episode slips stay ~1.25-1.27/s (YIN gap_silence 1.253918, YIN gap_noise 1.261830, MPM gap_silence 1.257862), and MPM gap_noise is strictly WORSE than harmonic (0 -> 1.265823, the later adoption move itself counted); N=2 is worse still (MPM gap_silence 2.515723);
+(c) N=5 DOES remove gap-episode slips (0.000000 everywhere) while keeping the 2.89c repair;
+(d) all persistence layers keep octave-jump retention (1.02c MPM / 1.64c YIN) and vibrato unchanged (6.12c YIN / 4.10c MPM); V/UV metrics match the continuity machine exactly;
+(e) the repair move itself counts one >600-cent delta per strong_2nd episode (0.573066/s slip rate) at every N — an adoption event IS a register move, so "slip rate" on a biased corpus conflates misflips with the repair.
+
+Interpretation: persistence gating works, but the effective gate on this corpus is N=5 (~25 ms at HOP=240/48 kHz), not the a-priori N=3; the misleading onset frames evidently persist >=3 frames after re-entry here. N=5 was sensitivity, not a selected parameter — real-voice evidence must set the gate, not this corpus. The v1/v2 comparison confirms the single-authority lesson from the harmonic experiment.
+
+Maps to Next evidence item 1: candidate-level octave continuity + V/UV + harmonic disambiguation + onset re-entry slip control all have synthetic evidence now (onset control at sensitivity N=5, primary N=3 falsified). Item 1's synthetic track is complete; what remains is product-integration and real-voice work (items in "Not yet proven").
+
 ## Not yet proven
 
 - quality of any Monkey's Ear production pitch detector or resynthesis algorithm;
@@ -169,7 +186,7 @@ Maps to Next evidence item 1: harmonic/energy disambiguation now has synthetic e
 ## Next evidence
 
 The next executable work should connect these pieces instead of adding more isolated prose:
-1. octave continuity + V/UV transitions and harmonic/energy octave disambiguation have synthetic evidence (2026-10-11 layer + harmonic experiments) — remaining: onset re-entry slip control, with the persistence-gated evidence register (adopt an evidence register only after N consecutive agreeing frames) as the named candidate;
+1. octave continuity + V/UV transitions, harmonic/energy octave disambiguation, and onset re-entry slip control all have synthetic evidence (2026-10-11 layer + harmonic + persistence experiments; persistence primary N=3 falsified, sensitivity N=5 holds on this corpus) — the synthetic track of item 1 is complete; remaining is detector-side product integration at the `conf > .35` seam and real-voice validation of the gate depth;
 2. improve contour transition isolation and fast-band leakage on the randomized corpus;
 3. implement independent envelope reconstruction around both transformation families, carrying LPC20 and cepstral/True-Envelope-style candidates;
 4. replace the generic frequency-domain baseline with an explicit phase-locked spectral prototype and add transient/onset tests;

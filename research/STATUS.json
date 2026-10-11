@@ -22,7 +22,9 @@
             "detector_octave_continuity": "research/pitch-correction/experiments/detector_octave_continuity_v1.py",
             "detector_octave_continuity_evidence": "SYNTHETIC 2026-10-11: register-scoped octave hysteresis + V/UV hangover; resync passes jump retention, strict fails it informatively; MPM strong-2nd-harmonic persistent bias survives all layers (needs harmonic evidence)",
             "detector_octave_harmonic": "research/pitch-correction/experiments/detector_octave_harmonic_v1.py",
-            "detector_octave_harmonic_evidence": "SYNTHETIC 2026-10-11: harmonic-evidence register choice (lowest octave candidate whose fundamental is visibly present, VIS_FLOOR 5% of band max) fixes MPM strong-2nd-harmonic persistent bias 1202.9c -> 2.89c with no jump-retention or vibrato cost; costs ~1 register flip per gap episode at onset re-entry (persistence-gated evidence hybrid is next evidence)"
+            "detector_octave_harmonic_evidence": "SYNTHETIC 2026-10-11: harmonic-evidence register choice (lowest octave candidate whose fundamental is visibly present, VIS_FLOOR 5% of band max) fixes MPM strong-2nd-harmonic persistent bias 1202.9c -> 2.89c with no jump-retention or vibrato cost; costs ~1 register flip per gap episode at onset re-entry (persistence-gated evidence hybrid is next evidence)",
+            "detector_octave_persistence": "research/pitch-correction/experiments/detector_octave_persistence_v1.py",
+            "detector_octave_persistence_evidence": "SYNTHETIC 2026-10-11: persistence-gated evidence adoption (register changes only after N consecutive identical claims) keeps the 2.89c bias repair (1202.89c -> 2.89c at N=2/3/5); declared primary N=3 falsified for onset slips (still ~1.25/s; N=2 worse), sensitivity N=5 removes all gap-episode slips (0.0) with jump/vibrato unchanged; v1 cost-competition+gate variant (preserved) never repaired the bias — one authority per decision; repair move counts 1 legit register delta (0.573/s) on biased corpus"
     }
   },
   "shared": {
