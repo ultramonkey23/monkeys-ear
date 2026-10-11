@@ -17,8 +17,10 @@
       "history": "research/pitch-correction/RESEARCH_HISTORY.md",
       "evidence_level": "SYNTHETIC_MEASURED",
       "product_integration": "PRODUCT_CHAIN_SYNTHETIC_DRIVEN_20261011",
-      "local_source_audit": "research/pitch-correction/LOCAL_SOURCE_AUDIT_20261011.md",
-      "product_chain_probe": "test/test_vocal_target_chain_probe.cpp"
+            "local_source_audit": "research/pitch-correction/LOCAL_SOURCE_AUDIT_20261011.md",
+            "product_chain_probe": "test/test_vocal_target_chain_probe.cpp",
+            "detector_octave_continuity": "research/pitch-correction/experiments/detector_octave_continuity_v1.py",
+            "detector_octave_continuity_evidence": "SYNTHETIC 2026-10-11: register-scoped octave hysteresis + V/UV hangover; resync passes jump retention, strict fails it informatively; MPM strong-2nd-harmonic persistent bias survives all layers (needs harmonic evidence)"
     }
   },
   "shared": {
