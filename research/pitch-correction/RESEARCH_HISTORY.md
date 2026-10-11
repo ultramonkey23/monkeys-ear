@@ -146,6 +146,14 @@ Measured (synthetic characterization; no quality claims): (a) vibrato tracking i
 
 Maps to Next evidence item 1 (candidate-level octave continuity + V/UV transitions now has synthetic evidence incl. failure modes). Remaining for item 1: harmonic/energy evidence to disambiguate persistent bias vs real jump, and onset re-entry slip control. Still not proven: everything in "Not yet proven" below.
 
+## 2026-10-11 — harmonic-evidence octave disambiguation tested (continuity item 1 remainder)
+
+Evidence state: SYNTHETIC. Experiment: `experiments/detector_octave_harmonic_v1.py`, results CSV `experiments/detector_octave_harmonic_v1_results.csv`. Direct follow-up to the layer experiment above: its measured conclusion was that temporal evidence cannot repair a PERSISTENT estimator register error (MPM on strong_2nd_harmonic kept a 1202.9c bias through continuity and resync). This experiment adds a different evidence source — per-frame harmonic evidence. The octave-register claimant is the LOWEST octave candidate (f0/2, f0, 2f0) whose own fundamental is visibly present in the frame spectrum (peak > VIS_FLOOR=5% of the highest band peak, 80–900 Hz, ±2 bins around the candidate). Same hangover V/UV state machine; harmonic_strict vs harmonic_resync layers compared against raw and continuity_resync on identical estimator frames.
+
+Measured (synthetic characterization; no quality claims): (a) the persistent bias is REPAIRED — MPM strong_2nd_harmonic goes 1202.9c (raw) / 1202.9c (continuity_resync) to 2.89c (harmonic_strict and harmonic_resync); (b) no damage where temporal layers were correct: octave_jump retention 1.02c MPM / 1.64c YIN, vibrato unchanged (6.12c YIN / 4.10c MPM, 0 slips), YIN strong_2nd unaffected (3.18c); (c) the cost is onset re-entry: harmonic layers show ~1.25 register slips/s on gap episodes (YIN gap_noise 1.261830, MPM gap_silence 1.257862) where continuity_resync had 0 — single frames after silence/noise briefly mislead the visibility rule; this is comparable in size to the resync onset cost already measured (YIN gap_silence 1.253918). V/UV metrics identical to the continuity machine. Interpretation: persistent register error needs non-temporal evidence (now demonstrated), and evidence-based selection needs persistence gating at onsets (not yet implemented).
+
+Maps to Next evidence item 1: harmonic/energy disambiguation now has synthetic evidence; onset re-entry slip control remains, with the persistence-gated evidence hybrid (adopt an evidence register only after N consecutive agreeing frames) as the named next candidate. Still not proven: everything in "Not yet proven" below.
+
 ## Not yet proven
 
 - quality of any Monkey's Ear production pitch detector or resynthesis algorithm;
@@ -161,7 +169,7 @@ Maps to Next evidence item 1 (candidate-level octave continuity + V/UV transitio
 ## Next evidence
 
 The next executable work should connect these pieces instead of adding more isolated prose:
-1. octave continuity + V/UV transitions have synthetic evidence (2026-10-11 layer experiment) — remaining: harmonic/energy evidence to disambiguate persistent estimator octave bias from a real jump, and onset re-entry slip control;
+1. octave continuity + V/UV transitions and harmonic/energy octave disambiguation have synthetic evidence (2026-10-11 layer + harmonic experiments) — remaining: onset re-entry slip control, with the persistence-gated evidence register (adopt an evidence register only after N consecutive agreeing frames) as the named candidate;
 2. improve contour transition isolation and fast-band leakage on the randomized corpus;
 3. implement independent envelope reconstruction around both transformation families, carrying LPC20 and cepstral/True-Envelope-style candidates;
 4. replace the generic frequency-domain baseline with an explicit phase-locked spectral prototype and add transient/onset tests;

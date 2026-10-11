@@ -20,7 +20,9 @@
             "local_source_audit": "research/pitch-correction/LOCAL_SOURCE_AUDIT_20261011.md",
             "product_chain_probe": "test/test_vocal_target_chain_probe.cpp",
             "detector_octave_continuity": "research/pitch-correction/experiments/detector_octave_continuity_v1.py",
-            "detector_octave_continuity_evidence": "SYNTHETIC 2026-10-11: register-scoped octave hysteresis + V/UV hangover; resync passes jump retention, strict fails it informatively; MPM strong-2nd-harmonic persistent bias survives all layers (needs harmonic evidence)"
+            "detector_octave_continuity_evidence": "SYNTHETIC 2026-10-11: register-scoped octave hysteresis + V/UV hangover; resync passes jump retention, strict fails it informatively; MPM strong-2nd-harmonic persistent bias survives all layers (needs harmonic evidence)",
+            "detector_octave_harmonic": "research/pitch-correction/experiments/detector_octave_harmonic_v1.py",
+            "detector_octave_harmonic_evidence": "SYNTHETIC 2026-10-11: harmonic-evidence register choice (lowest octave candidate whose fundamental is visibly present, VIS_FLOOR 5% of band max) fixes MPM strong-2nd-harmonic persistent bias 1202.9c -> 2.89c with no jump-retention or vibrato cost; costs ~1 register flip per gap episode at onset re-entry (persistence-gated evidence hybrid is next evidence)"
     }
   },
   "shared": {
