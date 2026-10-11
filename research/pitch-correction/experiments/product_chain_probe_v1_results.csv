@@ -1,0 +1,25 @@
+# Evidence state: SYNTHETIC
+# Source: test/test_vocal_target_chain_probe.cpp (monkeys_ear_vocal_target_chain_probe), run 2026-10-11 on Termux/Android ARM64, cmake Release.
+# Characterization of the real product chain (VocalTargetEngine -> AudioInputProcessor::process_vocal_sample) driven with synthetic contours.
+# No listening/quality claims: REAPER listening remains release authority. Instrument: independent Hann-windowed ACF F0 estimator, band 120-420 Hz, accuracy about 1.5 cents (alignment study in RESEARCH_HISTORY 2026-10-11 entry).
+scenario,key,value,contract
+estimator_self_check,error_cents,1.342085,GATE_LT_3
+estimator_self_check,strength,1.038544,CHAR
+engine_vibrato_hold,final_error_cents,0.000000,GATE_LT_2
+engine_vibrato_hold,switch_count,0.000000,GATE_EQ_0
+engine_vibrato_hold,final_degree,0.000000,GATE_EQ_0
+engine_glissando,final_error_cents,0.115723,GATE_LT_2
+engine_glissando,switch_count,2.000000,GATE_GE_1
+engine_onset_jump,held_degree,1.000000,GATE_EQ_ORACLE
+engine_onset_jump,reacquired_degree,2.000000,GATE_EQ_ORACLE
+engine_onset_jump,oracle_old_degree,1.000000,CHAR
+engine_onset_jump,oracle_new_degree,2.000000,CHAR
+engine_confidence_seam,low_conf_onset_degree,0.000000,GATE_EQ_0
+engine_confidence_seam,vibrato_run_switches,0.000000,GATE_EQ_0
+chain_vibrato_resynthesis,mean_intent_error_cents,18.134812,GATE_LT_150
+chain_vibrato_resynthesis,measured_windows,73.000000,CHAR
+chain_vibrato_resynthesis,input_vibrato_depth_cents,24.342262,CHAR
+chain_vibrato_resynthesis,output_vibrato_depth_cents,25.722351,CHAR
+chain_vibrato_resynthesis,vibrato_reduced,0,CHAR
+negative_control_empty_tuning,passthrough_error_cents,0.000000,GATE_EQ_0
+probe,verdict,PASS,PROBE

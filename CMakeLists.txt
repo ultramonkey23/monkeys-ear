@@ -47,6 +47,12 @@ target_link_libraries(monkeys_ear_test_runner PRIVATE monkeys_ear_core)
 add_executable(monkeys_ear_vocal_tracker_probe test/test_vocal_tracker_probe.cpp)
 target_link_libraries(monkeys_ear_vocal_tracker_probe PRIVATE monkeys_ear_core)
 
+# Research characterization probe for the product pitch chain
+# (VocalTargetEngine -> process_vocal_sample) driven with synthetic
+# time-varying contours; synthetic evidence never claims listening quality.
+add_executable(monkeys_ear_vocal_target_chain_probe test/test_vocal_target_chain_probe.cpp)
+target_link_libraries(monkeys_ear_vocal_target_chain_probe PRIVATE monkeys_ear_core)
+
 # Legacy combined VST3 remains during migration. Standalone wrappers sit beside
 # it and link the same core; no DSP fork is permitted.
 add_library(monkeys_ear SHARED vst3/vst3_entry.cpp)

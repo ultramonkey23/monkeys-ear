@@ -15,9 +15,10 @@
       "status": "ACTIVE_RESEARCH",
       "architecture": "research/pitch-correction/ARCHITECTURE.md",
       "history": "research/pitch-correction/RESEARCH_HISTORY.md",
-   "evidence_level": "HYPOTHESIS_RESEARCH",
-   "product_integration": "LOCAL_SOURCE_AUDIT_20261011_MAPPED",
-   "local_source_audit": "research/pitch-correction/LOCAL_SOURCE_AUDIT_20261011.md"
+      "evidence_level": "SYNTHETIC_MEASURED",
+      "product_integration": "PRODUCT_CHAIN_SYNTHETIC_DRIVEN_20261011",
+      "local_source_audit": "research/pitch-correction/LOCAL_SOURCE_AUDIT_20261011.md",
+      "product_chain_probe": "test/test_vocal_target_chain_probe.cpp"
     }
   },
   "shared": {

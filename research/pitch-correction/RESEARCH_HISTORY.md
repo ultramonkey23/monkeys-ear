@@ -128,6 +128,16 @@ product two-stage grain chain is the correct in-product baseline for transformat
 no phase-locked spectral or WORLD-style reference exists in product. Research "Next evidence"
 items 1, 4 and 5 stay open and non-redundant.
 
+## 2026-10-11 — product chain driven with synthetic time-varying contours (gate-4 probe)
+
+Evidence state: SYNTHETIC. Probe: `test/test_vocal_target_chain_probe.cpp` (`monkeys_ear_vocal_target_chain_probe`, registered in root `CMakeLists.txt`), results CSV `experiments/product_chain_probe_v1_results.csv`. First real execution of research contours through the PRODUCT chain identified by the 2026-10-11 source audit: `VocalTargetEngine::process` scoring/hysteresis/glide then `AudioInputProcessor::process_vocal_sample` two-stage grain resynthesis. Seven scenarios: estimator self-check, vibrato hold, glissando, onset-jump contrast (against an independent nearest-degree oracle), confidence seam, full-chain vibrato resynthesis (S5), empty-tuning negative control.
+
+Measured (characterization only; no quality claims — REAPER listening remains release authority): vibrato hold 0.0c error / 0 switches; glissando 0.12c final error / 2 switches; onset-jump held degree 1 and reacquired degree 2 both match the independent oracle; confidence seam does not reset on a low-confidence onset and runs with 0 spurious switches; empty-tuning passthrough is exactly 0.0c (negative control). Full chain S5: mean intent error 18.1c over 73 windows vs the 150c gate; measured vibrato depth input 24.3c vs output 25.7c (`CHAR,chain_vibrato_resynthesis,vibrato_reduced,0` — with default vibrato retention the chain preserves vibrato depth; this is a CHAR observation, not a contract).
+
+Methodology finding (instrument, negative-result preserved): the first probe run failed its own estimator self-check (4.07c pure-tone error). Root cause ruled down to the probe's independent ACF estimator: a rectangular window gives finite-window alignment-dependent parabolic-vertex bias (an exact C++ replica reproduced it; sine-generation variants A/B/C all reproduced 4.07c, ruling out bionic sinf). Fix validated in scratch: Hann taper + declared estimation band (120-420 Hz lag search) drops worst-case bias 4.08c -> 1.34c across alignments and kills octave slips on vibrato tones. Probe now passes with the instrument fixed; the 3c gate was kept honest rather than widened. Lesson for future probes: estimate audio-side F0 with a windowed, band-declared estimator and validate the instrument's own bias before gating product behavior.
+
+Maps to Next evidence item 5 (both transforms driven from the same time-varying target contour — now done at synthetic level through the product chain) and touches item 1's voiced/onset seam (onset protection and the `conf > .35` voiced gate are now characterized end-to-end; candidate-level octave continuity in a DETECTOR remains open). Still not proven: everything in "Not yet proven" above, especially real-voice behavior and listening quality.
+
 ## Not yet proven
 
 - quality of any Monkey's Ear production pitch detector or resynthesis algorithm;
