@@ -138,6 +138,14 @@ Methodology finding (instrument, negative-result preserved): the first probe run
 
 Maps to Next evidence item 5 (both transforms driven from the same time-varying target contour — now done at synthetic level through the product chain) and touches item 1's voiced/onset seam (onset protection and the `conf > .35` voiced gate are now characterized end-to-end; candidate-level octave continuity in a DETECTOR remains open). Still not proven: everything in "Not yet proven" above, especially real-voice behavior and listening quality.
 
+## 2026-10-11 — detector octave continuity + V/UV hangover layer tested (continuity item 1)
+
+Evidence state: SYNTHETIC. Experiment: `experiments/detector_octave_continuity_v1.py`, results CSV `experiments/detector_octave_continuity_v1_results.csv`. Three selection layers over identical per-frame YIN/MPM estimates from `detector_baseline_v1.py` — `raw` (single-hypothesis pass-through, hard gate `conf>.35` mirroring product `audio_input.cpp` seam), `continuity_strict` (octave-register candidates {f0/2,f0,2f0} with hysteresis + V/UV hangover state machine, never follows persistent raw register change), `continuity_resync` (plus persistent-disagreement resync, RESYNC_FRAMES=3/RESYNC_MARGIN_CENTS=300). Five scenarios with ground truth: octave_jump 220→440 Hz, vibrato, gap_silence, gap_noise (fricative-like), strong_2nd_harmonic.
+
+Measured (synthetic characterization; no quality claims): (a) vibrato tracking is preserved by continuity layers (median 6.1c YIN / 4.1c MPM, equal to raw); (b) strict continuity SUPPRESSES octave slips at no vibrato cost but holds a real octave jump in the wrong register (jump-retention error ~1198c — a mechanism can be continuity-smooth into "correcting away" a real musical jump); (c) persistent-disagreement resync restores jump retention (1.6c/1.0c) while keeping noise-gap slip rate 0 for MPM; (d) resync costs onset-re-entry robustness: YIN gap_silence shows 1.25 slips/s versus 0 strict; (e) a PERSISTENT estimator octave bias (MPM on strong_2nd_harmonic, raw 1202.9c) survives all layers — continuity cannot distinguish a sustained wrong octave from a real one without harmonic evidence. Negative result preserved: the first run froze selection at the first voiced frame (hysteresis applied to within-register tracking); register-scoped hysteresis (octave switch must beat raw tracking by OCTAVE_MARGIN_CENTS=30) fixed vibrato tracking exactly and is the tested design.
+
+Maps to Next evidence item 1 (candidate-level octave continuity + V/UV transitions now has synthetic evidence incl. failure modes). Remaining for item 1: harmonic/energy evidence to disambiguate persistent bias vs real jump, and onset re-entry slip control. Still not proven: everything in "Not yet proven" below.
+
 ## Not yet proven
 
 - quality of any Monkey's Ear production pitch detector or resynthesis algorithm;
@@ -153,7 +161,7 @@ Maps to Next evidence item 5 (both transforms driven from the same time-varying 
 ## Next evidence
 
 The next executable work should connect these pieces instead of adding more isolated prose:
-1. add candidate-level octave continuity/hysteresis and voiced/unvoiced transitions to detector testing;
+1. octave continuity + V/UV transitions have synthetic evidence (2026-10-11 layer experiment) — remaining: harmonic/energy evidence to disambiguate persistent estimator octave bias from a real jump, and onset re-entry slip control;
 2. improve contour transition isolation and fast-band leakage on the randomized corpus;
 3. implement independent envelope reconstruction around both transformation families, carrying LPC20 and cepstral/True-Envelope-style candidates;
 4. replace the generic frequency-domain baseline with an explicit phase-locked spectral prototype and add transient/onset tests;
