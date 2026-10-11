@@ -1,4 +1,7 @@
 build/
+build-termux/
+# Test-run artifacts at repo root; curated presets live tracked in presets/.
+/*.mepreset
 bin/
 *.wav
 *.exe
