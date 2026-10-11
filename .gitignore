@@ -16,3 +16,5 @@ CMakeCache.txt
 CMakeFiles/
 .vscode/
 .vs/
+
+__pycache__/
