@@ -19,10 +19,19 @@ static_assert(std::size(builtins)==static_cast<size_t>(VocalBuiltinTuning::Count
 TuningSpace::TuningSpace(){set_builtin(VocalBuiltinTuning::Chromatic);}
 void TuningSpace::clear(float period){degree_count=0;period_cents=std::isfinite(period)?std::max(1.0f,period):1200.0f;builtin=VocalBuiltinTuning::Count;label.fill(0);}
 bool TuningSpace::add_degree_cents(float cents,float gravity,float ascending,float descending,const char* degree_label){
-    if(degree_count>=MAX_DEGREES||!std::isfinite(cents))return false;
-    auto& degree=degrees[degree_count++];degree={};degree.cents=cents;
-    degree.gravity=clamp(sanitize(gravity),0.0f,1.0f);degree.ascending_gravity=clamp(sanitize(ascending),0.0f,2.0f);degree.descending_gravity=clamp(sanitize(descending),0.0f,2.0f);
-    if(degree_label)std::strncpy(degree.label.data(),degree_label,degree.label.size()-1);return true;
+    if (degree_count >= MAX_DEGREES || !std::isfinite(cents)) {
+        return false;
+    }
+    auto& degree = degrees[degree_count++];
+    degree = {};
+    degree.cents = cents;
+    degree.gravity = clamp(sanitize(gravity), 0.0f, 1.0f);
+    degree.ascending_gravity = clamp(sanitize(ascending), 0.0f, 2.0f);
+    degree.descending_gravity = clamp(sanitize(descending), 0.0f, 2.0f);
+    if (degree_label) {
+        std::strncpy(degree.label.data(), degree_label, degree.label.size() - 1);
+    }
+    return true;
 }
 bool TuningSpace::add_degree_ratio(float numerator,float denominator,float gravity,float ascending,float descending,const char* degree_label){
     if(!std::isfinite(numerator)||!std::isfinite(denominator)||numerator<=0.0f||denominator<=0.0f)return false;

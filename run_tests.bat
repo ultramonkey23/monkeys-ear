@@ -17,11 +17,39 @@ if not exist build\monkeys_ear_test_runner.exe (
 cd build
 .\monkeys_ear_test_runner.exe
 set "RUNNER_ERR=%ERRORLEVEL%"
-cd ..
-
 if %RUNNER_ERR% neq 0 (
+    cd ..
     echo [FAIL] Deterministic test runner failed with code %RUNNER_ERR%
     exit /b %RUNNER_ERR%
 )
 
-echo [PASS] All Monkey's Ear audio and latency tests verified!
+if exist monkeys_ear_host_probe.exe (
+    .\monkeys_ear_host_probe.exe
+    if %ERRORLEVEL% neq 0 (
+        cd ..
+        echo [FAIL] VST3 host probe failed with code %ERRORLEVEL%
+        exit /b %ERRORLEVEL%
+    )
+)
+
+if exist monkeys_ear_vocal_host_probe.exe (
+    .\monkeys_ear_vocal_host_probe.exe
+    if %ERRORLEVEL% neq 0 (
+        cd ..
+        echo [FAIL] Vocal VST3 host probe failed with code %ERRORLEVEL%
+        exit /b %ERRORLEVEL%
+    )
+)
+
+if exist monkeys_ear_vocal_target_chain_probe.exe (
+    .\monkeys_ear_vocal_target_chain_probe.exe
+    if %ERRORLEVEL% neq 0 (
+        cd ..
+        echo [FAIL] Vocal target chain probe failed with code %ERRORLEVEL%
+        exit /b %ERRORLEVEL%
+    )
+)
+
+cd ..
+
+echo [PASS] All Monkey's Ear audio, host, and latency tests verified!
