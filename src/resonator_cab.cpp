@@ -9,6 +9,7 @@ CabinetResonator::CabinetResonator()
       resonance_(0.3f),
       damping_(0.4f),
       mix_(0.4f) {
+    reset();
     update_poles();
 }
 

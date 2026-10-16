@@ -36,6 +36,7 @@ void MonkeysEarEngine::init(float sample_rate, size_t max_block_size) {
     latency_meter_.set_sample_rate(sample_rate_);
     latency_meter_.set_block_size(max_block_size_);
 
+    reset();
     apply_macros();
 }
 

@@ -7,14 +7,14 @@ namespace monkeys_ear {
 
 // Second-order modal resonator filter
 struct ModalPole {
-    float freq_hz;
-    float decay_s;
-    float gain;
-    float y1;
-    float y2;
-    float a1;
-    float a2;
-    float b0;
+    float freq_hz = 220.0f;
+    float decay_s = 0.05f;
+    float gain = 1.0f;
+    float y1 = 0.0f;
+    float y2 = 0.0f;
+    float a1 = 0.0f;
+    float a2 = 0.0f;
+    float b0 = 0.0f;
 
     void update(float sample_rate) {
         float omega = TWO_PI * freq_hz / sample_rate;
@@ -56,7 +56,7 @@ private:
     float damping_;
     float mix_;
 
-    std::array<ModalPole, 4> poles_;
+    std::array<ModalPole, 4> poles_{};
     void update_poles();
 };
 

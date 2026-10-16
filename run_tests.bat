@@ -50,6 +50,15 @@ if exist monkeys_ear_vocal_target_chain_probe.exe (
     )
 )
 
+if exist monkeys_ear_vocal_tracker_probe.exe (
+    .\monkeys_ear_vocal_tracker_probe.exe
+    if %ERRORLEVEL% neq 0 (
+        cd ..
+        echo [FAIL] Vocal tracker probe failed with code %ERRORLEVEL%
+        exit /b %ERRORLEVEL%
+    )
+)
+
 cd ..
 
 echo [PASS] All Monkey's Ear audio, host, and latency tests verified!

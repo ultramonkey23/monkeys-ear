@@ -579,7 +579,7 @@ void run_ab_experiment_and_renders() {
     std::cout << "\n[A/B METRICS RESULT]\n";
     std::cout << "  - Mode A (Conventional Baseline): Peak = " << peak_a << " (" << 20.0f * std::log10(peak_a) << " dBFS), RMS = " << rms_a << " (" << 20.0f * std::log10(rms_a) << " dBFS)\n";
     std::cout << "  - Mode B (Chrono-Stateful Body):  Peak = " << peak_b << " (" << 20.0f * std::log10(peak_b) << " dBFS), RMS = " << rms_b << " (" << 20.0f * std::log10(rms_b) << " dBFS)\n";
-    std::cout << "  - RMS Timbral Deviation:          " << rms_diff << " (" << 20.0f * std::log10(rms_diff) << " dBFS difference)\n";
+    std::cout << "  - RMS Timbral Deviation:          " << rms_diff << " (" << 20.0f * std::log10(rms_diff) << " dBFS difference)\n" << std::flush;
     assert(rms_diff > 0.02f); // Significant musical difference proven!
 
     // Write A/B comparison WAV files
