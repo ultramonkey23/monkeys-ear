@@ -441,6 +441,72 @@ void test_multipass_filter_and_eq() {
     std::cout << "PASS (LP rejection="<<20*std::log10(low/high)<<" dB, bell boost="<<20*std::log10(rms_of(b,12000)/rms_of(a,12000))<<" dB)\n";
 }
 
+// Real instrument performance, not a standalone demo: sustain controls
+// existing voice envelopes and the two patch selectors retain their meaning.
+void test_sustain_pedal_and_patch_selector_compatibility() {
+    std::cout << "[TEST] MIDI Sustain, Repeated Notes, Mono, Panic, and Legacy Palette... ";
+    constexpr float SR=48000.f;
+    VoiceManager voices;voices.set_sample_rate(SR);
+    voices.set_amp_envelope(.001f,.002f,1.f,.005f);
+    voices.set_filter_envelope(.001f,.002f,1.f,.005f);
+    auto render=[&](int count) {
+        for(int i=0;i<count;++i){float env=0,weight=0;voices.process_split(env,weight);}
+    };
+    voices.note_on(60,.8f);render(384);
+    voices.set_sustain_pedal(true);
+    voices.note_off(60);
+    render(2000);
+    assert(voices.active_voice_count()==1); // release must wait for pedal-up
+    voices.set_sustain_pedal(false);
+    render(3000);
+    assert(voices.active_voice_count()==0);
+
+    voices.set_sustain_pedal(true);
+    voices.note_on(60,.8f);render(384);voices.note_off(60);
+    voices.note_on(60,.9f);render(384); // same key retriggers another physical voice
+    assert(voices.active_voice_count()==2);
+    voices.set_sustain_pedal(false);render(3000);
+    assert(voices.active_voice_count()==1); // only original deferred voice releases
+    voices.note_off(60);render(3000);assert(voices.active_voice_count()==0);
+    voices.set_sustain_pedal(true);
+    voices.note_on(48,.8f);voices.note_off(48);
+    voices.all_notes_off();
+    assert(!voices.sustain_pedal_down());
+    render(3000);assert(voices.active_voice_count()==0);
+    voices.note_on(60,1.f);
+    voices.all_sounds_off();
+    assert(voices.active_voice_count()==0);
+
+    voices.set_voice_mode(true,true);
+    voices.note_on(60,.8f);render(250);
+    voices.set_sustain_pedal(true);voices.note_off(60);
+    voices.note_on(64,.8f); // mono retarget must not inherit deferred note
+    voices.set_sustain_pedal(false);render(250);
+    assert(voices.active_voice_count()==1);
+    voices.note_off(64);render(3000);
+    assert(voices.active_voice_count()==0);
+
+    MonkeysEarEngine engine;engine.init(SR,64);
+    engine.set_parameter_normalized(79,.30f);
+    assert(engine.get_current_preset().name=="MONOLITH");
+    engine.set_parameter_normalized(79,.55f);
+    assert(engine.get_current_preset().name=="FERAL WOBBLE");
+    engine.set_parameter_normalized(79,.95f);
+    assert(engine.get_current_preset().name=="VELVET LEAD");
+    engine.set_parameter_normalized(173,.56f);
+    assert(engine.get_current_preset().name=="TUBE FOUNDRY");
+    assert(engine.get_current_preset().tube_rack.enabled);
+    engine.set_parameter_normalized(172,1.f);
+    engine.handle_midi_note_on(60,.8f);
+    engine.handle_midi_note_off(60);
+    assert(engine.get_active_voices()>0);
+    engine.handle_midi_cc(64,0.f);
+    engine.handle_all_notes_off();
+    engine.reset();
+    assert(engine.get_active_voices()==0);
+    std::cout << "PASS\n";
+}
+
 void test_preset_roundtrip_and_extremes() {
     std::cout << "[TEST] Tonal Preset Round-Trip & Extreme Finite Output... ";
     auto source=PresetManager::create_feral_wobble(); auto text=source.serialize(); PresetData restored; assert(restored.deserialize(text));
@@ -750,6 +816,7 @@ int main(int argc, char** argv) {
         test_weight_and_external_subharmonics();
         test_multipass_filter_and_eq();
         test_preset_roundtrip_and_extremes();
+        test_sustain_pedal_and_patch_selector_compatibility();
         test_motion_causality();
         test_bounded_sound_space();
         run_ab_experiment_and_renders();

@@ -7,6 +7,12 @@
 #include <memory>
 #include <cmath>
 #include <cstdio>
+#include <array>
+#include <bit>
+#include <algorithm>
+#include <cstdint>
+#include <cstdlib>
+#include <cctype>
 
 using namespace Steinberg;
 using namespace Steinberg::Vst;
@@ -26,10 +32,15 @@ static const TUID kMonkeysEarControllerCID = INLINE_UID(
     0x4D6F6E6B, 0x65797345, 0x61724374, 0x726C7202
 );
 
-static constexpr int kNumParams = 172;
+static constexpr int kNumParams = 174;
 static constexpr uint32 kStateMagic = 0x4D453032u; // ME02
-static constexpr uint32 kStateVersion = 4u;
+static constexpr uint32 kStateVersion = 5u;
 
+// Avoid C++ fast-math assumptions when host automation includes NaN/Inf.
+static bool valid_normalized(ParamValue value) {
+    const uint64_t bits=std::bit_cast<uint64_t>(value);
+    return (bits & 0x7ff0000000000000ULL)!=0x7ff0000000000000ULL;
+}
 static tresult write_plugin_state(IBStream* stream, const std::shared_ptr<struct SharedPluginState>& state);
 static tresult read_plugin_state(IBStream* stream, const std::shared_ptr<struct SharedPluginState>& state);
 
@@ -101,6 +112,8 @@ struct SharedPluginState {
         params[161].store(env_norm(.005f));params[162].store(env_norm(.15f));params[163].store(.70f);params[164].store(env_norm(.25f));
         params[165].store(env_norm(.010f));params[166].store(env_norm(.20f));params[167].store(.30f);params[168].store(env_norm(.30f));
         params[169].store(0.0f);params[170].store(.40f);params[171].store((4.1f)/12.0f);
+        params[172].store(0.0f); // CC64 hold; never recalled into a held note
+        params[173].store(0.0f); // expanded palette; legacy ID79 unchanged
         for (int i = 0; i < kNumParams; ++i) dirty[i].store(false);
     }
 };
@@ -111,7 +124,13 @@ static tresult write_plugin_state(IBStream* stream, const std::shared_ptr<Shared
     if(!stream||!state)return kInvalidArgument;
     uint32 magic=kStateMagic,version=kStateVersion,count=kNumParams;
     if(!stream_write(stream,&magic,4)||!stream_write(stream,&version,4)||!stream_write(stream,&count,4))return kInternalError;
-    for(int i=0;i<kNumParams;++i){float v=state->params[i].load();if(!stream_write(stream,&v,4))return kInternalError;} return kResultOk;
+    for(int i=0;i<kNumParams;++i){
+        // Hardware damper state is ephemeral; opening a saved session must
+        // never start with the sustain pedal held down.
+        float v=i==172?0.0f:state->params[i].load();
+        if(!stream_write(stream,&v,4))return kInternalError;
+    }
+    return kResultOk;
 }
 static tresult read_plugin_state(IBStream* stream, const std::shared_ptr<SharedPluginState>& state) {
     if(!stream||!state)return kInvalidArgument;
@@ -121,7 +140,9 @@ static tresult read_plugin_state(IBStream* stream, const std::shared_ptr<SharedP
     for(uint32 i=0;i<count;++i){
         float v=0;
         if(!stream_read(stream,&v,4))return kInternalError;
-        state->params[i].store(std::clamp(v,0.0f,1.0f));
+        const uint32_t bits=std::bit_cast<uint32_t>(v);
+        const bool finite=(bits&0x7f800000u)!=0x7f800000u;
+        state->params[i].store(finite?std::clamp(v,0.0f,1.0f):0.0f);
         state->dirty[i].store(true);
     }
     // Recall of a v3/124-parameter session must turn off newly added rack
@@ -134,8 +155,23 @@ static tresult read_plugin_state(IBStream* stream, const std::shared_ptr<SharedP
             state->dirty[i].store(true);
         }
     }
+    state->params[172].store(0.0f);
+    state->dirty[172].store(true);
     return kResultOk;
 }
+
+// The component does not allocate in process(): MIDI storage is an owned
+// fixed-capacity buffer; parameter queues have one preallocated cursor/ParamID.
+struct ScheduledMidi {
+    Event event{};
+    int32 order=0;
+};
+struct ParameterCursor {
+    IParamValueQueue* queue=nullptr;
+    int32 next=0, count=0, offset=0;
+    float value=0.0f;
+    bool pending=false;
+};
 
 // ── VST3 Component (Shared DSP Engine for Instrument & FX) ────────────────
 class MonkeysEarComponent : public IComponent,
@@ -320,73 +356,144 @@ public:
     }
 
     tresult SMTG_STDCALL process(ProcessData& data) override {
-        if (data.numSamples <= 0) return kResultOk;
+        if(data.numSamples<0)return kInvalidArgument;
 
-        // 1. Process Host Automation Parameter Changes
-        if (data.inputParameterChanges) {
-            int32 numParams = data.inputParameterChanges->getParameterCount();
-            for (int32 i = 0; i < numParams; ++i) {
-                auto* queue = data.inputParameterChanges->getParameterData(i);
-                if (queue && queue->getPointCount() > 0) {
-                    ParamID id = queue->getParameterId();
-                    int32 sampleOffset = 0;
-                    ParamValue val = 0.0;
-                    if (queue->getPoint(queue->getPointCount() - 1, sampleOffset, val) == kResultOk) {
-                        apply_param_to_engine(id, static_cast<float>(val));
-                        if (id < kNumParams && state_) {
-                            state_->params[id].store(static_cast<float>(val));
-                            state_->dirty[id].store(false);
-                        }
+        // Apply the restored component state and any pending local control
+        // updates at the beginning of the host block. New host automation
+        // points at offset zero override these values.
+        for(int i=0;i<kNumParams;++i)
+            if(state_->dirty[i].exchange(false))
+                apply_param_to_engine(static_cast<ParamID>(i),state_->params[i].load());
+
+        // Hosts can flush parameters with numSamples=0 and no audio buffers.
+        if(data.numSamples==0){
+            if(data.inputParameterChanges){
+                const int32 count=std::max(0,data.inputParameterChanges->getParameterCount());
+                for(int32 q=0;q<count;++q){
+                    auto* queue=data.inputParameterChanges->getParameterData(q);
+                    if(!queue)continue;
+                    const ParamID id=queue->getParameterId();
+                    if(id>=kNumParams)continue;
+                    const int32 points=std::max(0,queue->getPointCount());
+                    for(int32 i=0;i<points;++i){
+                        int32 ignored=0;ParamValue value=0;
+                        if(queue->getPoint(i,ignored,value)!=kResultOk||!valid_normalized(value))continue;
+                        const float normalized=static_cast<float>(std::clamp(value,0.0,1.0));
+                        apply_param_to_engine(id,normalized);
+                        state_->params[id].store(normalized);
+                        state_->dirty[id].store(false);
                     }
                 }
             }
+            return kResultOk;
         }
 
-        // 2. Apply UI / Controller Changes from shared state
-        if (state_) {
-            for (int i = 0; i < kNumParams; ++i) {
-                if (state_->dirty[i].exchange(false)) {
-                    apply_param_to_engine(static_cast<ParamID>(i), state_->params[i].load());
-                }
+        if(data.numOutputs<1||!data.outputs||data.outputs[0].numChannels<2
+           ||!data.outputs[0].channelBuffers32
+           ||!data.outputs[0].channelBuffers32[0]
+           ||!data.outputs[0].channelBuffers32[1])return kResultFalse;
+        const float* in_l=nullptr;
+        const float* in_r=nullptr;
+        if(data.numInputs>0&&data.inputs&&data.inputs[0].numChannels>0
+           &&data.inputs[0].channelBuffers32){
+            in_l=data.inputs[0].channelBuffers32[0];
+            in_r=data.inputs[0].numChannels>1?data.inputs[0].channelBuffers32[1]:in_l;
+        }
+        float* const out_l=data.outputs[0].channelBuffers32[0];
+        float* const out_r=data.outputs[0].channelBuffers32[1];
+
+        // A bounded buffer rather than heap allocations on the audio thread.
+        // Sort by sampleOffset and original order; do not assume the host
+        // delivers an already-sorted event list.
+        int32 midi_count=0;
+        if(data.inputEvents){
+            const int32 count=std::max(0,data.inputEvents->getEventCount());
+            if(count>static_cast<int32>(scheduled_midi_.size()))return kResultFalse;
+            for(int32 i=0;i<count;++i){
+                Event event{};
+                if(data.inputEvents->getEvent(i,event)!=kResultOk)continue;
+                if(event.sampleOffset<0||event.sampleOffset>=data.numSamples)continue;
+                if(event.type!=kNoteOnEvent&&event.type!=kNoteOffEvent)continue;
+                scheduled_midi_[midi_count++]={event,i};
             }
         }
+        std::sort(scheduled_midi_.begin(),scheduled_midi_.begin()+midi_count,
+            [](const ScheduledMidi& a,const ScheduledMidi& b){
+                return a.event.sampleOffset!=b.event.sampleOffset
+                    ? a.event.sampleOffset<b.event.sampleOffset:a.order<b.order;
+            });
 
-        // 3. Process MIDI Note Events
-        if (data.inputEvents) {
-            int32 event_count = data.inputEvents->getEventCount();
-            for (int32 i = 0; i < event_count; ++i) {
-                Event e{};
-                if (data.inputEvents->getEvent(i, e) == kResultOk) {
-                    if (e.type == kNoteOnEvent) {
-                        if (e.noteOn.velocity > 0.0f) {
-                            engine_.handle_midi_note_on(e.noteOn.pitch, e.noteOn.velocity);
-                        } else {
-                            engine_.handle_midi_note_off(e.noteOn.pitch);
-                        }
-                    } else if (e.type == kNoteOffEvent) {
-                        engine_.handle_midi_note_off(e.noteOff.pitch);
-                    }
-                }
+        std::array<ParameterCursor,kNumParams> parameter_events{};
+        std::array<int32,kNumParams> active_ids{};
+        int32 active_count=0;
+        if(data.inputParameterChanges){
+            const int32 count=std::max(0,data.inputParameterChanges->getParameterCount());
+            for(int32 q=0;q<count;++q){
+                auto* queue=data.inputParameterChanges->getParameterData(q);
+                if(!queue)continue;
+                const ParamID id=queue->getParameterId();
+                if(id>=kNumParams)continue;
+                auto& cursor=parameter_events[id];
+                if(!cursor.queue)active_ids[active_count++]=static_cast<int32>(id);
+                cursor.queue=queue;
+                cursor.next=0;
+                cursor.count=std::max(0,queue->getPointCount());
+                cursor.pending=false;
             }
         }
+        const auto advance=[&](ParameterCursor& c,int32 from){
+            c.pending=false;
+            while(c.queue&&c.next<c.count){
+                int32 offset=0;ParamValue value=0;
+                const tresult result=c.queue->getPoint(c.next++,offset,value);
+                if(result!=kResultOk||offset<from||offset>=data.numSamples
+                   ||!valid_normalized(value))continue;
+                c.offset=offset;
+                c.value=static_cast<float>(std::clamp(value,0.0,1.0));
+                c.pending=true;return;
+            }
+        };
+        for(int32 a=0;a<active_count;++a)
+            advance(parameter_events[active_ids[a]],0);
 
-        // 4. Resolve Input Audio Buffers (Causal routing of real external/recorded audio)
-        const float* in_l = nullptr;
-        const float* in_r = nullptr;
-        if (data.numInputs > 0 && data.inputs[0].channelBuffers32) {
-            if (data.inputs[0].numChannels > 0) in_l = data.inputs[0].channelBuffers32[0];
-            if (data.inputs[0].numChannels > 1) in_r = data.inputs[0].channelBuffers32[1];
-            else in_r = in_l;
+        int32 midi_cursor=0;
+        for(int32 position=0;position<data.numSamples;){
+            // Parameter changes at this sample precede same-sample notes.
+            for(int32 a=0;a<active_count;++a){
+                const int32 id=active_ids[a];auto& cursor=parameter_events[id];
+                while(cursor.pending&&cursor.offset==position){
+                    apply_param_to_engine(static_cast<ParamID>(id),cursor.value);
+                    state_->params[id].store(cursor.value);
+                    state_->dirty[id].store(false);
+                    advance(cursor,position);
+                }
+            }
+            while(midi_cursor<midi_count&&
+                  scheduled_midi_[midi_cursor].event.sampleOffset==position){
+                const Event& event=scheduled_midi_[midi_cursor++].event;
+                if(event.type==kNoteOnEvent){
+                    if(event.noteOn.velocity>0.0f)
+                        engine_.handle_midi_note_on(event.noteOn.pitch,event.noteOn.velocity);
+                    else engine_.handle_midi_note_off(event.noteOn.pitch);
+                }else if(event.type==kNoteOffEvent){
+                    engine_.handle_midi_note_off(event.noteOff.pitch);
+                }
+            }
+
+            int32 next=data.numSamples;
+            if(midi_cursor<midi_count)
+                next=std::min(next,scheduled_midi_[midi_cursor].event.sampleOffset);
+            for(int32 a=0;a<active_count;++a){
+                const auto& cursor=parameter_events[active_ids[a]];
+                if(cursor.pending)next=std::min(next,cursor.offset);
+            }
+            if(next<=position)return kInternalError;
+            engine_.process_block(in_l?in_l+position:nullptr,
+                                  in_r?in_r+position:nullptr,
+                                  out_l+position,out_r+position,
+                                  static_cast<size_t>(next-position));
+            position=next;
         }
-
-        // 5. Synthesize & Process through the Shared Engine
-        if (data.numOutputs > 0 && data.outputs[0].numChannels >= 2) {
-            float* out_l = data.outputs[0].channelBuffers32[0];
-            float* out_r = data.outputs[0].channelBuffers32[1];
-
-            engine_.process_block(in_l, in_r, out_l, out_r, static_cast<size_t>(data.numSamples));
-        }
-
         return kResultOk;
     }
 
@@ -441,7 +548,7 @@ private:
     }
     void apply_param_to_engine(ParamID id, float value) {
         engine_.set_parameter_normalized(static_cast<int>(id), value);
-        if(id==79)sync_patch_controls_for_state();
+        if(id==79||id==173)sync_patch_controls_for_state();
     }
 
     std::atomic<uint32> ref_count_;
@@ -450,6 +557,7 @@ private:
     bool processing_;
     std::shared_ptr<SharedPluginState> state_;
     monkeys_ear::MonkeysEarEngine engine_;
+    std::array<ScheduledMidi,512> scheduled_midi_{};
 };
 
 // ── VST3 Controller (UI Parameters & MIDI Mapping) ─────────────────────────
@@ -526,7 +634,9 @@ public:
         if (paramIndex < 0 || paramIndex >= kNumParams) return kInvalidArgument;
 
         info.id = static_cast<ParamID>(paramIndex);
-        info.stepCount = (paramIndex==79)?7
+        info.stepCount = (paramIndex==79)?3
+            : paramIndex==173?7
+            : paramIndex==172?1
             : (paramIndex==82||paramIndex==113||paramIndex==124||paramIndex==125||paramIndex==128||paramIndex==169)?1
             : (paramIndex>=129&&paramIndex<=160&&((paramIndex-129)%8)==0)?1
             : (paramIndex>=129&&paramIndex<=160&&((paramIndex-129)%8)==1)?monkeys_ear::kTubeFlavorCount-1
@@ -584,9 +694,13 @@ public:
         } else if(paramIndex>=161 && paramIndex<=168){
             constexpr const char* kEnvelopes[]={"AMP: Attack","AMP: Decay","AMP: Sustain","AMP: Release","FILTER ENV: Attack","FILTER ENV: Decay","FILTER ENV: Sustain","FILTER ENV: Release"};
             std::snprintf(title,sizeof(title),"%s",kEnvelopes[paramIndex-161]);
-        } else if(paramIndex>=169){
+        } else if(paramIndex>=169&&paramIndex<=171){
             constexpr const char* kTiming[]={"LFO: Tempo Sync","LFO: Tempo BPM","LFO: Subdivision"};
             std::snprintf(title,sizeof(title),"%s",kTiming[paramIndex-169]);
+        } else if(paramIndex==172){
+            std::snprintf(title,sizeof(title),"PLAY: Sustain Pedal (CC64)");
+        } else if(paramIndex==173){
+            std::snprintf(title,sizeof(title),"PLAY: Sound Palette");
         } else {
             std::snprintf(title,sizeof(title),"%s",titles[paramIndex]);
         }
@@ -598,11 +712,13 @@ public:
     }
 
     tresult SMTG_STDCALL getParamStringByValue(ParamID id, ParamValue valueNormalized, char16 string[128]) override {
+        if(id>=kNumParams||!string||!valid_normalized(valueNormalized))return kInvalidArgument;
+        valueNormalized=std::clamp(valueNormalized,0.0,1.0);
         char buf[64];
         if(id>=129&&id<=160&&((id-129)%8)==1){
             int type=std::clamp(static_cast<int>(valueNormalized*monkeys_ear::kTubeFlavorCount),0,monkeys_ear::kTubeFlavorCount-1);
             snprintf(buf,sizeof(buf),"%s",monkeys_ear::kTubeFlavorNames[type]);
-        }else if(id==124||id==128||id==169){
+        }else if(id==124||id==128||id==169||id==172){
             snprintf(buf,sizeof(buf),"%s",valueNormalized>=.5?"On":"Off");
         }else if(id==125){
             snprintf(buf,sizeof(buf),"%s",valueNormalized>=.5?"Two parallel pairs":"Four in series");
@@ -636,7 +752,11 @@ public:
             const char* modes[] = {"Synth Only", "Hybrid Blend", "External Audio"};
             snprintf(buf, sizeof(buf), "%s", (m >= 0 && m <= 2) ? modes[m] : "Synth");
         } else if (id == 79) {
-            int p=std::clamp(static_cast<int>(valueNormalized*8.0),0,7);
+            const int p=std::clamp(static_cast<int>(valueNormalized*3.99),0,3);
+            const char* names[]={"Current","MONOLITH","FERAL WOBBLE","VELVET LEAD"};
+            snprintf(buf,sizeof(buf),"%s",names[p]);
+        } else if(id==173){
+            const int p=std::clamp(static_cast<int>(valueNormalized*8.0),0,7);
             const char* names[]={"Current","MONOLITH","FERAL WOBBLE","VELVET LEAD",
                 "TUBE FOUNDRY","CLOCKWORK SUB","GLASS CHAMBER","SOUND SPACE"};
             snprintf(buf,sizeof(buf),"%s",names[p]);
@@ -657,8 +777,61 @@ public:
         return kResultOk;
     }
 
-    tresult SMTG_STDCALL getParamValueByString(ParamID /*id*/, const char16* /*string*/, ParamValue& valueNormalized) override {
-        valueNormalized = 0.5;
+    tresult SMTG_STDCALL getParamValueByString(ParamID id, const char16* raw, ParamValue& out) override {
+        if(id>=kNumParams||!raw)return kInvalidArgument;
+        std::string input;
+        for(int i=0;i<127&&raw[i];++i){
+            if(raw[i]>127)return kResultFalse;
+            input+=static_cast<char>(std::tolower(static_cast<unsigned char>(raw[i])));
+        }
+        const size_t first=input.find_first_not_of(" \t\n\r");
+        if(first==std::string::npos)return kResultFalse;
+        input=input.substr(first,input.find_last_not_of(" \t\n\r")-first+1);
+        const auto matches=[&](const char* title){
+            std::string name(title);
+            for(char& c:name)c=static_cast<char>(std::tolower(static_cast<unsigned char>(c)));
+            return name==input;
+        };
+        if(id==79||id==173){
+            constexpr const char* sounds[]={"Current","MONOLITH","FERAL WOBBLE","VELVET LEAD",
+                "TUBE FOUNDRY","CLOCKWORK SUB","GLASS CHAMBER","SOUND SPACE"};
+            for(int n=0;n<(id==79?4:8);++n)if(matches(sounds[n])){
+                out=id==79?std::min(1.0,(n+.5)/3.99):(n+.5)/8.0;return kResultOk;
+            }
+        }
+        if(id>=129&&id<=160&&(id-129)%8==1){
+            for(int n=0;n<monkeys_ear::kTubeFlavorCount;++n)
+                if(matches(monkeys_ear::kTubeFlavorNames[n])){
+                    out=(n+.5)/monkeys_ear::kTubeFlavorCount;return kResultOk;
+                }
+        }
+        if(id==171){
+            constexpr const char* divisions[]={"4 bars","2 bars","1 bar","1/2",
+                "1/4","1/8","1/16","1/32","1/4 triplet",
+                "1/8 triplet","1/8 dotted","1/16 dotted"};
+            for(int n=0;n<12;++n)if(matches(divisions[n])){out=(n+.5)/12.0;return kResultOk;}
+        }
+        if(id==124||id==125||id==128||id==169||id==172||
+           (id>=129&&id<=160&&(id-129)%8==0)){
+            if(matches("on")||matches("true")||matches("two parallel pairs")){out=1;return kResultOk;}
+            if(matches("off")||matches("false")||matches("four in series")){out=0;return kResultOk;}
+        }
+        char* end=nullptr;
+        const double number=std::strtod(input.c_str(),&end);
+        if(end==input.c_str()||!valid_normalized(number))return kResultFalse;
+        if(id==170)out=std::clamp((number-40.0)/200.0,0.0,1.0);
+        else if(id>=161&&id<=168&&id!=163&&id!=167){
+            const double seconds=input.find("ms")!=std::string::npos?number*.001:number;
+            out=std::sqrt(std::clamp((seconds-.001)/6.0,0.0,1.0));
+        }else if(id>=129&&id<=160&&(id-129)%8==1)
+            out=(std::clamp(static_cast<int>(number),0,monkeys_ear::kTubeFlavorCount-1)+.5)/monkeys_ear::kTubeFlavorCount;
+        else if(id==171)out=(std::clamp(static_cast<int>(number),0,11)+.5)/12.0;
+        else if(id==173)out=(std::clamp(static_cast<int>(number),0,7)+.5)/8.0;
+        else if(id==79)out=std::min(1.0,(std::clamp(static_cast<int>(number),0,3)+.5)/3.99);
+        else if(id==0)out=number<=0?0:std::clamp(std::log(number/40.0)/std::log(450.0),0.0,1.0);
+        else if(id==8)out=number<=-100?0:std::clamp(number/40.0+.85,0.0,1.0);
+        else if(id==11)out=std::clamp(number/48.0+.5,0.0,1.0);
+        else out=std::clamp(input.find('%')!=std::string::npos?number/100.0:number,0.0,1.0);
         return kResultOk;
     }
 
@@ -678,8 +851,9 @@ public:
     }
 
     tresult SMTG_STDCALL setParamNormalized(ParamID id, ParamValue value) override {
+        if(!valid_normalized(value))return kInvalidArgument;
         if (id < kNumParams && state_) {
-            state_->params[id].store(static_cast<float>(value));
+            state_->params[id].store(static_cast<float>(std::clamp(value,0.0,1.0)));
             state_->dirty[id].store(true);
             return kResultOk;
         }
@@ -701,6 +875,9 @@ public:
 
         if (midiControllerNumber == 1 || midiControllerNumber == 74) {
             id = 0; // CC 1 (Mod) or CC 74 -> Filter Cutoff
+            return kResultOk;
+        } else if (midiControllerNumber == 64) {
+            id = 172; // Damper / sustain pedal: PLAY control
             return kResultOk;
         } else if (midiControllerNumber == 71) {
             id = 1; // CC 71 -> Filter Resonance

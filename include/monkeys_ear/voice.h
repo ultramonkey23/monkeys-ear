@@ -83,6 +83,7 @@ public:
     void set_sample_rate(float sr);
     void note_on(int note, float velocity);
     void note_off();
+    void kill(); // immediate voice reset on transport/host deactivation
     void set_pitch_bend(float semitones);
     void set_waveform(Waveform wf);
     void set_sub_mix(float sub_mix);
@@ -153,6 +154,9 @@ public:
     void note_on(int note, float velocity);
     void note_off(int note);
     void all_notes_off();
+    void all_sounds_off();
+    void set_sustain_pedal(bool down);
+    bool sustain_pedal_down() const { return sustain_down_; }
     void set_pitch_bend(float semitones);
     void set_waveform(Waveform wf);
     void set_sub_mix(float sub_mix);
@@ -186,6 +190,8 @@ private:
     bool hard_sync_;
     bool mono_;
     bool legato_;
+    bool sustain_down_ = false;
+    std::array<bool, MAX_VOICES> deferred_release_{};
 
     int find_free_voice();
 };

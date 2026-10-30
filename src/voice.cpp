@@ -276,6 +276,11 @@ void SynthVoice::note_off() {
     filter_env_.release();
 }
 
+void SynthVoice::kill() {
+    amp_env_.reset();
+    filter_env_.reset();
+}
+
 void SynthVoice::set_pitch_bend(float semitones) {
     pitch_bend_semitones_ = semitones;
     update_frequencies();
@@ -445,6 +450,7 @@ void VoiceManager::note_on(int note, float velocity) {
     if (mono_) {
         if (voices_[0].is_active()) voices_[0].retarget_note(note, velocity, !legato_);
         else voices_[0].note_on(note, velocity);
+        deferred_release_[0]=false; // a mono retrigger takes ownership of this voice
         voices_[0].set_pitch_bend(pitch_bend_);
         voices_[0].set_fm_amount(fm_amount_);
         voices_[0].set_osc2_semi(osc2_semi_);
@@ -454,6 +460,7 @@ void VoiceManager::note_on(int note, float velocity) {
     int idx = find_free_voice();
     if (idx >= 0 && idx < static_cast<int>(MAX_VOICES)) {
         voices_[idx].note_on(note, velocity);
+        deferred_release_[static_cast<size_t>(idx)]=false; // voice steal must not inherit pedal latch
         voices_[idx].set_pitch_bend(pitch_bend_);
         voices_[idx].set_fm_amount(fm_amount_);
         voices_[idx].set_osc2_semi(osc2_semi_);
@@ -462,17 +469,37 @@ void VoiceManager::note_on(int note, float velocity) {
 }
 
 void VoiceManager::note_off(int note) {
-    for (auto& v : voices_) {
-        if (v.is_active() && v.get_note() == note) {
-            v.note_off();
+    for(size_t i=0;i<MAX_VOICES;++i) {
+        auto& voice=voices_[i];
+        if(!voice.is_active()||voice.get_note()!=note)continue;
+        if(sustain_down_)deferred_release_[i]=true;
+        else {voice.note_off();deferred_release_[i]=false;}
+    }
+}
+
+void VoiceManager::set_sustain_pedal(bool down) {
+    if(sustain_down_==down)return;
+    sustain_down_=down;
+    if(!down){
+        // A fresh same-pitch key press has its own unlatched voice, so release
+        // the *original* deferred voices even while that pitch is held again.
+        for(size_t i=0;i<MAX_VOICES;++i){
+            if(deferred_release_[i])voices_[i].note_off();
+            deferred_release_[i]=false;
         }
     }
 }
 
 void VoiceManager::all_notes_off() {
-    for (auto& v : voices_) {
-        v.note_off();
-    }
+    sustain_down_=false;
+    deferred_release_.fill(false);
+    for(auto& voice:voices_)voice.note_off();
+}
+
+void VoiceManager::all_sounds_off() {
+    sustain_down_=false;
+    deferred_release_.fill(false);
+    for(auto& voice:voices_)voice.kill();
 }
 
 void VoiceManager::set_pitch_bend(float semitones) {

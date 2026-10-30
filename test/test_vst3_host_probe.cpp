@@ -5,6 +5,7 @@
 #include <cstring>
 #include <cmath>
 #include <string>
+#include <limits>
 #include "vst3_sdk_minimal.h"
 
 using namespace Steinberg;
@@ -22,6 +23,36 @@ public:
     int32 SMTG_STDCALL getEventCount()override{return 1;}
     tresult SMTG_STDCALL getEvent(int32 index,Event& e)override{if(index!=0)return kInvalidArgument;e=event;return kResultOk;}
     tresult SMTG_STDCALL addEvent(Event& e)override{event=e;return kResultOk;}
+};
+
+class TwoPointQueue final : public IParamValueQueue {
+public:
+    TwoPointQueue(ParamID id,int32 offset,ParamValue first,ParamValue second)
+        : id_(id),offset_(offset),first_(first),second_(second){}
+    tresult SMTG_STDCALL queryInterface(const TUID,void** obj)override{if(obj)*obj=nullptr;return kResultFalse;}
+    uint32 SMTG_STDCALL addRef()override{return 1;}
+    uint32 SMTG_STDCALL release()override{return 1;}
+    ParamID SMTG_STDCALL getParameterId()override{return id_;}
+    int32 SMTG_STDCALL getPointCount()override{return 2;}
+    tresult SMTG_STDCALL getPoint(int32 index,int32& offset,ParamValue& value)override{
+        if(index<0||index>=2)return kInvalidArgument;
+        offset=index==0?0:offset_;
+        value=index==0?first_:second_;return kResultOk;
+    }
+    tresult SMTG_STDCALL addPoint(int32,ParamValue,int32&)override{return kNotImplemented;}
+private:
+    ParamID id_;int32 offset_;ParamValue first_,second_;
+};
+class TwoPointChanges final : public IParameterChanges {
+public:
+    TwoPointChanges(ParamID id,int32 offset,ParamValue a,ParamValue b):queue_(id,offset,a,b){}
+    tresult SMTG_STDCALL queryInterface(const TUID,void** obj)override{if(obj)*obj=nullptr;return kResultFalse;}
+    uint32 SMTG_STDCALL addRef()override{return 1;}
+    uint32 SMTG_STDCALL release()override{return 1;}
+    int32 SMTG_STDCALL getParameterCount()override{return 1;}
+    IParamValueQueue* SMTG_STDCALL getParameterData(int32 index)override{return index==0?&queue_:nullptr;}
+    IParamValueQueue* SMTG_STDCALL addParameterData(const ParamID&,int32&)override{return nullptr;}
+private:TwoPointQueue queue_;
 };
 
 class MemoryStream final : public IBStream {
@@ -77,19 +108,39 @@ int main() {
     CHECK_STAGE(factory2->getClassInfo2(2,&info2)==kResultOk,"read controller class info");
     IEditController* controller=nullptr; res=factory2->createInstance(info2.cid,IEditController_iid,(void**)&controller);
     CHECK_STAGE(res==kResultOk && controller!=nullptr,"create edit controller");
-    CHECK_STAGE(controller->getParameterCount()==172,"controller exposes 172 stable host parameters");
-    for(int32 i=0;i<172;++i){ParameterInfo pInfo{};CHECK_STAGE(controller->getParameterInfo(i,pInfo)==kResultOk,"read parameter info");}
+    CHECK_STAGE(controller->getParameterCount()==174,"controller exposes 174 stable host parameters");
+    for(int32 i=0;i<174;++i){ParameterInfo pInfo{};CHECK_STAGE(controller->getParameterInfo(i,pInfo)==kResultOk,"read parameter info");}
 
     MemoryStream state_stream;
     CHECK_STAGE(fx_comp->getState(&state_stream)==kResultOk,"serialize FX state");
-    CHECK_STAGE(state_stream.bytes.size()==12u+172u*sizeof(float),"serialized state size");
+    CHECK_STAGE(state_stream.bytes.size()==12u+174u*sizeof(float),"serialized state size");
     state_stream.pos=0; CHECK_STAGE(controller->setComponentState(&state_stream)==kResultOk,"controller accepts component state");
     ParameterInfo tube_type{},amp_sustain{},division{};
     CHECK_STAGE(controller->getParameterInfo(154,tube_type)==kResultOk && tube_type.stepCount==13,
                 "tube 4 exposes all 14 types with correct enum metadata");
     CHECK_STAGE(controller->getParameterInfo(163,amp_sustain)==kResultOk &&
                 controller->getParameterInfo(171,division)==kResultOk && division.stepCount==11,
-                "host exposes sustain and 12 rhythmic divisions");
+                "host exposes envelope sustain and 12 rhythmic divisions");
+    ParameterInfo old_patch{},new_patch{},pedal{};
+    CHECK_STAGE(controller->getParameterInfo(79,old_patch)==kResultOk && old_patch.stepCount==3 &&
+                controller->getParameterInfo(173,new_patch)==kResultOk && new_patch.stepCount==7 &&
+                controller->getParameterInfo(172,pedal)==kResultOk && pedal.stepCount==1,
+                "old preset selector remains four choices; new palette and CC64 are appended");
+    ParamValue typed=0.0;
+    CHECK_STAGE(controller->getParamValueByString(170,u"122 BPM",typed)==kResultOk &&
+                std::abs(typed-.41)<1e-8,"typed tempo maps to numeric BPM");
+    CHECK_STAGE(controller->getParamValueByString(164,u"250 ms",typed)==kResultOk &&
+                typed>.20&&typed<.21,"typed release time maps to ADSR seconds");
+    CHECK_STAGE(controller->getParamValueByString(154,u"KT88",typed)==kResultOk &&
+                std::abs(typed-13.5/14.0)<1e-8,"typed named tube maps to the last flavor");
+    CHECK_STAGE(controller->getParamValueByString(173,u"TUBE FOUNDRY",typed)==kResultOk &&
+                std::abs(typed-4.5/8.0)<1e-8,"PLAY palette accepts named sounds");
+    CHECK_STAGE(controller->getParamValueByString(79,u"MONOLITH",typed)==kResultOk &&
+                typed>.25&&typed<.50,"legacy preset editor keeps old name/value");
+    CHECK_STAGE(controller->getParamValueByString(173,u"not a preset",typed)!=kResultOk,
+                "invalid typed selector does not silently become midpoint");
+    CHECK_STAGE(controller->setParamNormalized(173,std::numeric_limits<double>::quiet_NaN())==kInvalidArgument,
+                "reject invalid controller automation");
     // Controller created after both components must NOT bind implicitly to
     // the last component; otherwise this edit changes FX without host routing.
     CHECK_STAGE(controller->setParamNormalized(124,1.0)==kResultOk,"edit controller-local tube enable");
@@ -110,11 +161,14 @@ int main() {
     std::memcpy(legacy.bytes.data()+8,&legacy_count,4);
     CHECK_STAGE(instr_comp->setState(&legacy)==kResultOk,"read legacy v3 host snapshot without new rack fields");
     MemoryStream migrated;CHECK_STAGE(instr_comp->getState(&migrated)==kResultOk &&
-        migrated.bytes.size()==12u+172u*sizeof(float),"legacy snapshot migrated with appended controls");
+        migrated.bytes.size()==12u+174u*sizeof(float),"legacy snapshot migrated with appended controls");
     IMidiMapping* midi_map=nullptr; CHECK_STAGE(controller->queryInterface(IMidiMapping_iid,(void**)&midi_map)==kResultOk && midi_map!=nullptr,"controller exposes MIDI mapping");
     ParamID bend_id=0,pressure_id=0;
     CHECK_STAGE(midi_map->getMidiControllerAssignment(0,0,129,bend_id)==kResultOk && bend_id==80,"pitch-bend mapping");
-    CHECK_STAGE(midi_map->getMidiControllerAssignment(0,0,130,pressure_id)==kResultOk && pressure_id==81,"pressure mapping"); midi_map->release();
+    CHECK_STAGE(midi_map->getMidiControllerAssignment(0,0,130,pressure_id)==kResultOk && pressure_id==81,"pressure mapping");
+    ParamID sustain_id=0;
+    CHECK_STAGE(midi_map->getMidiControllerAssignment(0,0,64,sustain_id)==kResultOk && sustain_id==172,
+                "hardware CC64 routes to real voice sustain"); midi_map->release();
 
     IAudioProcessor* instr_proc=nullptr; CHECK_STAGE(instr_comp->queryInterface(IAudioProcessor_iid,(void**)&instr_proc)==kResultOk && instr_proc!=nullptr,"instrument exposes audio processor");
     ProcessSetup instr_setup{}; instr_setup.sampleRate=48000; instr_setup.maxSamplesPerBlock=128;
@@ -123,6 +177,34 @@ int main() {
     OneEventList notes; notes.event.type=kNoteOnEvent; notes.event.noteOn.pitch=48; notes.event.noteOn.velocity=.9f;
     ProcessData instr_data{}; instr_data.numSamples=128; instr_data.numOutputs=1; instr_data.outputs=&instr_out; instr_data.inputEvents=&notes;
     CHECK_STAGE(instr_proc->process(instr_data)==kResultOk,"process instrument note"); float instr_peak=0; for(float v:instr_l)instr_peak=std::max(instr_peak,std::abs(v)); CHECK_STAGE(instr_peak>.001f,"instrument produces audio");
+    instr_comp->setActive(false); // clears held voices and effect tails
+    CHECK_STAGE(instr_comp->setActive(true)==kResultOk,"reactivate reset instrument");
+    notes.event.sampleOffset=64;
+    notes.event.noteOn.pitch=55;
+    CHECK_STAGE(instr_proc->process(instr_data)==kResultOk,"schedule note at sample 64");
+    float before_note=0.f,after_note=0.f;
+    for(int i=0;i<64;++i)before_note=std::max(before_note,std::abs(instr_l[i]));
+    for(int i=64;i<128;++i)after_note=std::max(after_note,std::abs(instr_l[i]));
+    CHECK_STAGE(before_note<1.e-7f && after_note>1.e-7f,
+                "VST3 MIDI note does not sound before its sampleOffset");
+    instr_data.inputEvents=nullptr;
+    TwoPointChanges gain_ramp(8,64,.85,0.0);
+    instr_data.inputParameterChanges=&gain_ramp;
+    CHECK_STAGE(instr_proc->process(instr_data)==kResultOk,"render two automation values in one audio block");
+    float gain_first=0.f,gain_second=0.f;
+    for(int i=0;i<64;++i)gain_first=std::max(gain_first,std::abs(instr_l[i]));
+    for(int i=64;i<128;++i)gain_second=std::max(gain_second,std::abs(instr_l[i]));
+    CHECK_STAGE(gain_first>1.e-7f && gain_second<gain_first*.10f,
+                "master gain automation takes effect at offset 64, not block start");
+    ProcessData flush{};flush.numSamples=0;flush.inputParameterChanges=&gain_ramp;
+    CHECK_STAGE(instr_proc->process(flush)==kResultOk,
+                "accept host zero-sample parameter flush");
+    MemoryStream flush_state;
+    CHECK_STAGE(instr_comp->getState(&flush_state)==kResultOk,
+                "serialize after no-buffer automation flush");
+    float flushed=1.f;
+    memcpy(&flushed,flush_state.bytes.data()+12u+8u*sizeof(float),4);
+    CHECK_STAGE(flushed==0.f,"zero-sample flush applied last master gain value");
     instr_comp->setActive(false); instr_proc->release();
 
     IAudioProcessor* fx_proc=nullptr; res=fx_comp->queryInterface(IAudioProcessor_iid,(void**)&fx_proc); CHECK_STAGE(res==kResultOk && fx_proc!=nullptr,"FX exposes audio processor");

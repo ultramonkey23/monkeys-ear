@@ -62,22 +62,24 @@ Verified on Windows x64 @ 48kHz (Build with CMake + Ninja + GCC 14.2):
 
 ## Integrated creative controls — quick playtest guide
 
-In REAPER's standard VST parameter controls (this wave does not introduce a custom graphical editor), use the **PRESET: Target Patch** selector to audition:
+In REAPER's standard VST parameter controls (there is no custom graphical editor yet), use **PLAY: Sound Palette** (ID 173) to audition:
 - `0 Current`, `1 MONOLITH`, `2 FERAL WOBBLE`, `3 VELVET LEAD` (unchanged legacy choices).
 - `4 TUBE FOUNDRY` — four serial tube positions, modulation and cathode/supply interaction.
 - `5 CLOCKWORK SUB` — two parallel tube pairs, subharmonics and tempo-divided movement.
 - `6 GLASS CHAMBER` — long expressive envelopes, modal Sound Space and subdued nonlinear coloration.
 - `7 SOUND SPACE` — original Sound Space factory demonstration.
 
+The earlier **PRESET: Target Patch** control (ID 79) deliberately stays a four-option legacy selector: Current, MONOLITH, FERAL WOBBLE and VELVET LEAD. This preserves old project and automation meanings. **PLAY: Sustain Pedal** (ID 172) supports MIDI CC64, with held notes releasing only when the pedal rises. Sustaining multiple repeated notes remains polyphonic; host deactivate resets the voices. Host MIDI note-on/off timing and parameter automation are now scheduled by sample offset within each audio block. The host accepts no-audio parameter flush calls. The sustained pedal position is an ephemeral performance input and is never reopened as down on session restore.
+
 For immediate playability, start with the existing eight macros **Brightness / Bite / Heat / Body / Echo / Space / Mic Blend / Character**, then adjust `AMP: Attack/Decay/Sustain/Release` (IDs 161..164), `FILTER ENV: Attack/Decay/Sustain/Release` (165..168), `LFO: Tempo Sync` (169), `LFO: Tempo BPM` (170) and `LFO: Subdivision` (171). Sync is **manual BPM**, not yet DAW transport-following: a recalled patch continues to play deterministically without host-tempo data. The 12 divisions are 4 bars, 2 bars, 1 bar, 1/2, 1/4, 1/8, 1/16, 1/32, quarter/ eighth triplets and dotted eighth/sixteenth.
 
 Advanced sound design: `RACK: Enable` (124), `Parallel Pairs` (125), `Shared Supply` (126), `Output` (127), `Anti-alias` (128), plus four sets of eight controls: `TUBE N: Enable / Tube Type / Drive / Bias / Plate Load / Cathode Sag / Coupling / Mix`. Every slot can independently select **14 tube-inspired profiles**: 12AX7, 12AT7, 12AY7, 12AU7, 5751, 12DW7, 6SN7, 6DJ8, EF86, 6V6, 6L6GC, EL84, EL34 and KT88. These are creative operating-point signatures, **not measured hardware equivalence**. Serial and paired-parallel routing use the same rack in the product signal path. Disabling the rack selects the original `TubeDriveStage` verbatim; old presets default off and use the old DSP.
 
-This source wave has a focused `monkeys_ear_tube_rack_probe` alongside the original native/host probes. **All results from earlier versions' timing tables must be remeasured** with the four-tube DSP enabled; those historical numbers are not evidence of this wave's REAPER performance. Old host state snapshots (124 parameters) and old text presets remain loadable. The three new sounds are ideas to explore, **not algorithmic claims of optimal tone**.
+This source wave has a focused `monkeys_ear_tube_rack_probe` alongside the original native/host probes. **All results from earlier versions' timing tables must be remeasured** with the four-tube DSP enabled; those historical numbers are not evidence of this wave's REAPER performance. Old host state snapshots (124/172 parameters) and old text presets remain loadable. The current host snapshot is 174 parameters; CC64 is never persisted as pressed. The three new sounds are ideas to explore, **not algorithmic claims of optimal tone**.
 
 ## Tonal Motion Architecture
 
-The main synth and FX wrapper now expose **172 VST3 parameters** (including two hidden performance controls). Existing IDs `0..123` remain stable. The appended `124..171` controls add a four-position tube rack, both existing voice/filter ADSRs, and musical-tempo subdivision of the existing LFO. Tube modeling is **one optional part** of the instrument, not a new product or an automatic change to old sounds. Three new built-in factory patches demonstrate interactions with oscillators, subharmonics, ChronoState, filters, Sound Space, and rhythm.
+The main synth and FX wrapper now expose **174 VST3 parameters** (including two hidden performance controls). Existing IDs `0..123` remain stable. The appended `124..173` controls add a four-position tube rack, both existing voice/filter ADSRs, and musical-tempo subdivision of the existing LFO. Tube modeling is **one optional part** of the instrument, not a new product or an automatic change to old sounds. Three new built-in factory patches demonstrate interactions with oscillators, subharmonics, ChronoState, filters, Sound Space, and rhythm.
 
 ### Bounded Sound Space
 

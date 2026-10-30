@@ -1,5 +1,7 @@
 #include "monkeys_ear/engine.h"
 #include <cmath>
+#include <bit>
+#include <cstdint>
 
 namespace monkeys_ear {
 
@@ -42,7 +44,7 @@ void MonkeysEarEngine::init(float sample_rate, size_t max_block_size) {
 }
 
 void MonkeysEarEngine::reset() {
-    voice_manager_.all_notes_off();
+    voice_manager_.all_sounds_off();
     audio_input_.reset();
     chrono_body_.reset();
     lfo1_.reset_phase();
@@ -245,8 +247,11 @@ void MonkeysEarEngine::set_input_route_mode(int mode) {
 void MonkeysEarEngine::set_aftertouch(float value) { aftertouch_ = clamp(value,0.0f,1.0f); }
 
 void MonkeysEarEngine::set_parameter_normalized(int id, float v) {
+    // The product is compiled with fast-math: use IEEE exponent bits, not
+    // std::isfinite(), to reject hostile VST3 values before clamping.
+    if((std::bit_cast<std::uint32_t>(v)&0x7f800000u)==0x7f800000u||id<0)return;
     v=clamp(v,0.0f,1.0f); auto& p=preset_manager_.mutable_current();
-    if(id<0)return;
+    if(id==172){handle_midi_cc(64,v);return;} // mapped CC64; performance state, not a preset field
     if(id<NUM_MACROS){ preset_manager_.set_macro(static_cast<MacroId>(id),v); apply_macros(); return; }
     if(id>=kTubeRackParamBase&&id<kTubeRackParamBase+kTubeRackParamCount){
         const int f=id-kTubeRackParamBase;
@@ -303,7 +308,14 @@ void MonkeysEarEngine::set_parameter_normalized(int id, float v) {
       case 28:p.filter_mode_a=static_cast<int>(v*4.99f);break;case 29:p.filter_cutoff_b_hz=40.0f*std::pow(450.0f,v);break;case 30:p.filter_mode_b=static_cast<int>(v*4.99f);break;case 31:p.filter_routing=static_cast<int>(v*2.99f);break;case 32:p.filter_wet=v;break;case 33:p.filter_key_tracking=v;break;case 34:p.filter_slope_a_24db=v>=.5f;break;case 35:p.filter_slope_b_24db=v>=.5f;break;case 36:p.filter_drive=v*2.0f;break;
       case 53:p.eq_bypass=v>=.5f;break;case 54:p.eq_gain_compensation=v>=.5f;break;case 55:p.lfo1_rate_hz=.05f*std::pow(600.0f,v);break;case 56:p.lfo1_waveform=static_cast<int>(v*4.99f);break;case 57:p.motion_curve=v;break;case 58:p.mod_lfo_cutoff=(v-.5f)*2;break;case 59:p.mod_lfo_resonance=(v-.5f)*2;break;case 60:p.mod_lfo_fm=(v-.5f)*2;break;case 61:p.mod_lfo_sub_blend=(v-.5f)*2;break;case 62:p.mod_lfo_drive=(v-.5f)*2;break;case 63:p.mod_lfo_eq_frequency=(v-.5f)*2;break;case 64:p.mod_lfo_eq_gain=(v-.5f)*2;break;case 65:p.mod_state_direction_filter=(v-.5f)*2;break;case 66:p.mod_state_fast_fm=(v-.5f)*2;break;case 67:p.mod_state_slow_balance=(v-.5f)*2;break;case 68:p.mod_state_slow_resonator=(v-.5f)*2;break;case 69:p.mod_audio_envelope_drive=(v-.5f)*2;break;
       case 70:p.mono_mode=v>=.5f;break;case 71:p.legato=v>=.5f;break;case 72:p.portamento_seconds=v*v*2.0f;break;case 73:p.pitch_bend_range=1.0f+v*23.0f;break;case 74:p.vibrato_depth_semitones=v*2.0f;break;case 75:p.velocity_tone=v;break;case 76:p.aftertouch_filter=(v-.5f)*2;break;case 77:p.aftertouch_drive=(v-.5f)*2;break;case 78:p.lfo1_depth=v;break;
-      case 79:{
+      case 79:{ // preserve every pre-existing normalized factory selector value
+          const int patch=std::min(3,static_cast<int>(v*3.99f));
+          if(patch==1)load_preset(PresetManager::create_monolith());
+          else if(patch==2)load_preset(PresetManager::create_feral_wobble());
+          else if(patch==3)load_preset(PresetManager::create_velvet_lead());
+          return;
+      }
+      case 173:{ // new selector; old ID 79 is never repurposed
           const int patch=std::min(7,static_cast<int>(v*8.0f));
           if(patch==1)load_preset(PresetManager::create_monolith());
           else if(patch==2)load_preset(PresetManager::create_feral_wobble());
@@ -353,7 +365,11 @@ void MonkeysEarEngine::handle_midi_pitch_bend(float semitones) {
 }
 
 void MonkeysEarEngine::handle_midi_cc(int cc_number, float value_0_to_1) {
+    if(!std::isfinite(value_0_to_1))return;
     switch (cc_number) {
+        case 64: voice_manager_.set_sustain_pedal(value_0_to_1>=.5f); break;
+        case 120: reset(); break; // MIDI All Sounds Off
+        case 123: handle_all_notes_off(); break; // MIDI All Notes Off
         case 1:  set_aftertouch(value_0_to_1); break;
         case 74: set_macro(MACRO_CUTOFF, value_0_to_1); break;
         case 71: set_macro(MACRO_RESONANCE, value_0_to_1); break;
