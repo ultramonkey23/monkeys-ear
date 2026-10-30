@@ -55,8 +55,10 @@ See `docs/STANDALONE_MODULE_STANDARD.md` (historical filename; content is the co
 
 ## 4. MASTER CONVERGENCE & LAB BOUNDARIES
 
-- Code Prime remains the sole intentional mutation boundary.
-- Any temporary branches are disposable transport; **master convergence is mandatory**.
-- `master` is the canonical production line. Compatibility refs such as `main` fast-forward after a coherent production wave; no silent long-lived divergence.
+- Code Prime remains the sole intentional mutation boundary for Lab-routed product code work. An explicitly authorized direct GitHub maintenance operation must still comply with the Lab's operator-sovereignty and provenance law.
+- **`master` is the sole canonical development and integration branch.** Never select `main` as a development target, create agent-chosen feature/transport branches or pull requests, or use another branch as a fallback when direct `master` mutation is blocked.
+- Existing Code Prime-owned bounded ephemeral validation worktrees are implementation details, not persistent alternate branch authorities; accepted work must converge directly onto `master`, with normal push and remote readback. Do not overwrite concurrent or uncommitted work.
+- Any surviving `main` ref is a temporary compatibility alias, never a separate source of truth. It must only fast-forward from validated `master` and remain synchronized until the GitHub default branch is changed to `master` and the alias is safely retired. Until then, explicitly target `master` in all GitHub API/agent operations rather than relying on the repository default.
+- The Lab project registry, launchers, and source-resolution owners must agree on canonical `master`; any mismatched or inaccessible owner is a reported blocker, not permission to work on `main`.
 - Do not duplicate Lab organs or create parallel authority structures inside Monkey's Ear.
 - Proof prevents lies; proof does not choose the dream. Cody remains the final musical authority.
