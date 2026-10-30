@@ -9,13 +9,13 @@
 #include <cstdio>
 #include <cstring>
 #include <memory>
-#include <mutex>
 
 using namespace Steinberg;
 using namespace Steinberg::Vst;
 
 namespace {
 constexpr int kParamCount = 11;
+constexpr std::array<float,kParamCount> kDefaultValues{1.0f,.45f,.35f,.80f,.55f,.50f,.10f,0.0f,1.0f,.35f,.90f};
 constexpr uint32 kStateMagic = 0x4D455643u; // MEVC
 constexpr uint32 kStateVersion = 1u;
 static const TUID kVocalComponentCID = INLINE_UID(0x4D6F6E6B, 0x65794561, 0x72566F63, 0x616C3031); // Monke yEar Vocal01
@@ -35,12 +35,45 @@ struct VocalState {
     std::array<std::atomic<float>,kParamCount> values;
     std::array<std::atomic<bool>,kParamCount> dirty;
     VocalState() {
-        constexpr float defaults[kParamCount]={1.0f,.45f,.35f,.80f,.55f,.50f,.10f,0.0f,1.0f,.35f,.90f};
-        for(int i=0;i<kParamCount;++i){values[i].store(defaults[i]);dirty[i].store(false);}
+        for(int i=0;i<kParamCount;++i){values[i].store(kDefaultValues[i]);dirty[i].store(false);}
     }
 };
-std::mutex g_state_mutex;
-std::shared_ptr<VocalState> g_latest_state;
+
+// Component and controller have independent lifetime/state. A VST3 host
+// synchronizes the controller with IEditController::setComponentState and
+// delivers UI/automation edits to IAudioProcessor::process. A global "latest
+// component" pointer incorrectly couples unrelated plugin instances.
+bool normalized_value_is_finite(ParamValue value) {
+    std::uint64_t bits=0;
+    static_assert(sizeof(bits)==sizeof(value));
+    std::memcpy(&bits,&value,sizeof(bits));
+    return (bits&0x7ff0000000000000ULL)!=0x7ff0000000000000ULL;
+}
+
+struct AutomationCursor {
+    IParamValueQueue* queue=nullptr;
+    int32 next_index=0;
+    int32 point_count=0;
+    int32 offset=0;
+    float value=0.0f;
+    bool pending=false;
+};
+
+void advance_automation(AutomationCursor& cursor,int32 from_offset,int32 num_samples) {
+    cursor.pending=false;
+    while(cursor.queue&&cursor.next_index<cursor.point_count){
+        int32 offset=0;
+        ParamValue raw=0.0;
+        if(cursor.queue->getPoint(cursor.next_index++,offset,raw)!=kResultOk)continue;
+        if(offset<from_offset||offset>=num_samples||!normalized_value_is_finite(raw))continue;
+        cursor.offset=offset;
+        // Clamp as double before converting; a finite hostile double could
+        // otherwise overflow float to infinity under -ffast-math.
+        cursor.value=static_cast<float>(std::clamp(raw,0.0,1.0));
+        cursor.pending=true;
+        return;
+    }
+}
 
 tresult write_state(IBStream* stream,const std::shared_ptr<VocalState>& state) {
     if(!stream||!state) return kInvalidArgument;
@@ -66,7 +99,7 @@ tresult read_state(IBStream* stream,const std::shared_ptr<VocalState>& state) {
 
 class VocalComponent final : public IComponent, public IAudioProcessor {
 public:
-    VocalComponent():ref_(1),state_(std::make_shared<VocalState>()){std::lock_guard<std::mutex> lock(g_state_mutex);g_latest_state=state_;module_.prepare(48000.0f,512);apply_controls();}
+    VocalComponent():ref_(1),state_(std::make_shared<VocalState>()){module_.prepare(48000.0f,512);apply_controls();}
     tresult SMTG_STDCALL queryInterface(const TUID iid,void** obj) override {if(!obj)return kInvalidArgument;if(!std::memcmp(iid,FUnknown_iid,sizeof(TUID))||!std::memcmp(iid,IPluginBase_iid,sizeof(TUID))||!std::memcmp(iid,IComponent_iid,sizeof(TUID))){*obj=static_cast<IComponent*>(this);}else if(!std::memcmp(iid,IAudioProcessor_iid,sizeof(TUID))){*obj=static_cast<IAudioProcessor*>(this);}else{*obj=nullptr;return kResultFalse;}addRef();return kResultOk;}
     uint32 SMTG_STDCALL addRef() override{return ++ref_;} uint32 SMTG_STDCALL release() override{uint32 n=--ref_;if(!n)delete this;return n;}
     tresult SMTG_STDCALL initialize(FUnknown*) override{return kResultOk;} tresult SMTG_STDCALL terminate() override{return kResultOk;}
@@ -80,12 +113,57 @@ public:
     tresult SMTG_STDCALL canProcessSampleSize(int32 size) override{return size==0?kResultOk:kResultFalse;} uint32 SMTG_STDCALL getLatencySamples() override{return 0;}
     tresult SMTG_STDCALL setupProcessing(ProcessSetup& setup) override{module_.prepare(static_cast<float>(setup.sampleRate),static_cast<uint32>(std::max(1,setup.maxSamplesPerBlock)));apply_controls();return kResultOk;} tresult SMTG_STDCALL setProcessing(bool) override{return kResultOk;}
     tresult SMTG_STDCALL process(ProcessData& data) override {
+        if(data.numSamples<0)return kInvalidArgument;
         bool changed=false;
-        if(data.inputParameterChanges){for(int32 q=0;q<data.inputParameterChanges->getParameterCount();++q){auto* queue=data.inputParameterChanges->getParameterData(q);if(!queue||!queue->getPointCount())continue;int32 offset=0;ParamValue value=0; if(queue->getPoint(queue->getPointCount()-1,offset,value)==kResultOk){const ParamID id=queue->getParameterId();if(id<kParamCount){state_->values[id].store(std::clamp(static_cast<float>(value),0.0f,1.0f));changed=true;}}}}
         for(int i=0;i<kParamCount;++i)changed=state_->dirty[i].exchange(false)||changed;
-        if(changed)apply_controls();
-        if(data.numSamples<=0||data.numInputs<1||data.numOutputs<1||!data.inputs[0].channelBuffers32||!data.outputs[0].channelBuffers32)return kResultOk;
-        auto* in=data.inputs[0].channelBuffers32;auto* out=data.outputs[0].channelBuffers32;if(data.inputs[0].numChannels<2||data.outputs[0].numChannels<2)return kResultFalse;module_.process_block(in[0],in[1],out[0],out[1],static_cast<uint32>(data.numSamples));return kResultOk;
+        if(data.numSamples==0){if(changed)apply_controls();return kResultOk;}
+        if(data.numInputs<1||data.numOutputs<1||!data.inputs||!data.outputs
+           ||!data.inputs[0].channelBuffers32||!data.outputs[0].channelBuffers32)return kResultFalse;
+        auto* in=data.inputs[0].channelBuffers32;
+        auto* out=data.outputs[0].channelBuffers32;
+        if(data.inputs[0].numChannels<2||data.outputs[0].numChannels<2
+           ||!in[0]||!in[1]||!out[0]||!out[1])return kResultFalse;
+
+        // At most one queue per stable ParamID; no allocations, locks, or
+        // unbounded per-sample scanning on the real-time thread.
+        std::array<AutomationCursor,kParamCount> events{};
+        if(data.inputParameterChanges){
+            const int32 queue_count=std::max(0,data.inputParameterChanges->getParameterCount());
+            for(int32 q=0;q<queue_count;++q){
+                auto* queue=data.inputParameterChanges->getParameterData(q);
+                if(!queue)continue;
+                const ParamID id=queue->getParameterId();
+                if(id>=kParamCount)continue;
+                events[id].queue=queue;
+                events[id].next_index=0;
+                events[id].point_count=std::max(0,queue->getPointCount());
+            }
+        }
+        for(auto& event:events)advance_automation(event,0,data.numSamples);
+
+        // Split only at actual host automation offsets. Every sample is
+        // rendered once, with each control transition applied at its offset.
+        for(int32 position=0;position<data.numSamples;){
+            for(int32 id=0;id<kParamCount;++id){
+                auto& event=events[id];
+                while(event.pending&&event.offset==position){
+                    state_->values[id].store(event.value);
+                    changed=true;
+                    advance_automation(event,position,data.numSamples);
+                }
+            }
+            if(changed){apply_controls();changed=false;}
+            int32 next=data.numSamples;
+            for(const auto& event:events){
+                if(event.pending)next=std::min(next,event.offset);
+            }
+            if(next<=position)return kInternalError;
+            module_.process_block(in[0]+position,in[1]+position,
+                                  out[0]+position,out[1]+position,
+                                  static_cast<uint32>(next-position));
+            position=next;
+        }
+        return kResultOk;
     }
     uint32 SMTG_STDCALL getTailSamples() override{return 0;}
 private:
@@ -95,11 +173,11 @@ private:
 
 class VocalController final : public IEditController {
 public:
-    VocalController():ref_(1){std::lock_guard<std::mutex> lock(g_state_mutex);state_=g_latest_state?g_latest_state:std::make_shared<VocalState>();}
+    VocalController():ref_(1),state_(std::make_shared<VocalState>()){}
     tresult SMTG_STDCALL queryInterface(const TUID iid,void** obj) override{if(!obj)return kInvalidArgument;if(!std::memcmp(iid,FUnknown_iid,sizeof(TUID))||!std::memcmp(iid,IPluginBase_iid,sizeof(TUID))||!std::memcmp(iid,IEditController_iid,sizeof(TUID))){*obj=static_cast<IEditController*>(this);addRef();return kResultOk;}*obj=nullptr;return kResultFalse;} uint32 SMTG_STDCALL addRef() override{return ++ref_;}uint32 SMTG_STDCALL release() override{uint32 n=--ref_;if(!n)delete this;return n;}tresult SMTG_STDCALL initialize(FUnknown*) override{return kResultOk;}tresult SMTG_STDCALL terminate() override{return kResultOk;}
     tresult SMTG_STDCALL setComponentState(IBStream* s) override{return read_state(s,state_);}tresult SMTG_STDCALL setState(IBStream* s) override{return read_state(s,state_);}tresult SMTG_STDCALL getState(IBStream* s) override{return write_state(s,state_);}int32 SMTG_STDCALL getParameterCount() override{return kParamCount;}
-    tresult SMTG_STDCALL getParameterInfo(int32 i,ParameterInfo& info) override{static constexpr const char* names[kParamCount]={"VOCAL: Enable","VOCAL: Correction Strength","VOCAL: Drift Retention","VOCAL: Vibrato Retention","VOCAL: Transition","VOCAL: Envelope Repair","VOCAL: Spectral Residual","VOCAL: Character","VOCAL: Mix","VOCAL: Soft Sequential Staging","VOCAL: Aperiodic Protection"};if(i<0||i>=kParamCount)return kInvalidArgument;info.id=static_cast<ParamID>(i);info.stepCount=i==0?1:0;info.unitId=0;info.flags=kCanAutomate|(i==0?kIsBypass:0);info.defaultNormalizedValue=state_->values[i].load();copy16(info.title,names[i]);copy16(info.shortTitle,names[i]);copy16(info.units,i==4?"":"%");return kResultOk;}
-    tresult SMTG_STDCALL getParamStringByValue(ParamID id,ParamValue value,char16 string[128]) override{char text[32];if(id==0)std::snprintf(text,sizeof(text),"%s",value>=.5?"On":"Bypass");else if(id==4)std::snprintf(text,sizeof(text),"%.1f ms",2.0+(1.0-value)*58.0);else std::snprintf(text,sizeof(text),"%.1f %%",value*100.0);copy16(string,text);return kResultOk;}tresult SMTG_STDCALL getParamValueByString(ParamID,const char16*,ParamValue& value) override{value=.5;return kResultOk;}ParamValue SMTG_STDCALL normalizedParamToPlain(ParamID,ParamValue v) override{return v;}ParamValue SMTG_STDCALL plainParamToNormalized(ParamID,ParamValue v) override{return v;}ParamValue SMTG_STDCALL getParamNormalized(ParamID id) override{return id<kParamCount?state_->values[id].load():0.0;}tresult SMTG_STDCALL setParamNormalized(ParamID id,ParamValue value) override{if(id>=kParamCount)return kInvalidArgument;state_->values[id].store(std::clamp(static_cast<float>(value),0.0f,1.0f));state_->dirty[id].store(true);return kResultOk;}tresult SMTG_STDCALL setComponentHandler(IComponentHandler*) override{return kResultOk;}void* SMTG_STDCALL createView(const char8*) override{return nullptr;}
+    tresult SMTG_STDCALL getParameterInfo(int32 i,ParameterInfo& info) override{static constexpr const char* names[kParamCount]={"VOCAL: Enable","VOCAL: Correction Strength","VOCAL: Drift Retention","VOCAL: Vibrato Retention","VOCAL: Transition","VOCAL: Envelope Repair","VOCAL: Spectral Residual","VOCAL: Character","VOCAL: Mix","VOCAL: Soft Sequential Staging","VOCAL: Aperiodic Protection"};if(i<0||i>=kParamCount)return kInvalidArgument;info.id=static_cast<ParamID>(i);info.stepCount=i==0?1:0;info.unitId=0;info.flags=kCanAutomate|(i==0?kIsBypass:0);info.defaultNormalizedValue=kDefaultValues[i];copy16(info.title,names[i]);copy16(info.shortTitle,names[i]);copy16(info.units,i==4?"":"%");return kResultOk;}
+    tresult SMTG_STDCALL getParamStringByValue(ParamID id,ParamValue value,char16 string[128]) override{char text[32];if(id==0)std::snprintf(text,sizeof(text),"%s",value>=.5?"On":"Bypass");else if(id==4)std::snprintf(text,sizeof(text),"%.1f ms",2.0+(1.0-value)*58.0);else std::snprintf(text,sizeof(text),"%.1f %%",value*100.0);copy16(string,text);return kResultOk;}tresult SMTG_STDCALL getParamValueByString(ParamID,const char16*,ParamValue& value) override{value=.5;return kResultOk;}ParamValue SMTG_STDCALL normalizedParamToPlain(ParamID,ParamValue v) override{return v;}ParamValue SMTG_STDCALL plainParamToNormalized(ParamID,ParamValue v) override{return v;}ParamValue SMTG_STDCALL getParamNormalized(ParamID id) override{return id<kParamCount?state_->values[id].load():0.0;}tresult SMTG_STDCALL setParamNormalized(ParamID id,ParamValue value) override{if(id>=kParamCount||!normalized_value_is_finite(value))return kInvalidArgument;state_->values[id].store(static_cast<float>(std::clamp(value,0.0,1.0)));state_->dirty[id].store(true);return kResultOk;}tresult SMTG_STDCALL setComponentHandler(IComponentHandler*) override{return kResultOk;}void* SMTG_STDCALL createView(const char8*) override{return nullptr;}
 private:std::atomic<uint32> ref_;std::shared_ptr<VocalState> state_;
 };
 
