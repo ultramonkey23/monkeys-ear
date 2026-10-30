@@ -117,6 +117,18 @@ int main() {
     CHECK_STAGE(std::string(info0.name)=="Monkey's Ear" && std::string(info0.subCategories)=="Instrument|Synth","instrument class identity");
     IComponent* instr_comp=nullptr; res=factory2->createInstance(info0.cid,IComponent_iid,(void**)&instr_comp);
     CHECK_STAGE(res==kResultOk && instr_comp!=nullptr,"create instrument component");
+    IProcessContextRequirements* needs_transport=nullptr;
+    CHECK_STAGE(instr_comp->queryInterface(IProcessContextRequirements_iid,
+                    reinterpret_cast<void**>(&needs_transport))==kResultOk &&
+                needs_transport!=nullptr,
+                "VST3 3.7+ host can discover clock/transport context requirements");
+    const uint32 context_mask=needs_transport->getProcessContextRequirements();
+    const uint32 expected_context=IProcessContextRequirements::kNeedTempo |
+        IProcessContextRequirements::kNeedProjectTimeMusic |
+        IProcessContextRequirements::kNeedTransportState;
+    CHECK_STAGE(context_mask==expected_context,
+                "host is explicitly asked for BPM, project quarter notes and play state");
+    needs_transport->release();
     CHECK_STAGE(instr_comp->getBusCount(kAudio,kInput)==0 && instr_comp->getBusCount(kAudio,kOutput)==1 && instr_comp->getBusCount(kEvent,kInput)==1,"instrument bus topology");
 
     PClassInfo2 info1{};
@@ -124,6 +136,13 @@ int main() {
     CHECK_STAGE(std::string(info1.name)=="Monkey's Ear FX" && std::string(info1.category)=="Audio Module Class","FX class identity");
     IComponent* fx_comp=nullptr; res=factory2->createInstance(info1.cid,IComponent_iid,(void**)&fx_comp);
     CHECK_STAGE(res==kResultOk && fx_comp!=nullptr,"create FX component");
+    IProcessContextRequirements* fx_transport=nullptr;
+    CHECK_STAGE(fx_comp->queryInterface(IProcessContextRequirements_iid,
+                    reinterpret_cast<void**>(&fx_transport))==kResultOk &&
+                fx_transport!=nullptr &&
+                fx_transport->getProcessContextRequirements()==expected_context,
+                "shared engine FX variant requests the same required transport fields");
+    fx_transport->release();
     CHECK_STAGE(fx_comp->getBusCount(kAudio,kInput)==1 && fx_comp->getBusCount(kAudio,kOutput)==1 && fx_comp->getBusCount(kEvent,kInput)==1,"FX bus topology");
 
     PClassInfo2 info2{};
@@ -350,7 +369,18 @@ int main() {
 
     IAudioProcessor* instr_proc=nullptr; CHECK_STAGE(instr_comp->queryInterface(IAudioProcessor_iid,(void**)&instr_proc)==kResultOk && instr_proc!=nullptr,"instrument exposes audio processor");
     ProcessSetup instr_setup{}; instr_setup.sampleRate=48000; instr_setup.maxSamplesPerBlock=128;
-    CHECK_STAGE(instr_proc->setupProcessing(instr_setup)==kResultOk,"instrument setupProcessing"); CHECK_STAGE(instr_comp->setActive(true)==kResultOk,"activate instrument");
+    CHECK_STAGE(instr_proc->setupProcessing(instr_setup)==kResultOk,"instrument setupProcessing");
+    CHECK_STAGE(instr_proc->getTailSamples()==26u*48000u,
+                "48 kHz host tail includes full delay and reverb decay");
+    instr_setup.sampleRate=96000.0;
+    CHECK_STAGE(instr_proc->setupProcessing(instr_setup)==kResultOk &&
+                instr_proc->getTailSamples()==26u*96000u,
+                "96 kHz tail scales in samples instead of claiming one second");
+    instr_setup.sampleRate=48000.0;
+    CHECK_STAGE(instr_proc->setupProcessing(instr_setup)==kResultOk &&
+                instr_proc->getTailSamples()==26u*48000u,
+                "host returns to original rate without stale tail samples");
+    CHECK_STAGE(instr_comp->setActive(true)==kResultOk,"activate instrument");
     std::vector<float> instr_l(128),instr_r(128); float* instr_channels[]={instr_l.data(),instr_r.data()}; AudioBusBuffers instr_out{}; instr_out.numChannels=2; instr_out.channelBuffers32=instr_channels;
     OneEventList notes; notes.event.type=kNoteOnEvent; notes.event.noteOn.pitch=48; notes.event.noteOn.velocity=.9f;
     ProcessContext context{};
@@ -362,7 +392,10 @@ int main() {
     instr_data.outputs=&instr_out; instr_data.inputEvents=&notes;
     instr_data.processContext=&context;
     instr_data.inputParameterChanges=&transferred_palette;
+    instr_out.silenceFlags=3u; // adversarial host flag: both channels silent
     CHECK_STAGE(instr_proc->process(instr_data)==kResultOk,"process instrument note");
+    CHECK_STAGE(instr_out.silenceFlags==0u,
+                "sounding stereo instrument clears stale host silence flags");
     MemoryStream selected_patch_state;
     CHECK_STAGE(instr_comp->getState(&selected_patch_state)==kResultOk &&
                 selected_patch_state.bytes.size()==12u+178u*sizeof(float),
@@ -420,6 +453,10 @@ int main() {
     CHECK_STAGE(instr_proc->process(instr_data)==kResultOk,
                 "host dispatches sample-positioned MIDI poly pressure");
     instr_data.inputEvents=nullptr;
+    instr_out.silenceFlags=3u;
+    CHECK_STAGE(instr_proc->process(instr_data)==kResultOk &&
+                instr_out.silenceFlags==0u,
+                "after note-off, effect tails cannot be suppressed by stale flags");
     TwoPointChanges gain_ramp(8,64,.85,0.0);
     instr_data.inputParameterChanges=&gain_ramp;
     CHECK_STAGE(instr_proc->process(instr_data)==kResultOk,"render two automation values in one audio block");

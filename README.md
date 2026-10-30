@@ -124,6 +124,18 @@ This wave includes a deterministic native voice test plus a Windows VST3 host pr
 
 This wave adds a Windows-native VST3 `IPlugView`, a host automation-edit bridge, and shared factory-preset parameter projection for controller/processor agreement. The new Windows host probe covers editor attachment, edit callbacks, preset refresh, resize, detach, and reattach. These checks are committed source **until actually run against the rebuilt plug-in**; they do not certify REAPER or subjective usability.
 
+### Host reliability and build verification wave
+
+This source wave reinforces the **existing synth and effects**, not the feature count:
+
+- **Reliable tempo-follow requests:** both VST3 instrument and FX components implement `IProcessContextRequirements` (Steinberg VST 3.7+) and explicitly request host tempo, musical quarter-note position, and transport state. The LFO keeps the saved manual BPM fallback when the host omits the corresponding validity flags. Host-delivered musical timing is a requirement of the interface, but an actual REAPER session must still confirm the host provides and updates it.
+- **Preserved long tails:** the combined VST3 reports a conservative **26-second stereo effect tail** at the current host sample rate instead of a hardcoded 48,000 samples (~one second). The upper bound accounts for the original feedback delay (up to ~0.7 s at 75% feedback) and FDN reverb (up to 6.5 s T60), including diffusion. The estimate is intentionally patch-independent so selecting a longer patch does not require unreliable plugin-to-host restart signaling. This can make tail-sensitive offline render workflows longer; it prioritizes preserving sound.
+- **Correct output signaling:** each rendered stereo buffer clears VST3 output silence flags. The synth's voices, delays, reverb and state can remain audible after input notes stop, so it is not safe to infer output silence from no incoming MIDI or an audio input's silence flags.
+- **Idle GUI efficiency:** editor parameter values are polled on the UI thread, but GDI redraw happens only after a control actually changes or the interface is otherwise invalidated. This avoids continuous full-window repaints just to check for REAPER automation.
+- **Build portability:** `build.bat` and `run_tests.bat` now locate the current user's existing WinGet WinLibs installation by `%LOCALAPPDATA%`, accept an explicit `TOOLCHAIN_BIN`, or fall back to `g++.exe` already on `PATH`. Ninja is still required. Tests still rebuild from current source; they are not replaced with GitHub CI.
+
+The Windows VST3 host regression now checks transport-context interface discovery, the three required bits, 48/96 kHz tail scaling and clearing artificially pre-marked output silence flags. **These are new regression assertions in the committed source; they have not yet been executed in an actual rebuilt Windows plugin or REAPER.** CMake, Win32 graphics embedding, real audio-thread performance, a physical Arturia performance, and level-matched listening remain release gates. This wave does not claim a completed Windows build.
+
 ### Critique and remaining acceptance gates
 
 DRIFT/FRACTURE is a **playable coupling of existing synthesis mechanisms**; its novelty is in the relationships and expressive interaction, not a claim of unprecedented audio algorithms. The field is deliberately bounded, and neutral bypass is exact, but high FRACTURE can increase cross-modulation aliasing and perceived loudness: compare at matched level, 44.1/48/96 kHz, and in an actual mix. Real approval requires blind listening and the musician's judgement, not solely a different waveform or green test. A two-axis gesture also does not replace future per-note MPE or a graphical, editable modulation routing canvas.

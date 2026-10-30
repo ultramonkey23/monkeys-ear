@@ -5,13 +5,29 @@ echo =======================================================
 echo   BUILDING MONKEY'S EAR // PRODUCTION INSTRUMENT
 echo =======================================================
 
-set "TOOLCHAIN_BIN=C:\Users\harin\AppData\Local\Microsoft\WinGet\Packages\BrechtSanders.WinLibs.POSIX.UCRT.LLVM_Microsoft.Winget.Source_8wekyb3d8bbwe\mingw64\bin"
-set "PATH=%TOOLCHAIN_BIN%;%PATH%"
-
+rem Retain the existing WinLibs setup without hardcoding the original
+rem developer's Windows username. TOOLCHAIN_BIN may be set by the caller.
+if not defined TOOLCHAIN_BIN set "TOOLCHAIN_BIN=%LOCALAPPDATA%\Microsoft\WinGet\Packages\BrechtSanders.WinLibs.POSIX.UCRT.LLVM_Microsoft.Winget.Source_8wekyb3d8bbwe\mingw64\bin"
+if exist "%TOOLCHAIN_BIN%\g++.exe" (
+    set "PATH=%TOOLCHAIN_BIN%;%PATH%"
+    set "CXX_COMPILER=%TOOLCHAIN_BIN%\g++.exe"
+) else (
+    where g++.exe >nul 2>&1
+    if errorlevel 1 (
+        echo [ERROR] No GCC C++ compiler found. Install WinLibs or set TOOLCHAIN_BIN.
+        exit /b 2
+    )
+    set "CXX_COMPILER=g++.exe"
+)
+where ninja.exe >nul 2>&1
+if errorlevel 1 (
+    echo [ERROR] Ninja is required for this build. Install it and retry.
+    exit /b 2
+)
 if not exist build mkdir build
 
-echo [CMAKE] Configuring with Ninja and GCC 14.2...
-cmake -G "Ninja" -DCMAKE_CXX_COMPILER="%TOOLCHAIN_BIN%\g++.exe" -DCMAKE_C_COMPILER="%TOOLCHAIN_BIN%\gcc.exe" -B build -S .
+echo [CMAKE] Configuring with Ninja and !CXX_COMPILER! ...
+cmake -G "Ninja" -DCMAKE_CXX_COMPILER="!CXX_COMPILER!" -B build -S .
 if %ERRORLEVEL% neq 0 (
     echo [ERROR] CMake configuration failed!
     exit /b %ERRORLEVEL%

@@ -105,6 +105,9 @@ public:
     NativeEditor(IEditController* c,IComponentHandler** handler)
         : controller_(c),handler_slot_(handler) {
         controller_->addRef();
+        last_host_values_.assign(
+            static_cast<size_t>(std::max<int32>(0,controller_->getParameterCount())),
+            -2.0); // out of normalized range, force one first draw
         title_font_=CreateFontW(-30,0,0,0,FW_BOLD,FALSE,FALSE,FALSE,
             DEFAULT_CHARSET,OUT_DEFAULT_PRECIS,CLIP_DEFAULT_PRECIS,
             CLEARTYPE_QUALITY,DEFAULT_PITCH,L"Segoe UI");
@@ -272,7 +275,12 @@ private:
             SelectObject(buffer,old);DeleteObject(bitmap);DeleteDC(buffer);
             EndPaint(hwnd,&ps);return 0;
         }
-        case WM_TIMER:invalidate();return 0;
+        case WM_TIMER:
+            // Host automation may update parameters while this editor is idle.
+            // Poll cheap normalized values, not the audio engine; repaint only
+            // when an actual value changed (or a UI gesture invalidated).
+            refresh_on_parameter_change();
+            return 0;
         case WM_COMMAND:
             if(LOWORD(wp)==kComboId&&HIWORD(wp)==CBN_SELCHANGE) {
                 selected_area_=std::clamp(static_cast<int>(SendMessageW(combo_,CB_GETCURSEL,0,0)),0,14);
@@ -307,6 +315,20 @@ private:
         return DefWindowProcW(hwnd,msg,wp,lp);
     }
     void invalidate(){if(window_)InvalidateRect(window_,nullptr,FALSE);}
+    void refresh_on_parameter_change() {
+        bool any_changed=false;
+        const auto count=std::min<size_t>(
+            last_host_values_.size(),
+            static_cast<size_t>(std::max<int32>(0,controller_->getParameterCount())));
+        for(size_t i=0;i<count;++i){
+            const double current=controller_->getParamNormalized(static_cast<ParamID>(i));
+            if(current!=last_host_values_[i]){
+                last_host_values_[i]=current;
+                any_changed=true;
+            }
+        }
+        if(any_changed)invalidate();
+    }
     IComponentHandler* handler() const {return handler_slot_?*handler_slot_:nullptr;}
     void show_native_controls() {
         if(!combo_||!search_)return;
@@ -630,6 +652,7 @@ private:
     RECT drag_rect_{};
     std::wstring search_text_;
     std::vector<Hit> hits_;
+    std::vector<double> last_host_values_; // only GUI thread; never shared with DSP
 };
 
 IPlugView* create_editor(IEditController* controller,IComponentHandler** handler_slot){

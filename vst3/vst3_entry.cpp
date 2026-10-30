@@ -204,6 +204,7 @@ struct ParameterCursor {
 // ── VST3 Component (Shared DSP Engine for Instrument & FX) ────────────────
 class MonkeysEarComponent : public IComponent,
                             public IAudioProcessor,
+                            public IProcessContextRequirements,
                             public IConnectionPoint {
 public:
     explicit MonkeysEarComponent(bool is_fx = false)
@@ -235,6 +236,11 @@ public:
         }
         if (memcmp(_iid, IAudioProcessor_iid, sizeof(TUID)) == 0) {
             *obj = static_cast<IAudioProcessor*>(this);
+            addRef();
+            return kResultOk;
+        }
+        if (memcmp(_iid, IProcessContextRequirements_iid, sizeof(TUID)) == 0) {
+            *obj = static_cast<IProcessContextRequirements*>(this);
             addRef();
             return kResultOk;
         }
@@ -365,6 +371,15 @@ public:
         return kResultOk;
     }
 
+    // Request only the three context fields actually consumed by the same
+    // production LFO. Old patches and FX retain manual-BPM fallback when a
+    // host supplies neither. This is a Setup Done / UI thread query.
+    uint32 SMTG_STDCALL getProcessContextRequirements() override {
+        return IProcessContextRequirements::kNeedTempo |
+               IProcessContextRequirements::kNeedProjectTimeMusic |
+               IProcessContextRequirements::kNeedTransportState;
+    }
+
     tresult SMTG_STDCALL canProcessSampleSize(int32 symbolicSampleSize) override {
         return (symbolicSampleSize == 0) ? kResultOk : kResultFalse; // 32-bit float
     }
@@ -374,7 +389,13 @@ public:
     }
 
     tresult SMTG_STDCALL setupProcessing(ProcessSetup& setup) override {
-        engine_.init(static_cast<float>(setup.sampleRate), static_cast<size_t>(setup.maxSamplesPerBlock));
+        const double hz=setup.sampleRate;
+        // Clamp to a real audio rate even if a hostile/incomplete host setup
+        // would otherwise overflow the reported uint32 tail length.
+        const bool finite=(std::bit_cast<uint64_t>(hz)&0x7ff0000000000000ULL)!=0x7ff0000000000000ULL;
+        const double sr=(finite&&hz>=8000.0&&hz<=384000.0)?hz:48000.0;
+        reported_tail_sample_rate_.store(sr,std::memory_order_relaxed);
+        engine_.init(static_cast<float>(sr),static_cast<size_t>(std::max(1,setup.maxSamplesPerBlock)));
         return kResultOk;
     }
 
@@ -438,6 +459,11 @@ public:
         }
         float* const out_l=data.outputs[0].channelBuffers32[0];
         float* const out_r=data.outputs[0].channelBuffers32[1];
+        // A synth/FX with voices, delay, FDN and state memory cannot infer
+        // silence merely from the *input* bus or absence of new notes.
+        // Conservatively clear both output-channel silent bits for every
+        // rendered block; don't advertise silence over audible release tails.
+        data.outputs[0].silenceFlags=0;
 
         // A bounded buffer rather than heap allocations on the audio thread.
         // Sort by sampleOffset and original order; do not assume the host
@@ -556,7 +582,15 @@ public:
     }
 
     uint32 SMTG_STDCALL getTailSamples() override {
-        return 48000; // ~1 second reverb tail
+        // This includes a conservative tail for the longest possible macro
+        // delay (~0.7 s with 75% feedback: ~17 s to -60 dB) followed by the
+        // existing FDN reverb (up to 6.5 s T60), plus diffusion/predelay.
+        // Unlike patch-dependent reporting this stays valid as performers
+        // switch sounds, without unreliable host restart notifications.
+        constexpr double worst_case_tail_seconds=26.0;
+        const double samples=std::ceil(worst_case_tail_seconds*
+            reported_tail_sample_rate_.load(std::memory_order_relaxed));
+        return static_cast<uint32>(std::clamp(samples,0.0,10000000.0));
     }
 
     // ── IConnectionPoint ─────────────────────────────────────────────────────
@@ -589,6 +623,7 @@ private:
     bool is_fx_;
     bool active_;
     bool processing_;
+    std::atomic<double> reported_tail_sample_rate_{48000.0};
     std::shared_ptr<SharedPluginState> state_;
     monkeys_ear::MonkeysEarEngine engine_;
     std::array<ScheduledMidi,512> scheduled_midi_{};

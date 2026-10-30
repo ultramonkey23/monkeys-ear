@@ -121,5 +121,38 @@
     "compatibility": "host IDs 0..175 retained, 176/177 appended; old snapshots and presets neutral; initial host count 178, v7, all factory settings captured by existing shared projection",
     "known_repair": "host probe duplicate bend_id declaration corrected in this wave",
     "next_proof": "Compile and run existing native suite and Windows VST3 host probe, then REAPER/Arturia and blind/listening review with existing research/listening/blind_kit.py"
+  },
+  "host_reliability_wave": {
+    "date": "2026-10-30",
+    "intent": "Prove host musical clock delivery and preserve real audible tails instead of adding unverified creative controls",
+    "direct_source_authority": "master implementation and public Steinberg VST3 3.7+ interfaces",
+    "source_changes": [
+      "vst3/vst3_sdk_minimal.h",
+      "vst3/vst3_entry.cpp",
+      "vst3/native_editor.cpp",
+      "test/test_vst3_host_probe.cpp",
+      "build.bat",
+      "run_tests.bat",
+      "README.md",
+      "research/STATUS.json"
+    ],
+    "verified_external_contract": {
+      "IProcessContextRequirements": "Public SDK interface IID 2A654303-EF76-4E3D-95B5-FE83730EF6D0; flags request project quarter notes, tempo and transport state",
+      "silenceFlags": "Steinberg output bus silent bits must be reset when plug-in generates potentially audible samples",
+      "ProcessContext_layout": "x64 layout: 112 bytes, projectTimeMusic @ 40, tempo @72; now enforced by compile-time assertions"
+    },
+    "source_findings": {
+      "before": "VST3 component read optional host clock without requesting context; output silenceFlags not assigned; getTailSamples fixed at 48000 regardless of session sample rate; editor repainted every ~90 ms even when unchanged; Windows scripts hardcoded account profile path",
+      "repair": "IProcessContextRequirements implemented; sample-rate-aware 26-second conservative tail; rendered output silent flags cleared; change-driven GUI repaint; automatic user-account toolchain detection and overrides",
+      "known_remaining": "No full MSVC/MinGW build or REAPER/Arturia real-time execution in this environment. Host-probe source assertions were added; execution still needed."
+    },
+    "future_evidence_needed": [
+      "Real rebuilt 64-bit Windows VST3 instrument and FX binary",
+      "VST3 host probe: context requirements IID, output flags, 48/96k sample-rate tail scaling",
+      "Real REAPER project: clock-following BPM and playback positioning versus manual fallback",
+      "Level-matched 8–24 second tail recordings; verify no premature host truncation and no unwanted excessive render duration",
+      "Host automation replay and UI idle CPU benchmark at typical audio buffers",
+      "Arturia keyboard gameplay, pleasantness and dynamic movement in a mix"
+    ]
   }
 }

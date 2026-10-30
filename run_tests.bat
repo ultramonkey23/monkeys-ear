@@ -5,8 +5,10 @@ echo =======================================================
 echo   RUNNING MONKEY'S EAR DETERMINISTIC DSP + HOST TESTS
 echo =======================================================
 
-set "TOOLCHAIN_BIN=C:\Users\harin\AppData\Local\Microsoft\WinGet\Packages\BrechtSanders.WinLibs.POSIX.UCRT.LLVM_Microsoft.Winget.Source_8wekyb3d8bbwe\mingw64\bin"
-set "PATH=%TOOLCHAIN_BIN%;%PATH%"
+rem Keep the Windows runtime DLL search path aligned with build.bat.
+rem Respect user overrides and default to the current account's WinGet path.
+if not defined TOOLCHAIN_BIN set "TOOLCHAIN_BIN=%LOCALAPPDATA%\Microsoft\WinGet\Packages\BrechtSanders.WinLibs.POSIX.UCRT.LLVM_Microsoft.Winget.Source_8wekyb3d8bbwe\mingw64\bin"
+if exist "%TOOLCHAIN_BIN%\g++.exe" set "PATH=%TOOLCHAIN_BIN%;%PATH%"
 
 rem Always rebuild from current source: a passing stale executable is not a
 rem valid regression result after edits to the Vocal wrapper or host probe.

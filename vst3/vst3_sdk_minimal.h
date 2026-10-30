@@ -2,6 +2,7 @@
 
 #include <cstdint>
 #include <cstring>
+#include <cstddef>
 
 #if defined(_WIN32)
   #define SMTG_STDCALL __stdcall
@@ -324,6 +325,17 @@ struct ProcessContext {
     int32 samplesToNextClock=0;
 };
 
+// Fail at build time rather than reading a DAW's tempo from an incorrectly
+// packed transport structure. This minimal wrapper targets x64 Windows.
+#if defined(_WIN64) || defined(_M_X64) || defined(__x86_64__)
+static_assert(sizeof(ProcessContext)==112,
+              "VST3 ProcessContext size must match the public Steinberg ABI");
+static_assert(offsetof(ProcessContext,projectTimeMusic)==40,
+              "VST3 musical position has wrong ABI offset");
+static_assert(offsetof(ProcessContext,tempo)==72,
+              "VST3 BPM has wrong ABI offset");
+#endif
+
 struct ProcessData {
     int32 processMode;
     int32 symbolicSampleSize;
@@ -353,6 +365,30 @@ public:
 
 // IAudioProcessor IID: 42043F99-B7DA453C-A569E79D-9AAEC33D
 static const TUID IAudioProcessor_iid = INLINE_UID(0x42043F99, 0xB7DA453C, 0xA569E79D, 0x9AAEC33D);
+
+// The public VST3 SDK (3.7+) requires processors to declare which parts of
+// ProcessContext they consume. Hosts are not obligated to provide tempo,
+// project quarter-note position or transport state unless requested.
+class IProcessContextRequirements : public FUnknown {
+public:
+    enum Flags : uint32 {
+        kNeedSystemTime=1u<<0,
+        kNeedContinousTimeSamples=1u<<1,
+        kNeedProjectTimeMusic=1u<<2,
+        kNeedBarPositionMusic=1u<<3,
+        kNeedCycleMusic=1u<<4,
+        kNeedSamplesToNextClock=1u<<5,
+        kNeedTempo=1u<<6,
+        kNeedTimeSignature=1u<<7,
+        kNeedChord=1u<<8,
+        kNeedFrameRate=1u<<9,
+        kNeedTransportState=1u<<10
+    };
+    virtual uint32 SMTG_STDCALL getProcessContextRequirements()=0;
+};
+static const TUID IProcessContextRequirements_iid =
+    INLINE_UID(0x2A654303,0xEF764E3D,0x95B5FE83,0x730EF6D0);
+
 
 // Parameter Info
 struct ParameterInfo {
