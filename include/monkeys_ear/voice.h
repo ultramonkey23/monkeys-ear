@@ -85,6 +85,7 @@ public:
     void note_off();
     void kill(); // immediate voice reset on transport/host deactivation
     void set_pitch_bend(float semitones);
+    void set_poly_pressure(float value); // individual voice timbre articulation
     void set_waveform(Waveform wf);
     void set_sub_mix(float sub_mix);
     void set_fundamental_mix(float mix);
@@ -116,6 +117,7 @@ private:
     float velocity_;
     float base_frequency_;
     float pitch_bend_semitones_;
+    float poly_pressure_=0.0f;
     float detune_cents_;
     int osc2_semi_;
     float fm_amount_;
@@ -151,8 +153,10 @@ public:
 
     VoiceManager();
     void set_sample_rate(float sr);
-    void note_on(int note, float velocity);
-    void note_off(int note);
+    void note_on(int note,float velocity,int channel=0,int note_id=-1);
+    // Each key-off releases exactly one matching held voice.
+    void note_off(int note,int channel=-1,int note_id=-1);
+    void set_poly_pressure(int note,int channel,int note_id,float value);
     void all_notes_off();
     void all_sounds_off();
     void set_sustain_pedal(bool down);
@@ -192,6 +196,11 @@ private:
     bool legato_;
     bool sustain_down_ = false;
     std::array<bool, MAX_VOICES> deferred_release_{};
+    std::array<bool, MAX_VOICES> key_held_{};
+    std::array<int, MAX_VOICES> voice_channel_{};
+    std::array<int, MAX_VOICES> voice_note_id_{};
+    std::array<uint32_t, MAX_VOICES> key_generation_{};
+    uint32_t next_key_generation_=1;
 
     int find_free_voice();
 };

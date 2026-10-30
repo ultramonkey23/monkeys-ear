@@ -514,6 +514,70 @@ void test_host_clock_and_groove_in_product() {
     std::cout<<"PASS\n";
 }
 
+void test_arturia_class_midi_keyboard_notes() {
+    std::cout<<"[TEST] Physical MIDI Keyboard Semantics: channels, repeated notes, note IDs, pressure... ";
+    VoiceManager voices;
+    voices.set_sample_rate(48000.0f);
+    voices.set_amp_envelope(.001f,.001f,1.f,.004f);
+    voices.set_filter_envelope(.001f,.001f,1.f,.004f);
+    auto render=[&](int samples){
+        for(int i=0;i<samples;++i){
+            float filt=0.0f,weight=0.0f;
+            const float output=voices.process_split(filt,weight);
+            assert(std::isfinite(output));
+        }
+    };
+    voices.note_on(60,.8f,0,10);
+    voices.note_on(60,.8f,1,20);
+    render(512);
+    assert(voices.active_voice_count()==2);
+    voices.note_off(60,0,10);render(1000);
+    assert(voices.active_voice_count()==1); // same pitch, other MIDI channel survives
+    voices.note_off(60,1,20);render(1000);
+    assert(voices.active_voice_count()==0);
+
+    voices.note_on(62,.8f,0,101);
+    voices.note_on(62,.9f,0,102);
+    render(512);
+    assert(voices.active_voice_count()==2);
+    voices.note_off(62,0,101);render(1000);
+    assert(voices.active_voice_count()==1); // VST3 note ID matches physical press
+    voices.note_off(62,0,102);render(1000);
+    assert(voices.active_voice_count()==0);
+
+    voices.note_on(64,.9f,0,-1);
+    voices.note_on(64,.9f,0,-1);
+    render(512);
+    voices.note_off(64,0,-1);render(1000);
+    assert(voices.active_voice_count()==1); // MIDI 1.0 has no note IDs
+    voices.note_off(64,0,-1);render(1000);
+    assert(voices.active_voice_count()==0);
+
+    voices.note_on(67,.8f,0,301);render(480);
+    voices.set_sustain_pedal(true);
+    voices.note_off(67,0,301);render(2000);
+    assert(voices.active_voice_count()==1);
+    voices.set_sustain_pedal(false);render(1000);
+    assert(voices.active_voice_count()==0);
+
+    SynthVoice unpressed,pressed;
+    unpressed.set_sample_rate(48000.f);pressed.set_sample_rate(48000.f);
+    unpressed.note_on(69,.85f);pressed.note_on(69,.85f);
+    pressed.set_poly_pressure(.95f);
+    double difference=0.0;
+    for(int i=0;i<4096;++i){
+        float a=0,b=0,aw=0,bw=0;
+        float x=unpressed.process_split(a,aw);
+        float y=pressed.process_split(b,bw);
+        assert(std::isfinite(x)&&std::isfinite(y));
+        difference+=std::abs(x-y);
+    }
+    assert(difference>0.001); // per-note pressure has a real audio consequence
+    voices.all_sounds_off();
+    assert(voices.active_voice_count()==0);
+    std::cout<<"PASS\\n";
+}
+
 void test_factory_projection_for_native_editor() {
     std::cout<<"[TEST] Shared Factory Snapshot / PLAY and EXPLORE State Consistency... ";
     constexpr int N=176;
@@ -929,6 +993,7 @@ int main(int argc, char** argv) {
         test_multipass_filter_and_eq();
         test_preset_roundtrip_and_extremes();
         test_factory_projection_for_native_editor();
+        test_arturia_class_midi_keyboard_notes();
         test_sustain_pedal_and_patch_selector_compatibility();
         test_host_clock_and_groove_in_product();
         test_motion_causality();

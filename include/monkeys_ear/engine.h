@@ -37,8 +37,9 @@ public:
     );
 
     // MIDI Event Input (CALLED ON AUDIO THREAD)
-    void handle_midi_note_on(int note, float velocity);
-    void handle_midi_note_off(int note);
+    void handle_midi_note_on(int note,float velocity,int channel=0,int note_id=-1);
+    void handle_midi_note_off(int note,int channel=-1,int note_id=-1);
+    void handle_midi_poly_pressure(int note,int channel,int note_id,float pressure);
     void handle_midi_pitch_bend(float semitones);
     void handle_midi_cc(int cc_number, float value_0_to_1);
     void handle_all_notes_off();

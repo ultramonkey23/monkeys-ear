@@ -179,6 +179,16 @@ int main() {
                 controller->getParamNormalized(175)>.4,
                 "PLAY palette selection synchronizes actual preset controls");
     const ParamValue gui_patch_edit=edits.last_value;
+    // KEYS is an on-plugin setup/feel page, not a separate MIDI application.
+    SendMessageW(child,WM_LBUTTONDOWN,MK_LBUTTON,MAKELPARAM(914,40));
+    SendMessageW(child,WM_LBUTTONUP,0,MAKELPARAM(914,40));
+    RedrawWindow(child,nullptr,nullptr,RDW_INVALIDATE|RDW_UPDATENOW);
+    const int before_bend=edits.perform_count;
+    SendMessageW(child,WM_LBUTTONDOWN,MK_LBUTTON,MAKELPARAM(952,418));
+    SendMessageW(child,WM_LBUTTONUP,0,MAKELPARAM(952,418));
+    CHECK_STAGE(edits.perform_count>before_bend&&edits.last_id==73,
+                "KEYS page exposes actual pitch-bend range for physical wheel");
+
     ViewRect resized{0,0,1280,860};
     CHECK_STAGE(view->onSize(&resized)==kResultOk &&
                 view->getSize(&size)==kResultOk && size.right==1280,
@@ -222,6 +232,12 @@ int main() {
     CHECK_STAGE(units->selectUnit(5)==kResultOk && units->getSelectedUnit()==5,
                 "host can navigate to rhythm subgroup");
     units->release();
+    ParameterInfo bend_info{},pressure_info{};
+    CHECK_STAGE(controller->getParameterInfo(80,bend_info)==kResultOk&&
+                controller->getParameterInfo(81,pressure_info)==kResultOk&&
+                (bend_info.flags&kCanAutomate)!=0&&
+                (pressure_info.flags&kCanAutomate)!=0,
+                "hardware wheel and pressure target automatable hidden parameters");
     ParameterInfo old_patch{},new_patch{},pedal{};
     CHECK_STAGE(controller->getParameterInfo(79,old_patch)==kResultOk && old_patch.stepCount==3 &&
                 controller->getParameterInfo(173,new_patch)==kResultOk && new_patch.stepCount==7 &&
@@ -271,7 +287,15 @@ int main() {
     IMidiMapping* midi_map=nullptr; CHECK_STAGE(controller->queryInterface(IMidiMapping_iid,(void**)&midi_map)==kResultOk && midi_map!=nullptr,"controller exposes MIDI mapping");
     ParamID bend_id=0,pressure_id=0;
     CHECK_STAGE(midi_map->getMidiControllerAssignment(0,0,129,bend_id)==kResultOk && bend_id==80,"pitch-bend mapping");
-    CHECK_STAGE(midi_map->getMidiControllerAssignment(0,0,130,pressure_id)==kResultOk && pressure_id==81,"pressure mapping");
+    CHECK_STAGE(midi_map->getMidiControllerAssignment(0,0,128,pressure_id)==kResultOk && pressure_id==81,
+                "VST3 channel pressure uses Steinberg controller 128");
+    CHECK_STAGE(midi_map->getMidiControllerAssignment(0,0,130,pressure_id)!=kResultOk,
+                "incorrect historical 130 aftertouch mapping no longer advertised");
+    ParamID bend_id=0,wheel_id=0;
+    CHECK_STAGE(midi_map->getMidiControllerAssignment(0,0,129,bend_id)==kResultOk&&bend_id==80,
+                "Arturia pitch wheel reaches normalized VST3 bend");
+    CHECK_STAGE(midi_map->getMidiControllerAssignment(0,0,1,wheel_id)==kResultOk&&wheel_id==0,
+                "Arturia mod wheel maps to existing brightness macro");
     ParamID sustain_id=0;
     CHECK_STAGE(midi_map->getMidiControllerAssignment(0,0,64,sustain_id)==kResultOk && sustain_id==172,
                 "hardware CC64 routes to real voice sustain"); midi_map->release();
@@ -312,6 +336,19 @@ int main() {
     for(int i=64;i<128;++i)after_note=std::max(after_note,std::abs(instr_l[i]));
     CHECK_STAGE(before_note<1.e-7f && after_note>1.e-7f,
                 "VST3 MIDI note does not sound before its sampleOffset");
+    // Standard VST3 polyphonic pressure events must reach individual notes,
+    // rather than disappearing because they are not NoteOn/NoteOff.
+    OneEventList poly_pressure;
+    poly_pressure.event.busIndex=0;
+    poly_pressure.event.sampleOffset=32;
+    poly_pressure.event.type=kPolyPressureEvent;
+    poly_pressure.event.polyPressure.channel=0;
+    poly_pressure.event.polyPressure.pitch=55;
+    poly_pressure.event.polyPressure.noteId=0;
+    poly_pressure.event.polyPressure.pressure=.85f;
+    instr_data.inputEvents=&poly_pressure;
+    CHECK_STAGE(instr_proc->process(instr_data)==kResultOk,
+                "host dispatches sample-positioned MIDI poly pressure");
     instr_data.inputEvents=nullptr;
     TwoPointChanges gain_ramp(8,64,.85,0.0);
     instr_data.inputParameterChanges=&gain_ramp;

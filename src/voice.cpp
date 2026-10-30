@@ -245,6 +245,7 @@ void SynthVoice::set_sample_rate(float sr) {
 void SynthVoice::note_on(int note, float velocity) {
     note_ = note;
     velocity_ = velocity;
+    poly_pressure_=0.0f;
     base_frequency_ = midi_to_freq(static_cast<float>(note));
     target_frequency_ = base_frequency_;
     if (!is_active() || portamento_seconds_ <= 0.0001f) current_frequency_ = target_frequency_;
@@ -263,6 +264,7 @@ void SynthVoice::note_on(int note, float velocity) {
 void SynthVoice::retarget_note(int note, float velocity, bool retrigger) {
     note_ = note;
     velocity_ = velocity;
+    poly_pressure_=0.0f;
     base_frequency_ = midi_to_freq(static_cast<float>(note));
     target_frequency_ = base_frequency_;
     if (retrigger) {
@@ -279,11 +281,16 @@ void SynthVoice::note_off() {
 void SynthVoice::kill() {
     amp_env_.reset();
     filter_env_.reset();
+    poly_pressure_=0.0f;
 }
 
 void SynthVoice::set_pitch_bend(float semitones) {
     pitch_bend_semitones_ = semitones;
     update_frequencies();
+}
+
+void SynthVoice::set_poly_pressure(float value) {
+    poly_pressure_=clamp(value,0.0f,1.0f);
 }
 
 void SynthVoice::set_waveform(Waveform wf) {
@@ -399,7 +406,8 @@ float SynthVoice::process_split(float& filter_env_out, float& weight_out) {
 
     // Sum interacting sources
     float carrier_level = 0.55f;
-    float mod_level = 0.45f * (1.0f - fm_amount_ * 0.35f);
+    float mod_level = 0.45f * (1.0f - fm_amount_ * 0.35f)
+        * (1.0f + 0.45f * poly_pressure_); // per-key expressive harmonic emphasis
     float character = carrier_level * s1 + mod_level * s2 + noise_mix_ * noise;
 
     float amp = amp_env_.process();
@@ -446,34 +454,60 @@ int VoiceManager::find_free_voice() {
     return oldest_idx;
 }
 
-void VoiceManager::note_on(int note, float velocity) {
-    if (mono_) {
-        if (voices_[0].is_active()) voices_[0].retarget_note(note, velocity, !legato_);
-        else voices_[0].note_on(note, velocity);
-        deferred_release_[0]=false; // a mono retrigger takes ownership of this voice
-        voices_[0].set_pitch_bend(pitch_bend_);
-        voices_[0].set_fm_amount(fm_amount_);
-        voices_[0].set_osc2_semi(osc2_semi_);
-        voices_[0].set_hard_sync(hard_sync_);
-        return;
-    }
-    int idx = find_free_voice();
-    if (idx >= 0 && idx < static_cast<int>(MAX_VOICES)) {
-        voices_[idx].note_on(note, velocity);
-        deferred_release_[static_cast<size_t>(idx)]=false; // voice steal must not inherit pedal latch
-        voices_[idx].set_pitch_bend(pitch_bend_);
-        voices_[idx].set_fm_amount(fm_amount_);
-        voices_[idx].set_osc2_semi(osc2_semi_);
-        voices_[idx].set_hard_sync(hard_sync_);
-    }
+void VoiceManager::note_on(int note,float velocity,int channel,int note_id) {
+    if(note<0||note>127||channel<0||channel>15)return;
+    const int idx=mono_?0:find_free_voice();
+    if(idx<0||idx>=static_cast<int>(MAX_VOICES))return;
+    const size_t slot=static_cast<size_t>(idx);
+    if(mono_&&voices_[0].is_active())
+        voices_[0].retarget_note(note,velocity,!legato_);
+    else voices_[slot].note_on(note,velocity);
+
+    // A new key press always takes ownership of a voice, including steals.
+    voice_channel_[slot]=channel;
+    voice_note_id_[slot]=note_id;
+    key_held_[slot]=true;
+    key_generation_[slot]=next_key_generation_++;
+    deferred_release_[slot]=false;
+    voices_[slot].set_poly_pressure(0.0f);
+    voices_[slot].set_pitch_bend(pitch_bend_);
+    voices_[slot].set_fm_amount(fm_amount_);
+    voices_[slot].set_osc2_semi(osc2_semi_);
+    voices_[slot].set_hard_sync(hard_sync_);
 }
 
-void VoiceManager::note_off(int note) {
-    for(size_t i=0;i<MAX_VOICES;++i) {
-        auto& voice=voices_[i];
-        if(!voice.is_active()||voice.get_note()!=note)continue;
-        if(sustain_down_)deferred_release_[i]=true;
-        else {voice.note_off();deferred_release_[i]=false;}
+void VoiceManager::note_off(int note,int channel,int note_id) {
+    if(note<0||note>127)return;
+    int chosen=-1;
+    uint32_t newest=0;
+    // VST3 note IDs are stronger identity than pitch. Without an ID (USB
+    // MIDI1 controllers), release ONE physical held press, not every
+    // overlapping voice of the same pitch.
+    for(size_t i=0;i<MAX_VOICES;++i){
+        if(!key_held_[i]||!voices_[i].is_active()||voices_[i].get_note()!=note)
+            continue;
+        if(channel>=0&&voice_channel_[i]!=channel)continue;
+        if(note_id>=0&&voice_note_id_[i]!=note_id)continue;
+        if(chosen<0||key_generation_[i]>=newest){
+            newest=key_generation_[i];
+            chosen=static_cast<int>(i);
+        }
+    }
+    if(chosen<0)return;
+    const size_t slot=static_cast<size_t>(chosen);
+    key_held_[slot]=false;
+    if(sustain_down_)deferred_release_[slot]=true;
+    else {voices_[slot].note_off();deferred_release_[slot]=false;}
+}
+
+void VoiceManager::set_poly_pressure(int note,int channel,int note_id,float value) {
+    if(note<0||note>127||channel<0||channel>15)return;
+    const float pressure=clamp(value,0.f,1.f);
+    for(size_t i=0;i<MAX_VOICES;++i){
+        if(!voices_[i].is_active()||voices_[i].get_note()!=note||
+           voice_channel_[i]!=channel)continue;
+        if(note_id>=0&&voice_note_id_[i]!=note_id)continue;
+        voices_[i].set_poly_pressure(pressure);
     }
 }
 
@@ -493,12 +527,14 @@ void VoiceManager::set_sustain_pedal(bool down) {
 void VoiceManager::all_notes_off() {
     sustain_down_=false;
     deferred_release_.fill(false);
+    key_held_.fill(false);
     for(auto& voice:voices_)voice.note_off();
 }
 
 void VoiceManager::all_sounds_off() {
     sustain_down_=false;
     deferred_release_.fill(false);
+    key_held_.fill(false);
     for(auto& voice:voices_)voice.kill();
 }
 

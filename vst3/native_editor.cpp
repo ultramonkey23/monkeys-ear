@@ -466,6 +466,32 @@ private:
         for(int i=0;i<4;++i)
             draw_param(dc,44+i*260,640,249,56,rhythm[i],names[i]);
     }
+    void draw_keys(HDC dc) {
+        title(dc,L"PLAY IT FROM YOUR MIDI KEYBOARD",
+              L"Arturia and other standard MIDI keyboards work through the DAW's MIDI input.",129);
+        rectangle(dc,44,188,1032,136,kPanel,kOutline,16);
+        label(dc,body_font_,kAccent,L"1  CONNECT",62,198,290,28);
+        label(dc,small_font_,kText,L"Plug the keyboard into USB. In REAPER Preferences > MIDI Devices,",62,228,980,27);
+        label(dc,small_font_,kText,L"enable the keyboard's normal MIDI port (not only its DAW/MCU port).",62,251,980,27);
+        label(dc,small_font_,kText,L"2  ARM THE INSTRUMENT TRACK  /  INPUT: MIDI  /  MONITORING: ON",62,280,980,31);
+
+        title(dc,L"FEEL & EXPRESSION",
+              L"These controls act on the existing voice engine: no required vendor script.",342);
+        constexpr int keys[8]={70,71,72,73,74,75,76,77};
+        constexpr const wchar_t* labels[8]={
+            L"MONO",L"LEGATO",L"GLIDE",L"BEND RANGE",
+            L"VIBRATO DEPTH",L"VELOCITY TONE",L"PRESSURE TO FILTER",L"PRESSURE TO DRIVE"
+        };
+        for(int i=0;i<8;++i)
+            draw_param(dc,44+(i%4)*260,390+(i/4)*72,249,64,keys[i],labels[i]);
+
+        title(dc,L"COMMON HARDWARE MESSAGES",
+              L"Key presses and pads become MIDI notes; controls can also use REAPER MIDI Learn.",557);
+        rectangle(dc,44,604,1032,100,kPanel,kOutline,14);
+        label(dc,small_font_,kText,L"KEYS / PADS: pitch + velocity    |    BEND WHEEL: pitch bend    |    PEDAL CC64: sustain",61,613,1000,28);
+        label(dc,small_font_,kText,L"MOD WHEEL CC1 / CC74: brightness    |    CC71: bite    |    CC91: space    |    CC93: echo",61,640,1000,28);
+        label(dc,small_font_,kText,L"CHANNEL PRESSURE: expressive filter/drive    |    POLY PRESSURE: individual-note timbre",61,667,1000,28);
+    }
     void draw_explore(HDC dc) {
         title(dc,L"EXPLORE THE ENGINE",
               L"Pick an area or search every parameter. Deep controls remain available, never required.",129);
@@ -504,15 +530,19 @@ private:
         label(dc,small_font_,kMuted,L"PLAY FIRST  /  EXPERIMENT DEEPER",44,69,680,28);
         // Output remains accessible in BOTH views, never hidden in deep menus.
         draw_param(dc,616,23,170,46,8,L"OUTPUT");
-        rectangle(dc,800,22,120,37,page_==0?RGB(31,77,76):kPanel,kOutline);
-        label(dc,body_font_,page_==0?kAccent:kText,L"PLAY",800,22,120,37,DT_CENTER);
-        add_hit(800,22,120,37,-1,1,0);
-        rectangle(dc,930,22,145,37,page_==1?RGB(31,77,76):kPanel,kOutline);
-        label(dc,body_font_,page_==1?kAccent:kText,L"EXPLORE",930,22,145,37,DT_CENTER);
-        add_hit(930,22,145,37,-1,1,1);
+        rectangle(dc,800,22,82,37,page_==0?RGB(31,77,76):kPanel,kOutline);
+        label(dc,body_font_,page_==0?kAccent:kText,L"PLAY",800,22,82,37,DT_CENTER);
+        add_hit(800,22,82,37,-1,1,0);
+        rectangle(dc,888,22,82,37,page_==2?RGB(31,77,76):kPanel,kOutline);
+        label(dc,body_font_,page_==2?kAccent:kText,L"KEYS",888,22,82,37,DT_CENTER);
+        add_hit(888,22,82,37,-1,1,2);
+        rectangle(dc,976,22,100,37,page_==1?RGB(31,77,76):kPanel,kOutline);
+        label(dc,body_font_,page_==1?kAccent:kText,L"EXPLORE",976,22,100,37,DT_CENTER);
+        add_hit(976,22,100,37,-1,1,1);
         HBRUSH line=CreateSolidBrush(kOutline);
         RECT sep{44,108,1076,110};FillRect(dc,&sep,line);DeleteObject(line);
         if(page_==0)draw_play(dc);
+        else if(page_==2)draw_keys(dc);
         else draw_explore(dc);
         const bool connected=handler()!=nullptr;
         label(dc,small_font_,connected?kMuted:RGB(255,175,113),

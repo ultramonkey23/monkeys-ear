@@ -389,15 +389,20 @@ void MonkeysEarEngine::set_parameter_normalized(int id, float v) {
     } apply_macros();
 }
 
-void MonkeysEarEngine::handle_midi_note_on(int note, float velocity) {
-    current_midi_note_ = note;
-    last_velocity_ = clamp(velocity,0.0f,1.0f);
+void MonkeysEarEngine::handle_midi_note_on(int note,float velocity,int channel,int note_id) {
+    if(note<0||note>127||channel<0||channel>15)return;
+    current_midi_note_=note;
+    last_velocity_=clamp(velocity,0.f,1.f);
     apply_macros();
-    voice_manager_.note_on(note, velocity);
+    voice_manager_.note_on(note,velocity,channel,note_id);
 }
 
-void MonkeysEarEngine::handle_midi_note_off(int note) {
-    voice_manager_.note_off(note);
+void MonkeysEarEngine::handle_midi_note_off(int note,int channel,int note_id) {
+    voice_manager_.note_off(note,channel,note_id);
+}
+
+void MonkeysEarEngine::handle_midi_poly_pressure(int note,int channel,int note_id,float pressure) {
+    voice_manager_.set_poly_pressure(note,channel,note_id,pressure);
 }
 
 void MonkeysEarEngine::handle_midi_pitch_bend(float semitones) {

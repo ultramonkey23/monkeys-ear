@@ -447,8 +447,21 @@ public:
             for(int32 i=0;i<count;++i){
                 Event event{};
                 if(data.inputEvents->getEvent(i,event)!=kResultOk)continue;
-                if(event.sampleOffset<0||event.sampleOffset>=data.numSamples)continue;
-                if(event.type!=kNoteOnEvent&&event.type!=kNoteOffEvent)continue;
+                if(event.busIndex!=0||event.sampleOffset<0||
+                   event.sampleOffset>=data.numSamples)continue;
+                if(event.type!=kNoteOnEvent&&event.type!=kNoteOffEvent&&
+                   event.type!=kPolyPressureEvent)continue;
+                if(event.type==kNoteOnEvent &&
+                   (event.noteOn.pitch<0||event.noteOn.pitch>127||
+                    event.noteOn.channel<0||event.noteOn.channel>15||
+                    !valid_normalized(event.noteOn.velocity)))continue;
+                if(event.type==kNoteOffEvent &&
+                   (event.noteOff.pitch<0||event.noteOff.pitch>127||
+                    event.noteOff.channel<0||event.noteOff.channel>15))continue;
+                if(event.type==kPolyPressureEvent &&
+                   (event.polyPressure.pitch<0||event.polyPressure.pitch>127||
+                    event.polyPressure.channel<0||event.polyPressure.channel>15||
+                    !valid_normalized(event.polyPressure.pressure)))continue;
                 scheduled_midi_[midi_count++]={event,i};
             }
         }
@@ -508,10 +521,18 @@ public:
                 const Event& event=scheduled_midi_[midi_cursor++].event;
                 if(event.type==kNoteOnEvent){
                     if(event.noteOn.velocity>0.0f)
-                        engine_.handle_midi_note_on(event.noteOn.pitch,event.noteOn.velocity);
-                    else engine_.handle_midi_note_off(event.noteOn.pitch);
+                        engine_.handle_midi_note_on(event.noteOn.pitch,
+                            std::clamp(event.noteOn.velocity,0.f,1.f),
+                            event.noteOn.channel,event.noteOn.noteId);
+                    else engine_.handle_midi_note_off(event.noteOn.pitch,
+                            event.noteOn.channel,event.noteOn.noteId);
                 }else if(event.type==kNoteOffEvent){
-                    engine_.handle_midi_note_off(event.noteOff.pitch);
+                    engine_.handle_midi_note_off(event.noteOff.pitch,
+                        event.noteOff.channel,event.noteOff.noteId);
+                }else if(event.type==kPolyPressureEvent){
+                    engine_.handle_midi_poly_pressure(event.polyPressure.pitch,
+                        event.polyPressure.channel,event.polyPressure.noteId,
+                        std::clamp(event.polyPressure.pressure,0.f,1.f));
                 }
             }
 
@@ -691,8 +712,11 @@ public:
             : paramIndex==171?11
             : ((paramIndex>=101&&paramIndex<=112&&((paramIndex-101)%3)<2)?7:0);
         info.unitId = unit_for_parameter(paramIndex);
-        info.flags = (paramIndex==80||paramIndex==81) ? (kIsHidden|kIsReadOnly)
-            : (kCanAutomate | (info.stepCount>1 ? kIsList : 0));
+        // Pitch bend and pressure are hidden from ordinary editing, but must
+        // be automatable targets for the VST3 MIDI mapping bridge.
+        info.flags=(kCanAutomate |
+                    ((paramIndex==80||paramIndex==81)?kIsHidden:0) |
+                    (info.stepCount>1?kIsList:0));
         // New controls have stable factory defaults, not a moving snapshot
         // of the last control value. Existing ID metadata is left compatible.
         static const SharedPluginState defaults(false);
@@ -969,8 +993,8 @@ public:
         } else if (midiControllerNumber == 129) {
             id = 80; // VST3 legacy MIDI pitch bend controller
             return kResultOk;
-        } else if (midiControllerNumber == 130) {
-            id = 81; // VST3 legacy MIDI channel pressure controller
+        } else if (midiControllerNumber == 128) {
+            id = 81; // Steinberg VST3 channel pressure / aftertouch controller
             return kResultOk;
         }
         return kResultFalse;

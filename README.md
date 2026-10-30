@@ -62,7 +62,7 @@ Verified on Windows x64 @ 48kHz (Build with CMake + Ninja + GCC 14.2):
 
 ## Integrated creative controls — quick playtest guide
 
-The instrument now has a **native Windows VST3 editor**, opened from the host's normal plug-in window. Start on its **PLAY** page rather than navigating 176 parameters. Select one of eight sounds, use the eight macros, shape the amp ADSR, then experiment with synced groove. Switch to **EXPLORE** only when you want the full engine; its area selector and live search expose all host parameters, including four independent tube positions. Host changes use standard VST3 automation callbacks rather than a separate DSP control channel.
+The instrument now has a **native Windows VST3 editor**, opened from the host's normal plug-in window. Start on its **PLAY** page rather than navigating 176 parameters. Select one of eight sounds, use the eight macros, shape the amp ADSR, then experiment with synced groove. **KEYS** shows external MIDI setup and keyboard performance controls, and **EXPLORE** exposes the full engine with area selection and search, including four independent tube positions. Host changes use standard VST3 automation callbacks rather than a separate DSP control channel.
 
 In PLAY, **Sound Palette** (ID 173) contains:
 - `0 Current`, `1 MONOLITH`, `2 FERAL WOBBLE`, `3 VELVET LEAD` (unchanged legacy choices).
@@ -81,6 +81,21 @@ Open the instrument, select **PLAY: Sound Palette → CLOCKWORK SUB**, enable **
 
 For hosts implementing **VST3 IUnitInfo**, the plugin now exposes 15 native groups: PLAY, Oscillators/Voice, Filters/Envelopes, four-band EQ, Rhythm/Modulation, ChronoState, Sound Space, Vocal, the Tube Rack and four nested tubes, and Master/Routing. The native editor adds an actual embedded PLAY/EXPLORE surface above the host-native parameter groups. It uses Windows child-window embedding and resizable GDI rendering, so the current editor is **Windows-only**; a host that does not support HWND can still present the normal parameter interface. Host-specific visibility and actual REAPER behavior require execution in REAPER. The new synced factory patches also carry manual fallback BPM, so offline use without transport context remains possible.
 
+
+### Hardware MIDI keyboard wave — Arturia and other class-compliant controllers
+
+**Playing the instrument uses standard MIDI routed by REAPER**, not a proprietary Arturia plug-in connection. The VST3 instrument declares one 16-channel event input and stereo audio output. Arturia KeyLab/MiniLab families normally offer a regular **MIDI** port for notes and performance, and some models also offer separate **DAW/MCU/HUI** ports for mixer/transport control. Choose the regular MIDI input to play Monkey's Ear. See [Arturia's controller/DAW integration guides](https://support.arturia.com/hc/en-us/articles/18547778386588-MIDI-Controllers-DAW-Integration) for your model and the [REAPER user guide](https://www.reaper.fm/userguide.php).
+
+In REAPER on Windows:
+1. Connect the Arturia keyboard over USB, then open **Options > Preferences > Audio > MIDI Devices** and enable its regular MIDI input. Use the separate DAW/MCU port only if you also configure REAPER's control-surface integration; it is not required for notes.
+2. Insert **monkeys_ear** as a virtual instrument on a track, **record-arm** it, set the track's input to **MIDI > your Arturia MIDI port > All Channels**, and turn **input monitoring ON**. Select an audible preset and play the keys or pads.
+3. On the new **KEYS** editor page, use **Bend Range**, **Velocity Tone**, **Vibrato Depth**, **Mono**, **Legato** and **Glide**. For sustain, attach a pedal that transmits MIDI **CC64**. The plugin also accepts channel pressure (VST3 controller **128**, corrected from the previous wrong 130), and VST3 poly-pressure events on individual notes.
+4. Default performance mappings: note number/velocity -> voice, pitch wheel -> pitch bend (controller 129), mod wheel CC1 and CC74 -> Brightness, CC71 -> Bite, CC91 -> Space, CC93 -> Echo, CC64 -> sustain, channel pressure -> the existing aftertouch performance control. REAPER's own MIDI Learn can associate your knobs and faders with other exposed parameters without requiring a custom script.
+5. If the keys do not sound, first check that **the correct MIDI port is enabled**, that the track is armed and monitoring, and that you inserted the **instrument** rather than the FX variant. The external hardware cannot be tested in this source environment.
+
+The note/voice manager now keeps key press identity by MIDI channel and optional VST3 note ID. Same-pitch overlapping notes no longer all release from one key-up, and a held note on channel two is not stopped by a channel-one note-off. Poly pressure applies a bounded harmonic-emphasis change to the matching voice. **This does not claim full MPE support**: pitch bend and channel pressure remain global performance controls, and the MIDI sustain mapping remains global. Model-specific DAW transport buttons and Arturia-specific display/feedback functions are outside this generic VST3 instrument protocol.
+
+This wave includes a deterministic native voice test plus a Windows VST3 host probe for the corrected MIDI controller assignments, per-note pressure delivery, and the **KEYS** editor automation path. All native/host build and actual REAPER/audio behavior remain **unverified until executed on the target machine**.
 
 ### Native editor — first physical-test checklist
 

@@ -198,6 +198,12 @@ struct NoteOffEvent {
     int32 noteId;
     float tuning;
 };
+struct PolyPressureEvent {
+    int16_t channel;
+    int16_t pitch;
+    float pressure;
+    int32 noteId;
+};
 
 struct Event {
     int32 busIndex;
@@ -208,6 +214,7 @@ struct Event {
     union {
         NoteOnEvent noteOn;
         NoteOffEvent noteOff;
+        PolyPressureEvent polyPressure;
         uint8_t raw[32];
     };
 };
