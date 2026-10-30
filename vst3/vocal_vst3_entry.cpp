@@ -116,7 +116,30 @@ public:
         if(data.numSamples<0)return kInvalidArgument;
         bool changed=false;
         for(int i=0;i<kParamCount;++i)changed=state_->dirty[i].exchange(false)||changed;
-        if(data.numSamples==0){if(changed)apply_controls();return kResultOk;}
+        if(data.numSamples==0){
+            // VST3 hosts may flush parameter changes without any audio samples.
+            // There is no sample timeline here: commit the last valid value.
+            if(data.inputParameterChanges){
+                const int32 count=std::max(0,data.inputParameterChanges->getParameterCount());
+                for(int32 q=0;q<count;++q){
+                    auto* queue=data.inputParameterChanges->getParameterData(q);
+                    if(!queue)continue;
+                    const ParamID id=queue->getParameterId();
+                    if(id>=kParamCount)continue;
+                    const int32 points=std::max(0,queue->getPointCount());
+                    for(int32 p=0;p<points;++p){
+                        int32 ignored_offset=0;
+                        ParamValue value=0.0;
+                        if(queue->getPoint(p,ignored_offset,value)!=kResultOk
+                           ||!normalized_value_is_finite(value))continue;
+                        state_->values[id].store(static_cast<float>(std::clamp(value,0.0,1.0)));
+                        changed=true;
+                    }
+                }
+            }
+            if(changed)apply_controls();
+            return kResultOk;
+        }
         if(data.numInputs<1||data.numOutputs<1||!data.inputs||!data.outputs
            ||!data.inputs[0].channelBuffers32||!data.outputs[0].channelBuffers32)return kResultFalse;
         auto* in=data.inputs[0].channelBuffers32;
