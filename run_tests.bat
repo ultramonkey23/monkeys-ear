@@ -1,64 +1,53 @@
 @echo off
-setlocal
+setlocal EnableExtensions EnableDelayedExpansion
 
 echo =======================================================
-echo   RUNNING MONKEY'S EAR DETERMINISTIC DSP TESTS ^& BENCHMARK
+echo   RUNNING MONKEY'S EAR DETERMINISTIC DSP + HOST TESTS
 echo =======================================================
 
 set "TOOLCHAIN_BIN=C:\Users\harin\AppData\Local\Microsoft\WinGet\Packages\BrechtSanders.WinLibs.POSIX.UCRT.LLVM_Microsoft.Winget.Source_8wekyb3d8bbwe\mingw64\bin"
 set "PATH=%TOOLCHAIN_BIN%;%PATH%"
 
-if not exist build\monkeys_ear_test_runner.exe (
-    echo [INFO] Binaries not found, triggering build...
-    call .\build.bat
-    if %ERRORLEVEL% neq 0 exit /b %ERRORLEVEL%
+rem Always rebuild from current source: a passing stale executable is not a
+rem valid regression result after edits to the Vocal wrapper or host probe.
+echo [INFO] Building the current Monkey's Ear source...
+call .\build.bat
+if errorlevel 1 (
+    set "BUILD_ERR=!errorlevel!"
+    echo [FAIL] Monkey's Ear build failed with code !BUILD_ERR!
+    exit /b !BUILD_ERR!
 )
 
-cd build
-.\monkeys_ear_test_runner.exe
-set "RUNNER_ERR=%ERRORLEVEL%"
-if %RUNNER_ERR% neq 0 (
-    cd ..
-    echo [FAIL] Deterministic test runner failed with code %RUNNER_ERR%
-    exit /b %RUNNER_ERR%
+pushd build
+if errorlevel 1 (
+    echo [FAIL] Cannot enter the build output directory
+    exit /b 2
 )
 
-if exist monkeys_ear_host_probe.exe (
-    .\monkeys_ear_host_probe.exe
-    if %ERRORLEVEL% neq 0 (
-        cd ..
-        echo [FAIL] VST3 host probe failed with code %ERRORLEVEL%
-        exit /b %ERRORLEVEL%
+rem Every expected executable is mandatory. The previous "if exist" pattern
+rem could silently skip a missing Vocal host probe and still print ALL PASS.
+for %%T in (
+    monkeys_ear_test_runner
+    monkeys_ear_host_probe
+    monkeys_ear_vocal_host_probe
+    monkeys_ear_vocal_target_chain_probe
+    monkeys_ear_vocal_tracker_probe
+) do (
+    if not exist "%%T.exe" (
+        echo [FAIL] Required test executable %%T.exe is missing
+        popd
+        exit /b 2
+    )
+    echo [TEST] %%T.exe
+    ".\%%T.exe"
+    set "TEST_ERR=!errorlevel!"
+    if not "!TEST_ERR!"=="0" (
+        echo [FAIL] %%T.exe failed with code !TEST_ERR!
+        popd
+        exit /b !TEST_ERR!
     )
 )
 
-if exist monkeys_ear_vocal_host_probe.exe (
-    .\monkeys_ear_vocal_host_probe.exe
-    if %ERRORLEVEL% neq 0 (
-        cd ..
-        echo [FAIL] Vocal VST3 host probe failed with code %ERRORLEVEL%
-        exit /b %ERRORLEVEL%
-    )
-)
-
-if exist monkeys_ear_vocal_target_chain_probe.exe (
-    .\monkeys_ear_vocal_target_chain_probe.exe
-    if %ERRORLEVEL% neq 0 (
-        cd ..
-        echo [FAIL] Vocal target chain probe failed with code %ERRORLEVEL%
-        exit /b %ERRORLEVEL%
-    )
-)
-
-if exist monkeys_ear_vocal_tracker_probe.exe (
-    .\monkeys_ear_vocal_tracker_probe.exe
-    if %ERRORLEVEL% neq 0 (
-        cd ..
-        echo [FAIL] Vocal tracker probe failed with code %ERRORLEVEL%
-        exit /b %ERRORLEVEL%
-    )
-)
-
-cd ..
-
-echo [PASS] All Monkey's Ear audio, host, and latency tests verified!
+popd
+echo [PASS] All required Monkey's Ear DSP, Vocal, host, and tracker probes executed successfully.
+exit /b 0
