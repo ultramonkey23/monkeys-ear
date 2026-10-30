@@ -102,7 +102,9 @@ int main() {
     CHECK_STAGE(a_enabled==0.f&&b_enabled==0.f,
                 "controller edit never leaks to an unrelated component");
     MemoryStream legacy;
-    legacy.bytes=state_stream.bytes;legacy.bytes.resize(12u+124u*sizeof(float));
+    // Restore the INSTRUMENT's legacy snapshot, not the FX snapshot; the
+    // latter intentionally routes external audio and would mute this test.
+    legacy.bytes=a_state.bytes;legacy.bytes.resize(12u+124u*sizeof(float));
     const uint32 legacy_version=3,legacy_count=124;
     std::memcpy(legacy.bytes.data()+4,&legacy_version,4);
     std::memcpy(legacy.bytes.data()+8,&legacy_count,4);
