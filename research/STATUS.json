@@ -190,5 +190,34 @@
       "Perceptual effect of pitch-gliding echo time on new presets and legacy patches; matched-level blind listening"
     ],
     "next_product_proof": "Run Windows run_tests.bat with mandatory reverb probe, VST3 host probe and full audio suite; record first REAPER/Arturia play and blind musical comparisons"
+  },
+  "session_recall_wave": {
+    "date": "2026-10-30",
+    "baseline_master": "b4fdf0f4bcafaac7496530134f264dac48fc7205",
+    "intent": "Save and recall the musician's personalized sound without factory selection silently erasing macro and modulation edits",
+    "product_paths": [
+      "vst3/vst3_entry.cpp",
+      "vst3/snapshot_replay.h",
+      "test/test_snapshot_replay.cpp",
+      "test/test_vst3_host_probe.cpp",
+      "CMakeLists.txt",
+      "run_tests.bat"
+    ],
+    "diagnosis_from_live_master": "IComponent::setState set dirty IDs, process() replayed numeric order. Applying palette ID 173 after IDs 0-78 factory-reset earlier values, and sync_patch_controls_for_state set the remaining dirty flags false. Previously saved personalized patches could reopen with factory defaults.",
+    "repair": "Stage complete reads (failed streams have no partial commit), publish restored snapshot atomically for next process callback, apply both factory selectors before every saved parameter override using one product-owned replay helper, preserve live automation ordering and VST3 controller state synchronization.",
+    "verified_execution": {
+      "helper_source_sha": "bb6dd031decd96701bb6513be631ffa9dbd35020",
+      "helper_probe_sha": "e85847f41a3195a130374659746c6bb0c04737e4",
+      "optimized": "GCC 14.2 -std=c++20 -O3 -ffast-math -DNDEBUG -Werror; PASS",
+      "sanitized": "Clang 17 -std=c++20 -O1 ASan+UBSan; PASS",
+      "checks": "Factory selectors 79/173 applied first; all 178 parameter IDs visited exactly once; user edits before/after selectors retained despite both factories resetting the modeled patch"
+    },
+    "unverified": [
+      "Full Windows VST3 build and host-probe replay",
+      "Real REAPER project close/reopen with physical Arturia and automated patches",
+      "Complete persistence of fields not exposed as VST3 parameters",
+      "Concurrent host UI-thread setState with live process() block overlap under stress"
+    ],
+    "next_real_world_gate": "Windows run_tests.bat (required snapshot replay probe + VST3 host probe) then save/reopen multiple personalized presets in REAPER, compare parameter states and audio outputs."
   }
 }

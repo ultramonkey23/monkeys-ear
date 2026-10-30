@@ -53,6 +53,11 @@ target_link_libraries(monkeys_ear_tube_rack_probe PRIVATE monkeys_ear_core)
 add_executable(monkeys_ear_reverb_rt_probe test/test_reverb_rt.cpp)
 target_link_libraries(monkeys_ear_reverb_rt_probe PRIVATE monkeys_ear_core)
 
+# This test exercises the exact snapshot ordering helper used by the VST3
+# processor on project recall. Run it without the Windows host as well.
+add_executable(monkeys_ear_snapshot_replay_probe test/test_snapshot_replay.cpp)
+target_include_directories(monkeys_ear_snapshot_replay_probe PRIVATE ${CMAKE_CURRENT_SOURCE_DIR})
+
 # Small isolated characterization harness for the pitch evidence layer. Keep it
 # separate from the large DSP suite so adversarial tracker work stays bounded.
 add_executable(monkeys_ear_vocal_tracker_probe test/test_vocal_tracker_probe.cpp)

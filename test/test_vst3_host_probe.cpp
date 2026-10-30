@@ -381,6 +381,72 @@ int main() {
                 instr_proc->getTailSamples()==26u*48000u,
                 "host returns to original rate without stale tail samples");
     CHECK_STAGE(instr_comp->setActive(true)==kResultOk,"activate instrument");
+
+    // A saved factory sound is NOT merely its factory defaults. Earlier code
+    // applied ID 173 after ID 0, then cleared pending overrides when the
+    // selector loaded its base patch. That silently lost edits on project
+    // reopen. Execute a real IComponent::setState/process/getState round-trip.
+    MemoryStream edited_patch;
+    CHECK_STAGE(instr_comp->getState(&edited_patch)==kResultOk &&
+                edited_patch.bytes.size()==12u+178u*sizeof(float),
+                "capture instrument snapshot before edited-patch recall");
+    const auto patch_override=[&](int id,float value){
+        std::memcpy(edited_patch.bytes.data()+12u+
+                    static_cast<size_t>(id)*sizeof(float),&value,sizeof(float));
+    };
+    patch_override(79,0.0f);    // no legacy selector competing with palette
+    patch_override(173,.6875f); // CLOCKWORK SUB (index 5)
+    patch_override(0,.13f);     // custom brightness, before selector ID173
+    patch_override(1,.82f);     // custom resonance, before selector ID173
+    patch_override(75,.63f);    // custom velocity tone, before ID79
+    patch_override(124,1.f);    // tube rack on, after ID79
+    patch_override(175,.07f);   // custom groove, after ID173
+    patch_override(176,.23f);   // custom drift, after ID173
+    patch_override(177,.91f);   // custom fracture, after ID173
+    edited_patch.pos=0;
+    CHECK_STAGE(instr_comp->setState(&edited_patch)==kResultOk,
+                "restore personalized CLOCKWORK SUB instrument state");
+    const int handlers_before_restore=edits.perform_count;
+    edited_patch.pos=0;
+    CHECK_STAGE(controller->setComponentState(&edited_patch)==kResultOk &&
+                edits.perform_count==handlers_before_restore,
+                "controller follows host restore without sending fake edits");
+    ProcessData recall_flush{};recall_flush.numSamples=0;
+    CHECK_STAGE(instr_proc->process(recall_flush)==kResultOk,
+                "apply complete restored patch to actual DSP on zero-sample flush");
+    MemoryStream recalled_patch;
+    CHECK_STAGE(instr_comp->getState(&recalled_patch)==kResultOk,
+                "serialize real DSP component after recall");
+    const auto restored_value=[&](int id){
+        float value=0;
+        std::memcpy(&value,recalled_patch.bytes.data()+12u+
+                    static_cast<size_t>(id)*sizeof(float),sizeof(float));
+        return value;
+    };
+    CHECK_STAGE(std::abs(restored_value(173)-.6875f)<1e-7f &&
+                std::abs(restored_value(0)-.13f)<1e-7f &&
+                std::abs(restored_value(1)-.82f)<1e-7f &&
+                std::abs(restored_value(75)-.63f)<1e-7f &&
+                std::abs(restored_value(124)-1.f)<1e-7f &&
+                std::abs(restored_value(175)-.07f)<1e-7f &&
+                std::abs(restored_value(176)-.23f)<1e-7f &&
+                std::abs(restored_value(177)-.91f)<1e-7f,
+                "factory palette recall preserved ALL edited controls across selector IDs");
+    CHECK_STAGE(std::abs(controller->getParamNormalized(0)-.13)<1e-6 &&
+                std::abs(controller->getParamNormalized(175)-.07)<1e-6,
+                "UI displays the user's recalled settings, not factory defaults");
+    MemoryStream truncated_patch;
+    truncated_patch.bytes=edited_patch.bytes;
+    truncated_patch.bytes.resize(truncated_patch.bytes.size()-sizeof(float));
+    CHECK_STAGE(instr_comp->setState(&truncated_patch)!=kResultOk,
+                "reject incomplete session instead of partially loading it");
+    CHECK_STAGE(instr_proc->process(recall_flush)==kResultOk,
+                "processor continues after failed state import");
+    MemoryStream after_bad_state;
+    CHECK_STAGE(instr_comp->getState(&after_bad_state)==kResultOk &&
+                after_bad_state.bytes==recalled_patch.bytes,
+                "truncated project leaves previous complete patch unchanged");
+
     std::vector<float> instr_l(128),instr_r(128); float* instr_channels[]={instr_l.data(),instr_r.data()}; AudioBusBuffers instr_out{}; instr_out.numChannels=2; instr_out.channelBuffers32=instr_channels;
     OneEventList notes; notes.event.type=kNoteOnEvent; notes.event.noteOn.pitch=48; notes.event.noteOn.velocity=.9f;
     ProcessContext context{};

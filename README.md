@@ -31,6 +31,14 @@ MIDI / MIC / LIVE AUDIO
 
 ---
 
+## Project Recall Fidelity — Factory Patches and Your Edits
+
+The VST3 instrument now restores saved **factory selection and every saved editable parameter as one patch**: it loads the selected factory sound first (legacy ID 79 and expanded ID 173), then reapplies the musician's personalized macro, envelope, velocity, tube, modulation, groove and DRIFT/FRACTURE values. Earlier processing applied IDs numerically; the later palette load could erase earlier saved edits and clear other pending overrides. This was a real **session-fidelity defect**, not a missing sound feature.
+
+The restore path stages the complete incoming stream before changing component state, so an incomplete project snapshot is rejected without a partially changed patch. The processing callback replays the factory base followed by user overrides from a fixed-size stack snapshot, with no heap allocation. Normal host parameter automation still runs after restoration and can deliberately override the newly recalled value. The controller receives the component state through the VST3 host protocol; it does not manufacture UI automation events when a project opens.
+
+The small `monkeys_ear_snapshot_replay_probe` is built and required by `run_tests.bat` and directly exercises the **same production replay helper** used by `vst3_entry.cpp`. Its exact source/header SHA-1 matched the canonical staged blobs and ran locally with GCC 14.2 `-O3 -ffast-math -DNDEBUG` and Clang 17 AddressSanitizer/UndefinedBehaviorSanitizer, including adversarial factory resets across all 178 parameter IDs. The Windows host probe additionally tests real `IComponent::setState`, zero-sample processing, `getState`, `IEditController::setComponentState`, changed user values on both sides of the selector IDs, and a truncated stream. **The Windows host probe has not executed here**. This repair does not claim that non-parameterized DSP internals can be completely reconstructed from a VST3 parameter snapshot; that requires a separate completeness audit.
+
 ## Real-Time Performance & Proof
 
 Verified on Windows x64 @ 48kHz (Build with CMake + Ninja + GCC 14.2):

@@ -1,6 +1,7 @@
 #include "vst3_sdk_minimal.h"
 #include "native_editor.h"
 #include "preset_param_snapshot.h"
+#include "snapshot_replay.h"
 #include "monkeys_ear/engine.h"
 #include <atomic>
 #include <cstring>
@@ -82,6 +83,8 @@ static void copy_to_char16(char16* dest, const char* src, size_t max_len) {
 struct SharedPluginState {
     std::atomic<float> params[kNumParams];
     std::atomic<bool> dirty[kNumParams];
+    std::atomic<bool> restore_in_progress{false};
+    std::atomic<bool> restored_snapshot_pending{false};
 
     SharedPluginState(bool is_fx = false) {
         for (int i = 0; i < kNumParams; ++i) params[i].store(0.5f);
@@ -163,28 +166,30 @@ static tresult write_plugin_state(IBStream* stream, const std::shared_ptr<Shared
 static tresult read_plugin_state(IBStream* stream, const std::shared_ptr<SharedPluginState>& state) {
     if(!stream||!state)return kInvalidArgument;
     uint32 magic=0,version=0,count=0;
-    if(!stream_read(stream,&magic,4)||!stream_read(stream,&version,4)||!stream_read(stream,&count,4))return kInternalError;
-    if(magic!=kStateMagic||version>kStateVersion||count>static_cast<uint32>(kNumParams))return kResultFalse;
+    if(!stream_read(stream,&magic,4)||!stream_read(stream,&version,4)||
+       !stream_read(stream,&count,4))return kInternalError;
+    if(magic!=kStateMagic||version>kStateVersion||
+       count>static_cast<uint32>(kNumParams))return kResultFalse;
+    // Stage an entire read before publishing. A short or corrupt stream
+    // must not leave a half-recalled synth behind.
+    std::array<float,kNumParams> values{};
     for(uint32 i=0;i<count;++i){
-        float v=0;
-        if(!stream_read(stream,&v,4))return kInternalError;
-        const uint32_t bits=std::bit_cast<uint32_t>(v);
+        float value=0.0f;
+        if(!stream_read(stream,&value,4))return kInternalError;
+        const uint32_t bits=std::bit_cast<uint32_t>(value);
         const bool finite=(bits&0x7f800000u)!=0x7f800000u;
-        state->params[i].store(finite?std::clamp(v,0.0f,1.0f):0.0f);
-        state->dirty[i].store(true);
+        values[i]=finite?std::clamp(value,0.0f,1.0f):0.0f;
     }
-    // Recall of a v3/124-parameter session must turn off newly added rack
-    // controls even when the same component was previously running a newer
-    // patch. Missing suffix fields may not inherit stale instance state.
     if(count<static_cast<uint32>(kNumParams)){
         const SharedPluginState defaults(false);
-        for(uint32 i=count;i<static_cast<uint32>(kNumParams);++i){
-            state->params[i].store(defaults.params[i].load());
-            state->dirty[i].store(true);
-        }
+        for(uint32 i=count;i<static_cast<uint32>(kNumParams);++i)
+            values[i]=defaults.params[i].load();
     }
-    state->params[172].store(0.0f);
-    state->dirty[172].store(true);
+    values[172]=0.0f; // never restore a physical pedal as pressed
+    for(int i=0;i<kNumParams;++i){
+        state->params[i].store(values[i],std::memory_order_relaxed);
+        state->dirty[i].store(true,std::memory_order_relaxed);
+    }
     return kResultOk;
 }
 
@@ -335,7 +340,12 @@ public:
     }
 
     tresult SMTG_STDCALL setState(IBStream* stream) override {
-        return read_plugin_state(stream,state_);
+        state_->restore_in_progress.store(true,std::memory_order_release);
+        const tresult result=read_plugin_state(stream,state_);
+        if(result==kResultOk)
+            state_->restored_snapshot_pending.store(true,std::memory_order_release);
+        state_->restore_in_progress.store(false,std::memory_order_release);
+        return result;
     }
 
     tresult SMTG_STDCALL getState(IBStream* stream) override {
@@ -406,12 +416,29 @@ public:
 
     tresult SMTG_STDCALL process(ProcessData& data) override {
         if(data.numSamples<0)return kInvalidArgument;
-        // Apply the restored component state and any pending local control
-        // updates at the beginning of the host block. New host automation
-        // points at offset zero override these values.
-        for(int i=0;i<kNumParams;++i)
-            if(state_->dirty[i].exchange(false))
-                apply_param_to_engine(static_cast<ParamID>(i),state_->params[i].load());
+        // A host snapshot is a complete edited patch, not 178 independent
+        // updates applied in parameter-ID order. Establish the base factory
+        // sound first; then apply *all* saved overrides without synchronizing
+        // factory defaults over the serialized user edits.
+        if(!state_->restore_in_progress.load(std::memory_order_acquire)) {
+            if(state_->restored_snapshot_pending.exchange(false,
+                                                           std::memory_order_acq_rel)){
+                std::array<float,kNumParams> saved{};
+                for(int i=0;i<kNumParams;++i)
+                    saved[i]=state_->params[i].load(std::memory_order_relaxed);
+                monkeys_ear::vst3::replay_patch_snapshot(saved,
+                    [this](size_t id,float value){
+                        engine_.set_parameter_normalized(static_cast<int>(id),value);
+                    });
+                for(int i=0;i<kNumParams;++i)
+                    state_->dirty[i].store(false,std::memory_order_relaxed);
+            }else{
+                for(int i=0;i<kNumParams;++i)
+                    if(state_->dirty[i].exchange(false))
+                        apply_param_to_engine(static_cast<ParamID>(i),
+                                              state_->params[i].load());
+            }
+        }
 
         // Resolve the clock after applying a newly selected patch, so its
         // first audio block aligns immediately to the host beat.
