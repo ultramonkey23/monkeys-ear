@@ -181,6 +181,20 @@ int main() {
     IAudioProcessor* processor=nullptr; CHECK_STAGE(component->queryInterface(IAudioProcessor_iid,reinterpret_cast<void**>(&processor))==kResultOk && processor!=nullptr,"Vocal component exposes audio processor");
     ProcessSetup setup{}; setup.sampleRate=48000;setup.maxSamplesPerBlock=256; CHECK_STAGE(processor->setupProcessing(setup)==kResultOk,"Vocal setupProcessing");
     CHECK_STAGE(processor->getLatencySamples()==0,"Vocal reports zero plugin latency");
+    OneParameterChange zero_sample_change(8,0.625);
+    ProcessData parameter_flush{};
+    parameter_flush.numSamples=0;
+    parameter_flush.inputParameterChanges=&zero_sample_change;
+    CHECK_STAGE(processor->process(parameter_flush)==kResultOk,
+                "accept host parameter-flush call with no audio buffers");
+    MemoryStream flushed_state;
+    CHECK_STAGE(component->getState(&flushed_state)==kResultOk,
+                "serialize component after zero-sample flush");
+    float flushed_mix=0.0f;
+    std::memcpy(&flushed_mix,flushed_state.bytes().data()+12u+8u*sizeof(float),sizeof(flushed_mix));
+    CHECK_STAGE(std::abs(flushed_mix-0.625f)<1.0e-7f,
+                "zero-sample host parameter queue updates component state");
+
     PClassInfo2 controller_info{}; CHECK_STAGE(factory2->getClassInfo2(1,&controller_info)==kResultOk,"read Vocal controller class info");
     IEditController* controller=nullptr; CHECK_STAGE(factory2->createInstance(controller_info.cid,IEditController_iid,reinterpret_cast<void**>(&controller))==kResultOk && controller!=nullptr,"create Vocal edit controller");
     CHECK_STAGE(controller->getParameterCount()==11,"Vocal controller exposes 11 parameters");
