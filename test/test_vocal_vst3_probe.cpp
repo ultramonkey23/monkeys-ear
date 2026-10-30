@@ -96,7 +96,44 @@ public:
 private: OnePointQueue queue_;
 };
 
-bool process_block(IAudioProcessor* processor, int block_size, IParameterChanges* changes, float phase, float* rms_out) {
+// Two events in one parameter queue exercise sample-offset rendering, rather
+// than a host that accidentally sends only a last-point/block-level change.
+class TwoPointQueue final : public IParamValueQueue {
+public:
+    TwoPointQueue(ParamID id,int32 second_offset,ParamValue first,ParamValue second)
+        : id_(id),second_offset_(second_offset),first_(first),second_(second){}
+    tresult SMTG_STDCALL queryInterface(const TUID,void** obj) override {if(obj)*obj=nullptr;return kResultFalse;}
+    uint32 SMTG_STDCALL addRef() override{return 1;}
+    uint32 SMTG_STDCALL release() override{return 1;}
+    ParamID SMTG_STDCALL getParameterId() override{return id_;}
+    int32 SMTG_STDCALL getPointCount() override{return 2;}
+    tresult SMTG_STDCALL getPoint(int32 index,int32& offset,ParamValue& value) override {
+        if(index<0||index>=2)return kInvalidArgument;
+        offset=index==0?0:second_offset_;
+        value=index==0?first_:second_;
+        return kResultOk;
+    }
+    tresult SMTG_STDCALL addPoint(int32,ParamValue,int32&) override{return kNotImplemented;}
+private:
+    ParamID id_;
+    int32 second_offset_;
+    ParamValue first_,second_;
+};
+class TwoParameterPoints final : public IParameterChanges {
+public:
+    TwoParameterPoints(ParamID id,int32 second_offset,ParamValue first,ParamValue second)
+        : queue_(id,second_offset,first,second){}
+    tresult SMTG_STDCALL queryInterface(const TUID,void** obj) override{if(obj)*obj=nullptr;return kResultFalse;}
+    uint32 SMTG_STDCALL addRef() override{return 1;}
+    uint32 SMTG_STDCALL release() override{return 1;}
+    int32 SMTG_STDCALL getParameterCount() override{return 1;}
+    IParamValueQueue* SMTG_STDCALL getParameterData(int32 index) override{return index==0?&queue_:nullptr;}
+    IParamValueQueue* SMTG_STDCALL addParameterData(const ParamID&,int32&) override{return nullptr;}
+private: TwoPointQueue queue_;
+};
+
+bool process_block(IAudioProcessor* processor, int block_size, IParameterChanges* changes, float phase, float* rms_out,
+                   float* first_half_delta=nullptr,float* second_half_delta=nullptr) {
     if (!processor || !rms_out || block_size<=0 || block_size>256) return false;
     float in_l[256]{},in_r[256]{},out_l[256]{},out_r[256]{};
     for(int i=0;i<block_size;++i){const float t=phase+static_cast<float>(i);in_l[i]=in_r[i]=0.35f*std::sin(2.0f*3.14159265358979323846f*220.0f*t/48000.0f);}
@@ -105,7 +142,15 @@ bool process_block(IAudioProcessor* processor, int block_size, IParameterChanges
     AudioBusBuffers outputs{};outputs.numChannels=2;outputs.channelBuffers32=out_ch;
     ProcessData data{};data.numSamples=block_size;data.numInputs=1;data.numOutputs=1;data.inputs=&inputs;data.outputs=&outputs;data.inputParameterChanges=changes;
     if (processor->process(data)!=kResultOk) return false;
-    double sum=0.0;for(int i=0;i<block_size;++i){const double d=out_l[i]-in_l[i];sum+=d*d;}*rms_out=static_cast<float>(std::sqrt(sum/block_size));
+    double sum=0.0,first=0.0,second=0.0;
+    for(int i=0;i<block_size;++i){
+        const double d=out_l[i]-in_l[i];
+        sum+=d*d;
+        if(i<block_size/2)first+=d*d;else second+=d*d;
+    }
+    *rms_out=static_cast<float>(std::sqrt(sum/block_size));
+    if(first_half_delta)*first_half_delta=static_cast<float>(std::sqrt(first/(block_size/2)));
+    if(second_half_delta)*second_half_delta=static_cast<float>(std::sqrt(second/(block_size-block_size/2)));
     return std::isfinite(*rms_out);
 }
 }
@@ -141,11 +186,29 @@ int main() {
     CHECK_STAGE(controller->getParameterCount()==11,"Vocal controller exposes 11 parameters");
     ParameterInfo info{}; CHECK_STAGE(controller->getParameterInfo(1,info)==kResultOk,"read Vocal parameter info");
     CHECK_STAGE(info.title[0]=='V' && info.title[7]=='C',"Vocal parameter schema identity");
+    CHECK_STAGE(std::abs(info.defaultNormalizedValue-0.45)<1.0e-7,"stable factory default is not current parameter value");
+    CHECK_STAGE(controller->setParamNormalized(1,std::numeric_limits<double>::quiet_NaN())==kInvalidArgument,
+                "reject NaN host normalized parameter");
+    CHECK_STAGE(controller->setParamNormalized(1,std::numeric_limits<double>::infinity())==kInvalidArgument,
+                "reject infinite host normalized parameter");
 
     const std::array<ParamValue,11> recalled_values{1.0,0.11,0.22,0.33,0.44,0.55,0.66,0.77,0.0,0.88,0.99};
     for(ParamID id=0;id<recalled_values.size();++id) {
         CHECK_STAGE(controller->setParamNormalized(id,recalled_values[id])==kResultOk,"set non-default Vocal state");
     }
+    // A real VST3 host delivers controller edits to the audio component as
+    // parameter queues. An independent controller must never mutate a random
+    // component merely because it was the most recently constructed instance.
+    float relay_rms=0.0f;
+    for(ParamID id=0;id<recalled_values.size();++id) {
+        OneParameterChange host_edit(id,recalled_values[id]);
+        CHECK_STAGE(process_block(processor,32,&host_edit,static_cast<float>(id*32),&relay_rms),
+                    "deliver host-edited control to component");
+    }
+    CHECK_STAGE(controller->getParameterInfo(1,info)==kResultOk &&
+                std::abs(info.defaultNormalizedValue-0.45)<1.0e-7,
+                "parameter schema default remains immutable after editing");
+
     MemoryStream saved_state;
     CHECK_STAGE(component->getState(&saved_state)==kResultOk,"serialize complete Vocal component state");
     CHECK_STAGE(saved_state.bytes().size()==12u+recalled_values.size()*sizeof(float),"Vocal state envelope has exact versioned size");
@@ -209,6 +272,57 @@ int main() {
         if(!(wet_delta > 1.0e-5f)){std::cerr<<"[FAIL] Mix=1 reaches active Vocal DSP at block "<<block_size<<" (delta="<<wet_delta<<")\n";return 1;}
         std::cout<<"[PASS] Mix=1 reaches active Vocal DSP at block "<<block_size<<" (delta="<<wet_delta<<")\n";
     }
+
+    // Product-chain warmup while Mix=0 must not affect the exact dry output.
+    ProcessSetup accurate_setup{};accurate_setup.sampleRate=48000.0;accurate_setup.maxSamplesPerBlock=256;
+    CHECK_STAGE(processor->setupProcessing(accurate_setup)==kResultOk,"prepare sample-accurate Vocal block");
+    OneParameterChange initial_dry(8,0.0);
+    float rms=0.0f;
+    CHECK_STAGE(process_block(processor,256,&initial_dry,0.0f,&rms),"arm dry initial state");
+    for(int b=0;b<32;++b)
+        CHECK_STAGE(process_block(processor,256,nullptr,static_cast<float>((b+1)*256),&rms),
+                    "warm vocal detector without bypassing DSP");
+    TwoParameterPoints midblock_change(8,128,0.0,1.0);
+    float first_delta=0.0f,second_delta=0.0f;
+    CHECK_STAGE(process_block(processor,256,&midblock_change,33.0f*256.0f,&rms,&first_delta,&second_delta),
+                "render two host parameter points in one buffer");
+    CHECK_STAGE(first_delta<1.0e-5f && second_delta>1.0e-5f,
+                "offset 128 changes only the second half of the Vocal audio buffer");
+
+    OneParameterChange invalid_automation(8,std::numeric_limits<double>::quiet_NaN());
+    CHECK_STAGE(process_block(processor,256,&invalid_automation,34.0f*256.0f,&rms),
+                "ignore nonfinite host automation in audio callback");
+    MemoryStream post_invalid;
+    CHECK_STAGE(component->getState(&post_invalid)==kResultOk,"serialize after invalid automation");
+    float preserved_mix=0.0f;
+    std::memcpy(&preserved_mix,post_invalid.bytes().data()+12u+8u*sizeof(float),sizeof(preserved_mix));
+    CHECK_STAGE(std::abs(preserved_mix-1.0f)<1.0e-7f,"invalid host automation cannot poison serialized state");
+
+    // Deliberately create both components BEFORE the controller. The old
+    // g_latest_state design incorrectly attached the controller to component B.
+    IComponent *sibling_a=nullptr,*sibling_b=nullptr;
+    IEditController* sibling_controller=nullptr;
+    CHECK_STAGE(factory2->createInstance(component_info.cid,IComponent_iid,
+                reinterpret_cast<void**>(&sibling_a))==kResultOk && sibling_a,
+                "create sibling Vocal component A");
+    CHECK_STAGE(factory2->createInstance(component_info.cid,IComponent_iid,
+                reinterpret_cast<void**>(&sibling_b))==kResultOk && sibling_b,
+                "create sibling Vocal component B");
+    CHECK_STAGE(factory2->createInstance(controller_info.cid,IEditController_iid,
+                reinterpret_cast<void**>(&sibling_controller))==kResultOk && sibling_controller,
+                "create controller after both independent components");
+    CHECK_STAGE(sibling_controller->setParamNormalized(8,0.125)==kResultOk,
+                "edit controller without component cross-talk");
+    MemoryStream sibling_a_state,sibling_b_state;
+    CHECK_STAGE(sibling_a->getState(&sibling_a_state)==kResultOk &&
+                sibling_b->getState(&sibling_b_state)==kResultOk,
+                "serialize both independent sibling components");
+    float sibling_a_mix=0.0f,sibling_b_mix=0.0f;
+    std::memcpy(&sibling_a_mix,sibling_a_state.bytes().data()+12u+8u*sizeof(float),sizeof(float));
+    std::memcpy(&sibling_b_mix,sibling_b_state.bytes().data()+12u+8u*sizeof(float),sizeof(float));
+    CHECK_STAGE(std::abs(sibling_a_mix-1.0f)<1.0e-7f && std::abs(sibling_b_mix-1.0f)<1.0e-7f,
+                "no global latest-component state leak across Vocal instances");
+    sibling_controller->release();sibling_b->release();sibling_a->release();
 
     std::cout<<">>> ALL STANDALONE VOCAL VST3 HOST/AUTOMATION CHECKS PASSED! <<<\n";
     controller->release();processor->release();component->release();factory2->release();factory->release();FreeLibrary(module);
