@@ -13,6 +13,19 @@
 
 namespace Steinberg {
 
+// View ABI needed for a real editor in hosts that support HWND embedding.
+// Declarations intentionally mirror the VST3 virtual method order.
+using TBool=uint8_t;
+using int16=int16_t;
+using FIDString=const char*;
+class IPlugView;
+class IPlugFrame;
+struct ViewRect {
+    int32_t left=0,top=0,right=0,bottom=0;
+    ViewRect()=default;
+    ViewRect(int32_t a,int32_t b,int32_t c,int32_t d):left(a),top(b),right(c),bottom(d){}
+};
+
 typedef int32_t int32;
 typedef uint32_t uint32;
 typedef int64_t int64;
@@ -72,6 +85,28 @@ static const TUID IBStream_iid = INLINE_UID(0xC3BF6EA2, 0x30994752, 0x9B6BF990, 
 
 // IPluginBase: 22888DDB-156E-45AE-8358-B34808190625
 static const TUID IPluginBase_iid = INLINE_UID(0x22888DDB, 0x156E45AE, 0x8358B348, 0x08190625);
+
+class IPlugView : public FUnknown {
+public:
+    virtual tresult SMTG_STDCALL isPlatformTypeSupported(FIDString type)=0;
+    virtual tresult SMTG_STDCALL attached(void* parent,FIDString type)=0;
+    virtual tresult SMTG_STDCALL removed()=0;
+    virtual tresult SMTG_STDCALL onWheel(float distance)=0;
+    virtual tresult SMTG_STDCALL onKeyDown(char16 key,int16 keyCode,int16 modifiers)=0;
+    virtual tresult SMTG_STDCALL onKeyUp(char16 key,int16 keyCode,int16 modifiers)=0;
+    virtual tresult SMTG_STDCALL getSize(ViewRect* size)=0;
+    virtual tresult SMTG_STDCALL onSize(ViewRect* size)=0;
+    virtual tresult SMTG_STDCALL onFocus(TBool state)=0;
+    virtual tresult SMTG_STDCALL setFrame(IPlugFrame* frame)=0;
+    virtual tresult SMTG_STDCALL canResize()=0;
+    virtual tresult SMTG_STDCALL checkSizeConstraint(ViewRect* rect)=0;
+};
+static const TUID IPlugView_iid=INLINE_UID(0x5BC32507,0xD06049EA,0xA6151B52,0x2B755B29);
+class IPlugFrame : public FUnknown {
+public:
+    virtual tresult SMTG_STDCALL resizeView(IPlugView* view,ViewRect* size)=0;
+};
+static const TUID IPlugFrame_iid=INLINE_UID(0x367FAF01,0xAFA94693,0x8D4DA2A0,0xED0882A3);
 
 class IPluginBase : public FUnknown {
 public:
@@ -359,7 +394,7 @@ public:
     virtual ParamValue SMTG_STDCALL getParamNormalized(ParamID id) = 0;
     virtual tresult SMTG_STDCALL setParamNormalized(ParamID id, ParamValue value) = 0;
     virtual tresult SMTG_STDCALL setComponentHandler(IComponentHandler* handler) = 0;
-    virtual void* SMTG_STDCALL createView(const char8* name) = 0;
+    virtual IPlugView* SMTG_STDCALL createView(const char8* name) = 0;
 };
 
 // IEditController IID: DCD7BBE3-7742448D-A874AACC-979C759E

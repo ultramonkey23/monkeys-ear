@@ -1,4 +1,5 @@
 #include "monkeys_ear/engine.h"
+#include "../vst3/preset_param_snapshot.h"
 #include "monkeys_ear/lfo.h"
 #include "monkeys_ear/chrono_state.h"
 #include "monkeys_ear/vocal_module.h"
@@ -513,6 +514,47 @@ void test_host_clock_and_groove_in_product() {
     std::cout<<"PASS\n";
 }
 
+void test_factory_projection_for_native_editor() {
+    std::cout<<"[TEST] Shared Factory Snapshot / PLAY and EXPLORE State Consistency... ";
+    constexpr int N=176;
+    std::array<float,N> params{};
+    std::array<bool,N> covered{};
+    for(int patch=0;patch<8;++patch) {
+        PresetData p{};
+        if(patch==0)p=PresetManager::create_factory_lead();
+        else {
+            const float choice=(static_cast<float>(patch)+.5f)/8.f;
+            assert(ui::factory_patch_for_selector(173,choice,p));
+        }
+        params.fill(.5f);covered.fill(false);
+        ui::emit_preset_params(p,[&](int id,float v){
+            assert(id>=0&&id<N);
+            assert(!covered[id]); // no repeated/ambiguous projection
+            assert(std::isfinite(v)&&v>=0.f&&v<=1.f);
+            params[id]=v;covered[id]=true;
+        });
+        assert(covered[0]&&covered[7]&&covered[8]);
+        assert(covered[124]&&covered[129]&&covered[154]&&covered[160]);
+        assert(covered[161]&&covered[163]&&covered[167]&&covered[169]);
+        assert(covered[170]&&covered[171]&&covered[174]&&covered[175]);
+        assert(!covered[79]&&!covered[80]&&!covered[81]&&!covered[172]&&!covered[173]);
+        assert(std::abs(params[0]-p.macros[0])<1e-6f);
+        assert(std::abs(params[163]-p.amp_sustain)<1e-6f);
+        assert(std::abs(params[175]-p.lfo_groove)<1e-6f);
+        for(int i=0;i<4;++i) {
+            const int id=129+8*i;
+            assert(std::abs(params[id+2]-p.tube_rack.slots[i].drive)<1e-5f);
+        }
+    }
+    // Old selector has not been silently expanded to use the new patches.
+    PresetData original,newPalette;
+    assert(ui::factory_patch_for_selector(79,.55f,original));
+    assert(original.name=="FERAL WOBBLE");
+    assert(ui::factory_patch_for_selector(173,.5625f,newPalette));
+    assert(newPalette.name=="TUBE FOUNDRY");
+    std::cout<<"PASS\n";
+}
+
 void test_sustain_pedal_and_patch_selector_compatibility() {
     std::cout << "[TEST] MIDI Sustain, Repeated Notes, Mono, Panic, and Legacy Palette... ";
     constexpr float SR=48000.f;
@@ -886,6 +928,7 @@ int main(int argc, char** argv) {
         test_weight_and_external_subharmonics();
         test_multipass_filter_and_eq();
         test_preset_roundtrip_and_extremes();
+        test_factory_projection_for_native_editor();
         test_sustain_pedal_and_patch_selector_compatibility();
         test_host_clock_and_groove_in_product();
         test_motion_causality();

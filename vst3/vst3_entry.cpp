@@ -1,4 +1,6 @@
 #include "vst3_sdk_minimal.h"
+#include "native_editor.h"
+#include "preset_param_snapshot.h"
 #include "monkeys_ear/engine.h"
 #include <atomic>
 #include <cstring>
@@ -547,39 +549,13 @@ public:
 
 private:
     void sync_patch_controls_for_state() {
-        // A program selection changes many synth controls at once. Snapshot
-        // the appended controls from the *actual* preset, so getState does not
-        // serialize old "rack off" defaults while the new rack is audible.
-        const auto& p=engine_.get_current_preset();
-        const auto update=[this](int id,float value){
-            state_->params[id].store(value);
-            state_->dirty[id].store(false);
-        };
-        update(124,p.tube_rack.enabled?1.f:0.f);
-        update(125,p.tube_rack.parallel?1.f:0.f);
-        update(126,p.tube_rack.shared_supply);
-        update(127,p.tube_rack.output);
-        update(128,p.tube_rack.antialias?1.f:0.f);
-        for(int i=0;i<4;++i){
-            const auto& t=p.tube_rack.slots[static_cast<size_t>(i)];
-            const int b=129+8*i;
-            update(b,t.enabled?1.f:0.f);
-            update(b+1,(static_cast<float>(t.flavor)+.1f)/monkeys_ear::kTubeFlavorCount);
-            update(b+2,t.drive);
-            update(b+3,(t.bias+1.f)*.5f);
-            update(b+4,t.plate_load);update(b+5,t.sag);
-            update(b+6,t.coupling);update(b+7,t.mix);
-        }
-        const auto env=[](float seconds){return std::sqrt(std::clamp((seconds-.001f)/6.f,0.f,1.f));};
-        update(161,env(p.amp_attack));update(162,env(p.amp_decay));
-        update(163,p.amp_sustain);update(164,env(p.amp_release));
-        update(165,env(p.filter_attack));update(166,env(p.filter_decay));
-        update(167,p.filter_sustain);update(168,env(p.filter_release));
-        update(169,p.lfo_tempo_sync?1.f:0.f);
-        update(170,(std::clamp(p.tempo_bpm,40.f,240.f)-40.f)/200.f);
-        update(171,(std::clamp(p.lfo_subdivision,0,11)+.1f)/12.f);
-        update(174,p.lfo_follow_host_tempo?1.f:0.f);
-        update(175,p.lfo_groove);
+        // Same factory parameter projection as the editor controller. The host
+        // can save the new patch, and the UI never displays stale macros.
+        monkeys_ear::ui::emit_preset_params(engine_.get_current_preset(),
+            [this](int id,float value) {
+                state_->params[id].store(value);
+                state_->dirty[id].store(false);
+            });
     }
     void apply_param_to_engine(ParamID id, float value) {
         engine_.set_parameter_normalized(static_cast<int>(id), value);
@@ -827,6 +803,24 @@ public:
             int m = static_cast<int>(valueNormalized * 2.99);
             const char* modes[] = {"Synth Only", "Hybrid Blend", "External Audio"};
             snprintf(buf, sizeof(buf), "%s", (m >= 0 && m <= 2) ? modes[m] : "Synth");
+        } else if(id==21){
+            const int ratio=std::clamp(static_cast<int>(valueNormalized*3.99),0,3)+1;
+            snprintf(buf,sizeof(buf),"1:%d",ratio);
+        } else if(id==28||id==30){
+            static const char* modes[]={"Lowpass","Bandpass","Highpass","Notch","Peak"};
+            snprintf(buf,sizeof(buf),"%s",modes[std::clamp(static_cast<int>(valueNormalized*4.99),0,4)]);
+        } else if(id==31){
+            static const char* routes[]={"Serial","Parallel","Split"};
+            snprintf(buf,sizeof(buf),"%s",routes[std::clamp(static_cast<int>(valueNormalized*2.99),0,2)]);
+        } else if(id==56){
+            static const char* waves[]={"Sine","Triangle","Saw","Square","Random Hold"};
+            snprintf(buf,sizeof(buf),"%s",waves[std::clamp(static_cast<int>(valueNormalized*4.99),0,4)]);
+        } else if(id>=37&&id<=52&&(id-37)%4==0){
+            static const char* eqTypes[]={"Bypass","Bell","Low Shelf","High Shelf","Highpass","Lowpass"};
+            snprintf(buf,sizeof(buf),"%s",eqTypes[std::clamp(static_cast<int>(valueNormalized*5.99),0,5)]);
+        } else if(id==23||id==34||id==35||id==53||id==54||
+                  id==70||id==71||id==82){
+            snprintf(buf,sizeof(buf),"%s",valueNormalized>=.5?"On":"Off");
         } else if (id == 79) {
             const int p=std::clamp(static_cast<int>(valueNormalized*3.99),0,3);
             const char* names[]={"Current","MONOLITH","FERAL WOBBLE","VELVET LEAD"};
@@ -927,13 +921,20 @@ public:
     }
 
     tresult SMTG_STDCALL setParamNormalized(ParamID id, ParamValue value) override {
-        if(!valid_normalized(value))return kInvalidArgument;
-        if (id < kNumParams && state_) {
-            state_->params[id].store(static_cast<float>(std::clamp(value,0.0,1.0)));
-            state_->dirty[id].store(true);
-            return kResultOk;
+        if(id>=kNumParams||!valid_normalized(value)||!state_)return kInvalidArgument;
+        const float normalized=static_cast<float>(std::clamp(value,0.0,1.0));
+        state_->params[id].store(normalized);
+        state_->dirty[id].store(true);
+        if(id==79||id==173){
+            monkeys_ear::PresetData selected;
+            if(monkeys_ear::ui::factory_patch_for_selector(id,normalized,selected)){
+                monkeys_ear::ui::emit_preset_params(selected,[this](int param,float v){
+                    state_->params[param].store(v);
+                    state_->dirty[param].store(false);
+                });
+            }
         }
-        return kInvalidArgument;
+        return kResultOk;
     }
 
     tresult SMTG_STDCALL setComponentHandler(IComponentHandler* handler) override {
@@ -941,8 +942,9 @@ public:
         return kResultOk;
     }
 
-    void* SMTG_STDCALL createView(const char8* /*name*/) override {
-        return nullptr; // Host creates native parameter controls
+    IPlugView* SMTG_STDCALL createView(const char8* name) override {
+        if(!name||std::strcmp(name,"editor")!=0)return nullptr;
+        return monkeys_ear::ui::create_editor(this,&handler_);
     }
 
     // ── IMidiMapping ────────────────────────────────────────────────────────

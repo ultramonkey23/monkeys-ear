@@ -66,6 +66,28 @@ public:
     tresult SMTG_STDCALL tell(int64* p)override{if(p)*p=pos;return kResultOk;}
 };
 
+class RecordingHandler final : public IComponentHandler {
+public:
+    int begin_count=0,perform_count=0,end_count=0;
+    ParamID last_id=static_cast<ParamID>(-1);
+    ParamValue last_value=-1.0;
+    tresult SMTG_STDCALL queryInterface(const TUID,void** out) override {
+        if(out)*out=nullptr;return kResultFalse;
+    }
+    uint32 SMTG_STDCALL addRef() override { return 1; }
+    uint32 SMTG_STDCALL release() override { return 1; }
+    tresult SMTG_STDCALL beginEdit(ParamID id) override {
+        ++begin_count;last_id=id;return kResultOk;
+    }
+    tresult SMTG_STDCALL performEdit(ParamID id,ParamValue v) override {
+        ++perform_count;last_id=id;last_value=v;return kResultOk;
+    }
+    tresult SMTG_STDCALL endEdit(ParamID id) override {
+        ++end_count;last_id=id;return kResultOk;
+    }
+    tresult SMTG_STDCALL restartComponent(int32) override { return kResultOk; }
+};
+
 int main() {
     std::cout << "=======================================================\n  HOST VERIFICATION PROBE // VST3 BINARY INSPECTION\n=======================================================\n" << std::flush;
 
@@ -110,6 +132,64 @@ int main() {
     CHECK_STAGE(res==kResultOk && controller!=nullptr,"create edit controller");
     CHECK_STAGE(controller->getParameterCount()==176,"controller exposes 176 stable host parameters");
     for(int32 i=0;i<176;++i){ParameterInfo pInfo{};CHECK_STAGE(controller->getParameterInfo(i,pInfo)==kResultOk,"read parameter info");}
+
+    RecordingHandler edits;
+    CHECK_STAGE(controller->setComponentHandler(&edits)==kResultOk,
+                "native editor can communicate through host automation handler");
+    IPlugView* view=controller->createView("editor");
+    CHECK_STAGE(view!=nullptr,"create a real VST3 instrument editor");
+    CHECK_STAGE(controller->createView("not-editor")==nullptr,
+                "unsupported view identity rejected");
+    CHECK_STAGE(view->isPlatformTypeSupported("HWND")==kResultOk &&
+                view->isPlatformTypeSupported("X11EmbedWindowID")!=kResultOk,
+                "editor correctly advertises Windows HWND embedding");
+    ViewRect size{};
+    CHECK_STAGE(view->getSize(&size)==kResultOk &&
+                size.right>=960&&size.bottom>=620,
+                "editor reports usable nonzero dimensions");
+    ViewRect too_small{0,0,320,200};
+    CHECK_STAGE(view->checkSizeConstraint(&too_small)==kResultOk &&
+                too_small.right>=960&&too_small.bottom>=620,
+                "host resize cannot destroy basic readability");
+    HWND parent=CreateWindowExW(0,L"STATIC",L"Monkey's Ear UI host probe",
+                               WS_OVERLAPPEDWINDOW,0,0,1200,850,
+                               nullptr,nullptr,GetModuleHandleW(nullptr),nullptr);
+    CHECK_STAGE(parent!=nullptr,"create host-owned parent HWND");
+    CHECK_STAGE(view->attached(parent,"HWND")==kResultOk,
+                "editor attaches child to host-owned window");
+    HWND child=FindWindowExW(parent,nullptr,L"MonkeysEarNativeEditor_01",nullptr);
+    CHECK_STAGE(child!=nullptr,"real native child window exists");
+    RedrawWindow(child,nullptr,nullptr,RDW_INVALIDATE|RDW_UPDATENOW);
+    // First WM_PAINT constructs click-hit geometry even with a hidden test parent.
+    const int before_edits=edits.perform_count;
+    SendMessageW(child,WM_LBUTTONDOWN,MK_LBUTTON,MAKELPARAM(125,365));
+    SendMessageW(child,WM_LBUTTONUP,0,MAKELPARAM(125,365));
+    CHECK_STAGE(edits.begin_count>0&&edits.perform_count>before_edits &&
+                edits.end_count==edits.begin_count&&edits.last_id==0,
+                "PLAY macro drag notifies real host begin/perform/end automation");
+    CHECK_STAGE(std::abs(controller->getParamNormalized(0)-edits.last_value)<1e-8,
+                "editor controller mirrors the normalized value sent to host");
+    // Choose CLOCKWORK SUB, then verify that all displayed controls use the
+    // selected patch's real macro, rhythm, and tube state (not stale init UI).
+    SendMessageW(child,WM_LBUTTONDOWN,MK_LBUTTON,MAKELPARAM(360,247));
+    SendMessageW(child,WM_LBUTTONUP,0,MAKELPARAM(360,247));
+    CHECK_STAGE(edits.last_id==173 &&
+                controller->getParamNormalized(124)>.5 &&
+                controller->getParamNormalized(169)>.5 &&
+                controller->getParamNormalized(175)>.4,
+                "PLAY palette selection synchronizes actual preset controls");
+    const ParamValue gui_patch_edit=edits.last_value;
+    ViewRect resized{0,0,1280,860};
+    CHECK_STAGE(view->onSize(&resized)==kResultOk &&
+                view->getSize(&size)==kResultOk && size.right==1280,
+                "editor resizes with the host");
+    CHECK_STAGE(view->removed()==kResultOk,"editor safely detaches from host");
+    CHECK_STAGE(view->attached(parent,"HWND")==kResultOk,
+                "editor can reopen without duplicated window state");
+    CHECK_STAGE(view->removed()==kResultOk,"editor cleans up after reopen");
+    CHECK_STAGE(view->release()==0,"editor reference lifetime completes");
+    DestroyWindow(parent);
+    controller->setComponentHandler(nullptr);
 
     MemoryStream state_stream;
     CHECK_STAGE(fx_comp->getState(&state_stream)==kResultOk,"serialize FX state");
@@ -205,10 +285,23 @@ int main() {
     context.state=ProcessContext::kTempoValid | ProcessContext::kProjectTimeMusicValid | ProcessContext::kPlaying;
     context.tempo=97.0;
     context.projectTimeMusic=5.25;
+    TwoPointChanges transferred_palette(173,0,gui_patch_edit,gui_patch_edit);
     ProcessData instr_data{}; instr_data.numSamples=128; instr_data.numOutputs=1;
     instr_data.outputs=&instr_out; instr_data.inputEvents=&notes;
     instr_data.processContext=&context;
-    CHECK_STAGE(instr_proc->process(instr_data)==kResultOk,"process instrument note"); float instr_peak=0; for(float v:instr_l)instr_peak=std::max(instr_peak,std::abs(v)); CHECK_STAGE(instr_peak>.001f,"instrument produces audio");
+    instr_data.inputParameterChanges=&transferred_palette;
+    CHECK_STAGE(instr_proc->process(instr_data)==kResultOk,"process instrument note");
+    MemoryStream selected_patch_state;
+    CHECK_STAGE(instr_comp->getState(&selected_patch_state)==kResultOk &&
+                selected_patch_state.bytes.size()==12u+176u*sizeof(float),
+                "host can serialize live selected factory patch");
+    float selected_tube=0,selected_groove=0;
+    std::memcpy(&selected_tube,selected_patch_state.bytes.data()+12u+124u*sizeof(float),4);
+    std::memcpy(&selected_groove,selected_patch_state.bytes.data()+12u+175u*sizeof(float),4);
+    CHECK_STAGE(selected_tube>.5f&&selected_groove>.4f,
+                "GUI host edit reached DSP factory and synchronized component state");
+    instr_data.inputParameterChanges=nullptr;
+    float instr_peak=0; for(float v:instr_l)instr_peak=std::max(instr_peak,std::abs(v)); CHECK_STAGE(instr_peak>.001f,"instrument produces audio");
     instr_comp->setActive(false); // clears held voices and effect tails
     CHECK_STAGE(instr_comp->setActive(true)==kResultOk,"reactivate reset instrument");
     notes.event.sampleOffset=64;

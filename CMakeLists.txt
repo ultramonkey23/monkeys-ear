@@ -61,9 +61,13 @@ target_link_libraries(monkeys_ear_vocal_target_chain_probe PRIVATE monkeys_ear_c
 
 # Legacy combined VST3 remains during migration. Standalone wrappers sit beside
 # it and link the same core; no DSP fork is permitted.
-add_library(monkeys_ear SHARED vst3/vst3_entry.cpp)
+add_library(monkeys_ear SHARED vst3/vst3_entry.cpp vst3/native_editor.cpp)
 target_include_directories(monkeys_ear PRIVATE ${CMAKE_CURRENT_SOURCE_DIR}/vst3)
 target_link_libraries(monkeys_ear PRIVATE monkeys_ear_core)
+if(WIN32)
+    target_compile_definitions(monkeys_ear PRIVATE NOMINMAX WIN32_LEAN_AND_MEAN)
+    target_link_libraries(monkeys_ear PRIVATE user32 gdi32)
+endif()
 set_target_properties(monkeys_ear PROPERTIES OUTPUT_NAME "monkeys_ear" SUFFIX ".vst3" PREFIX "")
 
 # Standalone-useful ecosystem module: intentionally a separate binary, not a

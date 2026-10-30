@@ -62,7 +62,9 @@ Verified on Windows x64 @ 48kHz (Build with CMake + Ninja + GCC 14.2):
 
 ## Integrated creative controls — quick playtest guide
 
-In REAPER's standard VST parameter controls (there is no custom graphical editor yet), use **PLAY: Sound Palette** (ID 173) to audition:
+The instrument now has a **native Windows VST3 editor**, opened from the host's normal plug-in window. Start on its **PLAY** page rather than navigating 176 parameters. Select one of eight sounds, use the eight macros, shape the amp ADSR, then experiment with synced groove. Switch to **EXPLORE** only when you want the full engine; its area selector and live search expose all host parameters, including four independent tube positions. Host changes use standard VST3 automation callbacks rather than a separate DSP control channel.
+
+In PLAY, **Sound Palette** (ID 173) contains:
 - `0 Current`, `1 MONOLITH`, `2 FERAL WOBBLE`, `3 VELVET LEAD` (unchanged legacy choices).
 - `4 TUBE FOUNDRY` — four serial tube positions, modulation and cathode/supply interaction.
 - `5 CLOCKWORK SUB` — two parallel tube pairs, subharmonics and tempo-divided movement.
@@ -77,11 +79,24 @@ For immediate playability, start with the existing eight macros **Brightness / B
 
 Open the instrument, select **PLAY: Sound Palette → CLOCKWORK SUB**, enable **LFO: Tempo Sync** and **RHYTHM: Follow Host Clock**, then change the DAW BPM between 80, 120, and 160. Try 1/8, 1/16, 1/8-triplet divisions while moving **RHYTHM: Groove Swing** from 0% to 70%; its rhythm can animate the existing filter/FM/sub/drive routes. Switch to GLASS CHAMBER to evaluate slower envelopes and Sound Space instead of tube intensity. For every comparison, listen to the sound **in a mix**, not only in isolation. Mono/key performance, sustain pedal, patch recall, and host automation should remain usable throughout.
 
-For hosts implementing **VST3 IUnitInfo**, the plugin now exposes 15 native groups: PLAY, Oscillators/Voice, Filters/Envelopes, four-band EQ, Rhythm/Modulation, ChronoState, Sound Space, Vocal, the Tube Rack and four nested tubes, and Master/Routing. This is a grouping surface, **not yet a custom graphical editor**. Host-specific visibility and REAPER behavior require actual host verification. The new synced factory patches also carry manual fallback BPM, so offline use without transport context remains possible.
+For hosts implementing **VST3 IUnitInfo**, the plugin now exposes 15 native groups: PLAY, Oscillators/Voice, Filters/Envelopes, four-band EQ, Rhythm/Modulation, ChronoState, Sound Space, Vocal, the Tube Rack and four nested tubes, and Master/Routing. The native editor adds an actual embedded PLAY/EXPLORE surface above the host-native parameter groups. It uses Windows child-window embedding and resizable GDI rendering, so the current editor is **Windows-only**; a host that does not support HWND can still present the normal parameter interface. Host-specific visibility and actual REAPER behavior require execution in REAPER. The new synced factory patches also carry manual fallback BPM, so offline use without transport context remains possible.
+
+
+### Native editor — first physical-test checklist
+
+1. Open `monkeys_ear.vst3` as a new instrument in REAPER on Windows. Confirm the **MONKEY'S EAR** editor appears in the ordinary plug-in window; there must be no separately launched standalone demo.
+2. Click **CLOCKWORK SUB** on PLAY, then verify the macros, rhythm values, and tube controls display that patch's current values. Switch to **GLASS CHAMBER** and confirm the editor updates again.
+3. Drag **Brightness** while recording automation. Move it from REAPER's automation lane afterward and verify the editor follows the host; undo/redo must not leave stale controls. All GUI writes go through the VST3 component handler.
+4. Try attack, sustain, release, division, DAW tempo sync and groove without opening EXPLORE. Then search EXPLORE for `tube`, `filter`, `sustain`, and `space`. Make sure no parameter is stranded behind the PLAY layer.
+5. Resize the native window, close it, reopen it, switch instances, and recall a project containing different patches in each instance. Verify one editor never changes the other instrument.
+6. Move the host between 32/64/128 audio buffers while dragging controls. The editor must not introduce locks, allocation or rendering on the audio thread.
+7. Evaluate with actual human playtime: can you understand the first screen without a manual, and can you deliberately reach the strange mechanisms when you want them?
+
+This wave adds a Windows-native VST3 `IPlugView`, a host automation-edit bridge, and shared factory-preset parameter projection for controller/processor agreement. The new Windows host probe covers editor attachment, edit callbacks, preset refresh, resize, detach, and reattach. These checks are committed source **until actually run against the rebuilt plug-in**; they do not certify REAPER or subjective usability.
 
 ### Critique and remaining acceptance gates
 
-These integrations answer basic timing, expressivity and discoverability concerns; they do **not** prove the sound is innovative or the workflow is excellent. A rhythmic phase warp is a creative control rather than a new synthesis architecture. There is still no custom PLAY-focused UI, no per-step sequencer or performance snapshots, and no measured REAPER audio deadline or perceptual listening evidence for this wave. DAW-beat synchronization is block-context-based; hosts may not provide valid musical position, in which case the LFO free-runs at the clock rate. No lookahead or new reported latency has been introduced.
+These integrations answer basic timing, expressivity and discoverability concerns; they do **not** prove the sound is innovative or the workflow is excellent. A rhythmic phase warp is a creative control rather than a new synthesis architecture. A native PLAY/EXPLORE editor now exists in source, but it still needs real REAPER proof, accessibility and high-DPI review, and musician usability feedback. There is no per-step sequencer or performance-snapshot workflow yet, and no measured REAPER audio deadline or perceptual listening evidence for this editor wave. DAW-beat synchronization is block-context-based; hosts may not provide valid musical position, in which case the LFO free-runs at the clock rate. No lookahead or new reported latency has been introduced.
 
 Advanced sound design: `RACK: Enable` (124), `Parallel Pairs` (125), `Shared Supply` (126), `Output` (127), `Anti-alias` (128), plus four sets of eight controls: `TUBE N: Enable / Tube Type / Drive / Bias / Plate Load / Cathode Sag / Coupling / Mix`. Every slot can independently select **14 tube-inspired profiles**: 12AX7, 12AT7, 12AY7, 12AU7, 5751, 12DW7, 6SN7, 6DJ8, EF86, 6V6, 6L6GC, EL84, EL34 and KT88. These are creative operating-point signatures, **not measured hardware equivalence**. Serial and paired-parallel routing use the same rack in the product signal path. Disabling the rack selects the original `TubeDriveStage` verbatim; old presets default off and use the old DSP.
 
