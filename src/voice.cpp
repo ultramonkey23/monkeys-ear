@@ -459,11 +459,17 @@ void VoiceManager::note_on(int note,float velocity,int channel,int note_id) {
     const int idx=mono_?0:find_free_voice();
     if(idx<0||idx>=static_cast<int>(MAX_VOICES))return;
     const size_t slot=static_cast<size_t>(idx);
-    if(mono_&&voices_[0].is_active())
-        voices_[0].retarget_note(note,velocity,!legato_);
-    else voices_[slot].note_on(note,velocity);
-
-    // A new key press always takes ownership of a voice, including steals.
+    if(mono_){
+        // Record every held key, not merely the sounding key. On top-key
+        // release, legato must return to the earlier key without a new note-on.
+        mono_keys_.push({note,channel,note_id,velocity});
+        if(voices_[0].is_active())
+            voices_[0].retarget_note(note,velocity,!legato_);
+        else voices_[0].note_on(note,velocity);
+    }else{
+        voices_[slot].note_on(note,velocity);
+    }
+    // A new press always owns a voice, including an existing/stealed one.
     voice_channel_[slot]=channel;
     voice_note_id_[slot]=note_id;
     key_held_[slot]=true;
@@ -478,6 +484,24 @@ void VoiceManager::note_on(int note,float velocity,int channel,int note_id) {
 
 void VoiceManager::note_off(int note,int channel,int note_id) {
     if(note<0||note>127)return;
+    if(mono_){
+        const auto released=mono_keys_.release(note,channel,note_id);
+        if(!released.found||!released.was_top)return;
+        if(released.has_next){
+            const auto& previous=released.next;
+            voices_[0].retarget_note(previous.note,previous.velocity,!legato_);
+            voice_channel_[0]=previous.channel;
+            voice_note_id_[0]=previous.note_id;
+            key_held_[0]=true;
+            deferred_release_[0]=false;
+            voices_[0].set_poly_pressure(0.f);
+        }else{
+            key_held_[0]=false;
+            if(sustain_down_)deferred_release_[0]=true;
+            else {voices_[0].note_off();deferred_release_[0]=false;}
+        }
+        return;
+    }
     int chosen=-1;
     uint32_t newest=0;
     // VST3 note IDs are stronger identity than pitch. Without an ID (USB
@@ -528,6 +552,7 @@ void VoiceManager::all_notes_off() {
     sustain_down_=false;
     deferred_release_.fill(false);
     key_held_.fill(false);
+    mono_keys_.clear();
     for(auto& voice:voices_)voice.note_off();
 }
 
@@ -535,6 +560,7 @@ void VoiceManager::all_sounds_off() {
     sustain_down_=false;
     deferred_release_.fill(false);
     key_held_.fill(false);
+    mono_keys_.clear();
     for(auto& voice:voices_)voice.kill();
 }
 
@@ -562,7 +588,15 @@ void VoiceManager::set_sub_phase(float phase_cycles) { for (auto& v : voices_) v
 void VoiceManager::set_sub_polarity(bool inverted) { for (auto& v : voices_) v.set_sub_polarity(inverted); }
 void VoiceManager::set_sub_saturation(float amount) { for (auto& v : voices_) v.set_sub_saturation(amount); }
 void VoiceManager::set_sub_envelope(float amount) { for (auto& v : voices_) v.set_sub_envelope(amount); }
-void VoiceManager::set_voice_mode(bool mono, bool legato) { mono_ = mono; legato_ = legato; }
+void VoiceManager::set_voice_mode(bool mono, bool legato) {
+    if(mono_!=mono){
+        // A mode change changes voice ownership. Clear held keys so a later
+        // note-off cannot address the wrong voice after the transition.
+        all_sounds_off();
+        mono_=mono;
+    }
+    legato_=legato;
+}
 void VoiceManager::set_portamento(float seconds) { for (auto& v : voices_) v.set_portamento(seconds); }
 void VoiceManager::set_vibrato(float semitones) { for (auto& v : voices_) v.set_vibrato(semitones); }
 

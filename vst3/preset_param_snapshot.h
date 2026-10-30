@@ -127,6 +127,8 @@ void emit_preset_params(const PresetData& p,Emit&& emit){
     put(171,choice(p.lfo_subdivision,12));
     put(174,p.lfo_follow_host_tempo?1.f:0.f);
     put(175,p.lfo_groove);
+    put(176,p.performance_drift);
+    put(177,p.performance_fracture);
 }
 
 // Selector 79 remains its original four-entry mapping. Selector 173 adds new

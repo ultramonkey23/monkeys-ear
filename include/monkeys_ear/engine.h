@@ -14,6 +14,7 @@
 #include "monkeys_ear/preset.h"
 #include "monkeys_ear/chrono_state.h"
 #include "monkeys_ear/lfo.h"
+#include "monkeys_ear/performance_field.h"
 #include "monkeys_ear/tonal.h"
 
 namespace monkeys_ear {
@@ -110,6 +111,8 @@ private:
     float audio_envelope_;
     int current_midi_note_;
     float last_velocity_;
+    float performance_drift_smoothed_=0.0f;
+    float performance_fracture_smoothed_=0.0f;
     size_t modulation_counter_;
     MotionSmoother cutoff_motion_;
     MotionSmoother resonance_motion_;

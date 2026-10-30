@@ -135,6 +135,10 @@ struct PresetData {
     int lfo_subdivision = 4;
     bool lfo_follow_host_tempo = false; // opt-in; legacy patches remain manual
     float lfo_groove = 0.0f;            // 0 = straight, 1 = 75/25 phase swing
+    // Gestural XY: optional coupling of the existing motion and timbre paths.
+    // Legacy patches serialize neither key and therefore stay exactly neutral.
+    float performance_drift = 0.0f;
+    float performance_fracture = 0.0f;
 
     PresetData();
     std::string serialize() const;

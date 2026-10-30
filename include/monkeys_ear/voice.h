@@ -1,6 +1,7 @@
 #pragma once
 
 #include "monkeys_ear/types.h"
+#include "monkeys_ear/mono_key_stack.h"
 #include <array>
 
 namespace monkeys_ear {
@@ -161,6 +162,9 @@ public:
     void all_sounds_off();
     void set_sustain_pedal(bool down);
     bool sustain_pedal_down() const { return sustain_down_; }
+    int current_mono_note() const {
+        return mono_&&voices_[0].is_active()?voices_[0].get_note():-1;
+    }
     void set_pitch_bend(float semitones);
     void set_waveform(Waveform wf);
     void set_sub_mix(float sub_mix);
@@ -201,6 +205,8 @@ private:
     std::array<int, MAX_VOICES> voice_note_id_{};
     std::array<uint32_t, MAX_VOICES> key_generation_{};
     uint32_t next_key_generation_=1;
+
+    MonoKeyStack mono_keys_{}; // fixed-capacity last-held-key priority
 
     int find_free_voice();
 };

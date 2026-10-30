@@ -130,8 +130,8 @@ int main() {
     CHECK_STAGE(factory2->getClassInfo2(2,&info2)==kResultOk,"read controller class info");
     IEditController* controller=nullptr; res=factory2->createInstance(info2.cid,IEditController_iid,(void**)&controller);
     CHECK_STAGE(res==kResultOk && controller!=nullptr,"create edit controller");
-    CHECK_STAGE(controller->getParameterCount()==176,"controller exposes 176 stable host parameters");
-    for(int32 i=0;i<176;++i){ParameterInfo pInfo{};CHECK_STAGE(controller->getParameterInfo(i,pInfo)==kResultOk,"read parameter info");}
+    CHECK_STAGE(controller->getParameterCount()==178,"controller exposes 178 stable host parameters");
+    for(int32 i=0;i<178;++i){ParameterInfo pInfo{};CHECK_STAGE(controller->getParameterInfo(i,pInfo)==kResultOk,"read parameter info");}
 
     RecordingHandler edits;
     CHECK_STAGE(controller->setComponentHandler(&edits)==kResultOk,
@@ -180,14 +180,32 @@ int main() {
                 "PLAY palette selection synchronizes actual preset controls");
     const ParamValue gui_patch_edit=edits.last_value;
     // KEYS is an on-plugin setup/feel page, not a separate MIDI application.
-    SendMessageW(child,WM_LBUTTONDOWN,MK_LBUTTON,MAKELPARAM(914,40));
-    SendMessageW(child,WM_LBUTTONUP,0,MAKELPARAM(914,40));
+    SendMessageW(child,WM_LBUTTONDOWN,MK_LBUTTON,MAKELPARAM(980,40));
+    SendMessageW(child,WM_LBUTTONUP,0,MAKELPARAM(980,40));
     RedrawWindow(child,nullptr,nullptr,RDW_INVALIDATE|RDW_UPDATENOW);
     const int before_bend=edits.perform_count;
     SendMessageW(child,WM_LBUTTONDOWN,MK_LBUTTON,MAKELPARAM(952,418));
     SendMessageW(child,WM_LBUTTONUP,0,MAKELPARAM(952,418));
     CHECK_STAGE(edits.perform_count>before_bend&&edits.last_id==73,
                 "KEYS page exposes actual pitch-bend range for physical wheel");
+    // The XY pad controls the actual existing synthesis graph via two
+    // independently host-automatable normalized parameters.
+    SendMessageW(child,WM_LBUTTONDOWN,MK_LBUTTON,MAKELPARAM(905,40));
+    SendMessageW(child,WM_LBUTTONUP,0,MAKELPARAM(905,40));
+    RedrawWindow(child,nullptr,nullptr,RDW_INVALIDATE|RDW_UPDATENOW);
+    const int before_gesture_edits=edits.perform_count;
+    const int before_gesture_begins=edits.begin_count;
+    SendMessageW(child,WM_LBUTTONDOWN,MK_LBUTTON,MAKELPARAM(470,360));
+    SendMessageW(child,WM_MOUSEMOVE,MK_LBUTTON,MAKELPARAM(600,270));
+    SendMessageW(child,WM_LBUTTONUP,0,MAKELPARAM(600,270));
+    CHECK_STAGE(edits.perform_count>=before_gesture_edits+4 &&
+                edits.begin_count==before_gesture_begins+2 &&
+                edits.end_count==edits.begin_count&&edits.last_id==177,
+                "PERFORM XY sends both VST3 begin/perform/end automation lifecycles");
+    const float gui_drift=static_cast<float>(controller->getParamNormalized(176));
+    const float gui_fracture=static_cast<float>(controller->getParamNormalized(177));
+    CHECK_STAGE(gui_drift>.6f&&gui_fracture>.7f,
+                "gesture coordinates are visible as real normalized host parameters");
 
     ViewRect resized{0,0,1280,860};
     CHECK_STAGE(view->onSize(&resized)==kResultOk &&
@@ -203,7 +221,7 @@ int main() {
 
     MemoryStream state_stream;
     CHECK_STAGE(fx_comp->getState(&state_stream)==kResultOk,"serialize FX state");
-    CHECK_STAGE(state_stream.bytes.size()==12u+176u*sizeof(float),"serialized state size");
+    CHECK_STAGE(state_stream.bytes.size()==12u+178u*sizeof(float),"serialized state size");
     state_stream.pos=0; CHECK_STAGE(controller->setComponentState(&state_stream)==kResultOk,"controller accepts component state");
     ParameterInfo tube_type{},amp_sustain{},division{};
     CHECK_STAGE(controller->getParameterInfo(154,tube_type)==kResultOk && tube_type.stepCount==13,
@@ -211,6 +229,12 @@ int main() {
     CHECK_STAGE(controller->getParameterInfo(163,amp_sustain)==kResultOk &&
                 controller->getParameterInfo(171,division)==kResultOk && division.stepCount==11,
                 "host exposes envelope sustain and 12 rhythmic divisions");
+    ParameterInfo drift{},fracture{};
+    CHECK_STAGE(controller->getParameterInfo(176,drift)==kResultOk &&
+                controller->getParameterInfo(177,fracture)==kResultOk &&
+                drift.unitId==1&&fracture.unitId==1&&
+                drift.stepCount==0&&fracture.stepCount==0,
+                "two continuous gesture axes live in the PLAY host unit");
     ParameterInfo clock{},groove{};
     CHECK_STAGE(controller->getParameterInfo(174,clock)==kResultOk &&
                 clock.stepCount==1 && clock.unitId==5 &&
@@ -283,7 +307,25 @@ int main() {
     std::memcpy(legacy.bytes.data()+8,&legacy_count,4);
     CHECK_STAGE(instr_comp->setState(&legacy)==kResultOk,"read legacy v3 host snapshot without new rack fields");
     MemoryStream migrated;CHECK_STAGE(instr_comp->getState(&migrated)==kResultOk &&
-        migrated.bytes.size()==12u+176u*sizeof(float),"legacy snapshot migrated with appended controls");
+        migrated.bytes.size()==12u+178u*sizeof(float),"legacy snapshot migrated with appended controls");
+    // A v6/176-parameter project must adopt *neutral* gesture axes.
+    MemoryStream previous_wave;
+    previous_wave.bytes=a_state.bytes;
+    previous_wave.bytes.resize(12u+176u*sizeof(float));
+    const uint32 old_schema=6,old_param_count=176;
+    std::memcpy(previous_wave.bytes.data()+4,&old_schema,4);
+    std::memcpy(previous_wave.bytes.data()+8,&old_param_count,4);
+    CHECK_STAGE(instr_comp->setState(&previous_wave)==kResultOk,
+                "load previous wave's 176-parameter instrument state");
+    MemoryStream migrated6;
+    CHECK_STAGE(instr_comp->getState(&migrated6)==kResultOk &&
+                migrated6.bytes.size()==12u+178u*sizeof(float),
+                "migrate v6 session to 178 without losing old parameters");
+    float default_drift=99,default_fracture=99;
+    std::memcpy(&default_drift,migrated6.bytes.data()+12u+176u*sizeof(float),4);
+    std::memcpy(&default_fracture,migrated6.bytes.data()+12u+177u*sizeof(float),4);
+    CHECK_STAGE(default_drift==0.f&&default_fracture==0.f,
+                "old session has zero sonic change from absent performance controls");
     IMidiMapping* midi_map=nullptr; CHECK_STAGE(controller->queryInterface(IMidiMapping_iid,(void**)&midi_map)==kResultOk && midi_map!=nullptr,"controller exposes MIDI mapping");
     ParamID bend_id=0,pressure_id=0;
     CHECK_STAGE(midi_map->getMidiControllerAssignment(0,0,129,bend_id)==kResultOk && bend_id==80,"pitch-bend mapping");
@@ -291,11 +333,17 @@ int main() {
                 "VST3 channel pressure uses Steinberg controller 128");
     CHECK_STAGE(midi_map->getMidiControllerAssignment(0,0,130,pressure_id)!=kResultOk,
                 "incorrect historical 130 aftertouch mapping no longer advertised");
-    ParamID bend_id=0,wheel_id=0;
+    ParamID wheel_id=0; // bend_id was already declared above
     CHECK_STAGE(midi_map->getMidiControllerAssignment(0,0,129,bend_id)==kResultOk&&bend_id==80,
                 "Arturia pitch wheel reaches normalized VST3 bend");
     CHECK_STAGE(midi_map->getMidiControllerAssignment(0,0,1,wheel_id)==kResultOk&&wheel_id==0,
                 "Arturia mod wheel maps to existing brightness macro");
+    ParamID gesture_drift_id=0,gesture_fracture_id=0;
+    CHECK_STAGE(midi_map->getMidiControllerAssignment(0,0,20,gesture_drift_id)==kResultOk&&
+                gesture_drift_id==176 &&
+                midi_map->getMidiControllerAssignment(0,0,21,gesture_fracture_id)==kResultOk&&
+                gesture_fracture_id==177,
+                "configurable hardware knobs CC20/21 can play the XY field");
     ParamID sustain_id=0;
     CHECK_STAGE(midi_map->getMidiControllerAssignment(0,0,64,sustain_id)==kResultOk && sustain_id==172,
                 "hardware CC64 routes to real voice sustain"); midi_map->release();
@@ -317,13 +365,35 @@ int main() {
     CHECK_STAGE(instr_proc->process(instr_data)==kResultOk,"process instrument note");
     MemoryStream selected_patch_state;
     CHECK_STAGE(instr_comp->getState(&selected_patch_state)==kResultOk &&
-                selected_patch_state.bytes.size()==12u+176u*sizeof(float),
+                selected_patch_state.bytes.size()==12u+178u*sizeof(float),
                 "host can serialize live selected factory patch");
     float selected_tube=0,selected_groove=0;
     std::memcpy(&selected_tube,selected_patch_state.bytes.data()+12u+124u*sizeof(float),4);
     std::memcpy(&selected_groove,selected_patch_state.bytes.data()+12u+175u*sizeof(float),4);
     CHECK_STAGE(selected_tube>.5f&&selected_groove>.4f,
                 "GUI host edit reached DSP factory and synchronized component state");
+    // Replay the GUI gesture as the host's documented parameter queues,
+    // not by secretly writing any private DSP object from the editor.
+    TwoPointChanges drift_automation(176,0,gui_drift,gui_drift);
+    TwoPointChanges fracture_automation(177,0,gui_fracture,gui_fracture);
+    ProcessData gesture_flush{};
+    gesture_flush.numSamples=0;
+    gesture_flush.inputParameterChanges=&drift_automation;
+    CHECK_STAGE(instr_proc->process(gesture_flush)==kResultOk,
+                "perform DRIFT through host parameter events");
+    gesture_flush.inputParameterChanges=&fracture_automation;
+    CHECK_STAGE(instr_proc->process(gesture_flush)==kResultOk,
+                "perform FRACTURE through host parameter events");
+    MemoryStream gesture_state;
+    CHECK_STAGE(instr_comp->getState(&gesture_state)==kResultOk &&
+                gesture_state.bytes.size()==12u+178u*sizeof(float),
+                "serialize audible performance field with the actual patch");
+    float recorded_drift=0.f,recorded_fracture=0.f;
+    std::memcpy(&recorded_drift,gesture_state.bytes.data()+12u+176u*sizeof(float),4);
+    std::memcpy(&recorded_fracture,gesture_state.bytes.data()+12u+177u*sizeof(float),4);
+    CHECK_STAGE(std::abs(recorded_drift-gui_drift)<1e-5f &&
+                std::abs(recorded_fracture-gui_fracture)<1e-5f,
+                "GUI XY -> VST3 host -> product DSP component -> session state");
     instr_data.inputParameterChanges=nullptr;
     float instr_peak=0; for(float v:instr_l)instr_peak=std::max(instr_peak,std::abs(v)); CHECK_STAGE(instr_peak>.001f,"instrument produces audio");
     instr_comp->setActive(false); // clears held voices and effect tails

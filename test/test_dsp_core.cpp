@@ -514,6 +514,85 @@ void test_host_clock_and_groove_in_product() {
     std::cout<<"PASS\n";
 }
 
+void test_gesture_field_and_mono_held_key_priority() {
+    std::cout<<"[TEST] Gestural performance field, bounded DSP and mono key return... ";
+    const float NaN=std::numeric_limits<float>::quiet_NaN();
+    for(int i=0;i<32768;++i){
+        const float lfo=std::sin(.004f*i);
+        const float energy=(i%1000)/1000.f;
+        const auto neutral=evaluate_performance_field(0,0,lfo,energy,.7f,-.3f,.8f,.25f);
+        assert(neutral.filter_offset==0.f && neutral.fm_offset==0.f &&
+               neutral.drive_offset==0.f && neutral.space_lfo==0.f &&
+               neutral.sub_offset==0.f);
+        const auto active=evaluate_performance_field(.75f,.65f,lfo,energy,.7f,-.3f,.8f,.25f);
+        assert(std::abs(active.filter_offset)<.56f);
+        assert(active.fm_offset>=0.f && active.fm_offset<=.4f);
+        assert(active.drive_offset>=0.f && active.drive_offset<=.42f);
+        assert(std::abs(active.space_lfo)<=.42f);
+    }
+    assert(evaluate_performance_field(NaN,NaN,NaN,NaN,NaN,NaN,NaN,NaN).fm_offset==0.f);
+    auto a=evaluate_performance_field(0,1,0,0,0,0,.5f,0);
+    auto b=evaluate_performance_field(1,1,0,0,0,0,.5f,0);
+    assert(b.fm_offset>a.fm_offset && b.drive_offset>a.drive_offset);
+
+    VoiceManager vm;vm.set_sample_rate(48000.f);
+    vm.set_amp_envelope(.001f,.005f,1.f,.010f);
+    vm.set_filter_envelope(.001f,.005f,1.f,.010f);
+    vm.set_voice_mode(true,true);
+    auto render=[&](int n){for(int i=0;i<n;++i){float f=0,w=0;vm.process_split(f,w);}};
+    vm.note_on(60,.8f,0,100);render(100);
+    vm.note_on(64,.8f,0,101);vm.note_on(67,.8f,0,102);
+    assert(vm.current_mono_note()==67);
+    vm.note_off(64,0,101);assert(vm.current_mono_note()==67);
+    vm.note_off(67,0,102);assert(vm.current_mono_note()==60);
+    vm.note_off(60,0,100);render(4800);
+    assert(vm.active_voice_count()==0);
+    vm.note_on(60,.8f,0,-1);vm.note_on(64,.8f,0,-1);
+    vm.set_sustain_pedal(true);
+    vm.note_off(64,0,-1);assert(vm.current_mono_note()==60);
+    vm.note_off(60,0,-1);render(1000);
+    assert(vm.active_voice_count()==1);
+    vm.set_sustain_pedal(false);render(4800);
+    assert(vm.active_voice_count()==0);
+    vm.set_voice_mode(false,false);
+    assert(vm.current_mono_note()==-1);
+
+    auto p=PresetManager::create_factory_lead();
+    assert(p.performance_drift==0.f && p.performance_fracture==0.f);
+    auto newPatch=PresetManager::create_clockwork_sub();
+    assert(newPatch.performance_drift>.5f&&newPatch.performance_fracture>.5f);
+    PresetData roundtrip;
+    assert(roundtrip.deserialize(newPatch.serialize()));
+    assert(std::abs(roundtrip.performance_drift-newPatch.performance_drift)<1e-5f);
+    assert(std::abs(roundtrip.performance_fracture-newPatch.performance_fracture)<1e-5f);
+
+    MonkeysEarEngine reference,neutral,expressive;
+    reference.init(48000.f,128);neutral.init(48000.f,128);expressive.init(48000.f,128);
+    reference.load_preset(p);neutral.load_preset(p);expressive.load_preset(p);
+    neutral.set_parameter_normalized(176,0.f);neutral.set_parameter_normalized(177,0.f);
+    expressive.set_parameter_normalized(176,.86f);
+    expressive.set_parameter_normalized(177,.73f);
+    reference.handle_midi_note_on(55,.8f);
+    neutral.handle_midi_note_on(55,.8f);
+    expressive.handle_midi_note_on(55,.8f);
+    std::array<float,128> zeros{},refL{},refR{},neuL{},neuR{},expL{},expR{};
+    double energy=0,difference=0,unchanged=0;
+    for(int block=0;block<60;++block){
+        reference.process_block(zeros.data(),zeros.data(),refL.data(),refR.data(),128);
+        neutral.process_block(zeros.data(),zeros.data(),neuL.data(),neuR.data(),128);
+        expressive.process_block(zeros.data(),zeros.data(),expL.data(),expR.data(),128);
+        for(int i=0;i<128;++i){
+            assert(std::isfinite(refL[i])&&std::isfinite(expL[i]));
+            energy+=refL[i]*refL[i];
+            difference+=(expL[i]-refL[i])*(expL[i]-refL[i]);
+            unchanged+=std::abs(refL[i]-neuL[i]);
+        }
+    }
+    assert(energy>1.e-8 && difference>1.e-7);
+    assert(unchanged<1.e-8); // bypassed gestures are the exact old synth
+    std::cout<<"PASS\n";
+}
+
 void test_arturia_class_midi_keyboard_notes() {
     std::cout<<"[TEST] Physical MIDI Keyboard Semantics: channels, repeated notes, note IDs, pressure... ";
     VoiceManager voices;
@@ -580,7 +659,7 @@ void test_arturia_class_midi_keyboard_notes() {
 
 void test_factory_projection_for_native_editor() {
     std::cout<<"[TEST] Shared Factory Snapshot / PLAY and EXPLORE State Consistency... ";
-    constexpr int N=176;
+    constexpr int N=178;
     std::array<float,N> params{};
     std::array<bool,N> covered{};
     for(int patch=0;patch<8;++patch) {
@@ -601,10 +680,13 @@ void test_factory_projection_for_native_editor() {
         assert(covered[124]&&covered[129]&&covered[154]&&covered[160]);
         assert(covered[161]&&covered[163]&&covered[167]&&covered[169]);
         assert(covered[170]&&covered[171]&&covered[174]&&covered[175]);
+        assert(covered[176]&&covered[177]);
         assert(!covered[79]&&!covered[80]&&!covered[81]&&!covered[172]&&!covered[173]);
         assert(std::abs(params[0]-p.macros[0])<1e-6f);
         assert(std::abs(params[163]-p.amp_sustain)<1e-6f);
         assert(std::abs(params[175]-p.lfo_groove)<1e-6f);
+        assert(std::abs(params[176]-p.performance_drift)<1e-6f);
+        assert(std::abs(params[177]-p.performance_fracture)<1e-6f);
         for(int i=0;i<4;++i) {
             const int id=129+8*i;
             assert(std::abs(params[id+2]-p.tube_rack.slots[i].drive)<1e-5f);
@@ -994,6 +1076,7 @@ int main(int argc, char** argv) {
         test_preset_roundtrip_and_extremes();
         test_factory_projection_for_native_editor();
         test_arturia_class_midi_keyboard_notes();
+        test_gesture_field_and_mono_held_key_priority();
         test_sustain_pedal_and_patch_selector_compatibility();
         test_host_clock_and_groove_in_product();
         test_motion_causality();

@@ -292,8 +292,12 @@ private:
                   GET_Y_LPARAM(lp)*kCanvasH/std::max(1,height_),true);
             return 0;
         case WM_MOUSEMOVE:
-            if(dragged_id_>=0&&(wp&MK_LBUTTON))
-                drag(GET_X_LPARAM(lp)*kCanvasW/std::max(1,width_));
+            if((dragged_id_>=0||dragged_id_==-2)&&(wp&MK_LBUTTON)){
+                const int x=GET_X_LPARAM(lp)*kCanvasW/std::max(1,width_);
+                const int y=GET_Y_LPARAM(lp)*kCanvasH/std::max(1,height_);
+                if(dragged_id_==-2)drag_xy(x,y);
+                else drag(x);
+            }
             return 0;
         case WM_LBUTTONUP:finish_drag();return 0;
         case WM_CAPTURECHANGED:finish_drag();return 0;
@@ -337,11 +341,22 @@ private:
         begin_edit(id);update_edit(id,value);finish_edit(id);
     }
     void finish_drag() {
-        if(dragged_id_<0)return;
+        if(dragged_id_<0&&dragged_id_!=-2)return;
         const int id=dragged_id_;
-        dragged_id_=-1; // ReleaseCapture synchronously sends WM_CAPTURECHANGED
+        dragged_id_=-1; // ReleaseCapture sends WM_CAPTURECHANGED synchronously
         if(window_&&GetCapture()==window_)ReleaseCapture();
-        finish_edit(id);
+        if(id==-2){finish_edit(176);finish_edit(177);}
+        else finish_edit(id);
+    }
+    void drag_xy(int x,int y) {
+        if(dragged_id_!=-2)return;
+        const float width=static_cast<float>(std::max(1,drag_rect_.right-drag_rect_.left));
+        const float height=static_cast<float>(std::max(1,drag_rect_.bottom-drag_rect_.top));
+        // Upper-right is maximum motion + instability; lower-left neutral.
+        const float drift=std::clamp((x-drag_rect_.left)/width,0.0f,1.0f);
+        const float fracture=std::clamp((drag_rect_.bottom-y)/height,0.0f,1.0f);
+        update_edit(176,drift);
+        update_edit(177,fracture);
     }
     void drag(int x) {
         if(dragged_id_<0)return;
@@ -376,6 +391,16 @@ private:
             if(!it->contains(x,y))continue;
             if(it->action==1){set_page(it->target);return;}
             if(it->action==2){change_single(173,(it->target+.5)/8.0);return;}
+            if(it->action==3){
+                if(!handler())return;
+                dragged_id_=-2;
+                drag_rect_=it->rect;
+                selected_id_=176;
+                begin_edit(176);begin_edit(177);
+                SetCapture(window_);
+                drag_xy(x,y);
+                return;
+            }
             const int id=it->id;selected_id_=id;
             ParameterInfo info{};
             if(controller_->getParameterInfo(id,info)!=kResultOk)return;
@@ -450,6 +475,9 @@ private:
             draw_sound(dc,44+col*260,183+row*48,249,i);
         }
         title(dc,L"SHAPE THE SOUND",L"Move these first. You can explore every mechanism later.",286);
+        rectangle(dc,838,286,238,36,RGB(31,77,76),kAccent,12);
+        label(dc,body_font_,kAccent,L"GESTURE FIELD: DRIFT / FRACTURE",848,286,218,36,DT_CENTER);
+        add_hit(838,286,238,36,-1,1,3);
         constexpr const wchar_t* labels[8]={
             L"BRIGHTNESS",L"BITE",L"HEAT",L"BODY",
             L"ECHO",L"SPACE",L"LIVE INPUT",L"CHARACTER"
@@ -466,6 +494,41 @@ private:
         for(int i=0;i<4;++i)
             draw_param(dc,44+i*260,640,249,56,rhythm[i],names[i]);
     }
+    void draw_perform(HDC dc) {
+        title(dc,L"PLAY THE SOUND AS A MOVING SYSTEM",
+              L"Drag the pad while holding notes. DRIFT and FRACTURE influence the whole synth.",129);
+        constexpr int left=78,top=205,width=734,height=350;
+        rectangle(dc,left-2,top-2,width+4,height+4,kPanel,kOutline,16);
+        HBRUSH grid=CreateSolidBrush(kOutline);
+        for(int n=1;n<4;++n){
+            const int xx=left+n*width/4;
+            RECT line{xx,top,xx+1,top+height};FillRect(dc,&line,grid);
+            const int yy=top+n*height/4;
+            RECT across{left,yy,left+width,yy+1};FillRect(dc,&across,grid);
+        }
+        DeleteObject(grid);
+        const float x=std::clamp(static_cast<float>(controller_->getParamNormalized(176)),0.f,1.f);
+        const float y=std::clamp(static_cast<float>(controller_->getParamNormalized(177)),0.f,1.f);
+        const int markerX=left+static_cast<int>(x*width);
+        const int markerY=top+height-static_cast<int>(y*height);
+        rectangle(dc,markerX-10,markerY-10,20,20,kAccent,kAccent,20);
+        add_hit(left,top,width,height,-1,3,0);
+
+        label(dc,body_font_,kMuted,L"FRACTURE  /  harmonic edge",78,165,510,31);
+        label(dc,body_font_,kAccent,L"DRIFT  /  rhythmic & state motion",79,570,735,34,DT_CENTER);
+
+        rectangle(dc,839,205,236,350,kPanel,kOutline,16);
+        label(dc,body_font_,kText,L"ONE GESTURE, FIVE SYSTEMS",852,216,208,36,DT_CENTER);
+        draw_param(dc,849,267,216,67,176,L"DRIFT");
+        draw_param(dc,849,347,216,67,177,L"FRACTURE");
+        label(dc,small_font_,kMuted,L"DRIFT grows LFO, filter",852,438,211,24);
+        label(dc,small_font_,kMuted,L"sub-motion and Sound Space.",852,463,211,24);
+        label(dc,small_font_,kMuted,L"FRACTURE bends oscillator FM",852,497,211,24);
+        label(dc,small_font_,kMuted,L"and the existing tube circuit.",852,519,211,24);
+        label(dc,small_font_,kText,L"LOWER-LEFT = ORIGINAL PATCH   |   MOVING DIAGONALLY = COUPLED EXPERIMENT",78,622,970,33);
+        label(dc,small_font_,kMuted,L"Automate both axes, use REAPER MIDI Learn, or assign controller knobs to CC20/21.",78,667,975,30);
+    }
+
     void draw_keys(HDC dc) {
         title(dc,L"PLAY IT FROM YOUR MIDI KEYBOARD",
               L"Arturia and other standard MIDI keyboards work through the DAW's MIDI input.",129);
@@ -530,19 +593,23 @@ private:
         label(dc,small_font_,kMuted,L"PLAY FIRST  /  EXPERIMENT DEEPER",44,69,680,28);
         // Output remains accessible in BOTH views, never hidden in deep menus.
         draw_param(dc,616,23,170,46,8,L"OUTPUT");
-        rectangle(dc,800,22,82,37,page_==0?RGB(31,77,76):kPanel,kOutline);
-        label(dc,body_font_,page_==0?kAccent:kText,L"PLAY",800,22,82,37,DT_CENTER);
-        add_hit(800,22,82,37,-1,1,0);
-        rectangle(dc,888,22,82,37,page_==2?RGB(31,77,76):kPanel,kOutline);
-        label(dc,body_font_,page_==2?kAccent:kText,L"KEYS",888,22,82,37,DT_CENTER);
-        add_hit(888,22,82,37,-1,1,2);
-        rectangle(dc,976,22,100,37,page_==1?RGB(31,77,76):kPanel,kOutline);
-        label(dc,body_font_,page_==1?kAccent:kText,L"EXPLORE",976,22,100,37,DT_CENTER);
-        add_hit(976,22,100,37,-1,1,1);
+        rectangle(dc,796,22,63,37,page_==0?RGB(31,77,76):kPanel,kOutline);
+        label(dc,body_font_,page_==0?kAccent:kText,L"PLAY",796,22,63,37,DT_CENTER);
+        add_hit(796,22,63,37,-1,1,0);
+        rectangle(dc,864,22,89,37,page_==3?RGB(31,77,76):kPanel,kOutline);
+        label(dc,body_font_,page_==3?kAccent:kText,L"PERFORM",864,22,89,37,DT_CENTER);
+        add_hit(864,22,89,37,-1,1,3);
+        rectangle(dc,958,22,54,37,page_==2?RGB(31,77,76):kPanel,kOutline);
+        label(dc,body_font_,page_==2?kAccent:kText,L"KEYS",958,22,54,37,DT_CENTER);
+        add_hit(958,22,54,37,-1,1,2);
+        rectangle(dc,1017,22,60,37,page_==1?RGB(31,77,76):kPanel,kOutline);
+        label(dc,body_font_,page_==1?kAccent:kText,L"DEEP",1017,22,60,37,DT_CENTER);
+        add_hit(1017,22,60,37,-1,1,1);
         HBRUSH line=CreateSolidBrush(kOutline);
         RECT sep{44,108,1076,110};FillRect(dc,&sep,line);DeleteObject(line);
         if(page_==0)draw_play(dc);
         else if(page_==2)draw_keys(dc);
+        else if(page_==3)draw_perform(dc);
         else draw_explore(dc);
         const bool connected=handler()!=nullptr;
         label(dc,small_font_,connected?kMuted:RGB(255,175,113),

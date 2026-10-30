@@ -60,6 +60,8 @@ void MonkeysEarEngine::reset() {
     fdn_reverb_.reset();
     safety_limiter_.reset();
     latency_meter_.reset();
+    performance_drift_smoothed_=field_unit(preset_manager_.get_current().performance_drift);
+    performance_fracture_smoothed_=field_unit(preset_manager_.get_current().performance_fracture);
 }
 
 namespace {
@@ -341,6 +343,12 @@ void MonkeysEarEngine::set_parameter_normalized(int id, float v) {
         else p.lfo_groove=v;
         apply_macros();return;
     }
+    if(id==176||id==177){
+        if(id==176)p.performance_drift=v;
+        else p.performance_fracture=v;
+        // The audio callback smooths both axes; no heavyweight DSP reset.
+        return;
+    }
     switch(id){
       case 8:p.master_gain_db=v>0.001f?(v-0.85f)*40.0f:-100.0f;break; case 9:p.synth_waveform=static_cast<int>(v*3.99f);break;
       case 10:p.osc_fm_amount=v;break; case 11:p.osc2_semi=static_cast<int>(std::round((v-.5f)*48));break; case 12:p.osc_hard_sync=v>=.5f;break;
@@ -441,17 +449,32 @@ void MonkeysEarEngine::process_block(
 
     const PresetData& p = preset_manager_.get_current();
     float env_amt = p.filter_env_amount;
+    const float gesture_coeff=1.0f-std::exp(-1.0f/(sample_rate_*.012f));
+    const float drift_target=field_unit(p.performance_drift);
+    const float fracture_target=field_unit(p.performance_fracture);
 
     for (size_t i = 0; i < num_samples; ++i) {
-        // 0. Modulation (LFO)
+        // Performance field: smooth manual/host gesture edits before they
+        // meet existing nonlinear synth paths (no zipper or new DSP graph).
+        performance_drift_smoothed_+=(drift_target-performance_drift_smoothed_)*gesture_coeff;
+        performance_fracture_smoothed_+=(fracture_target-performance_fracture_smoothed_)*gesture_coeff;
+        // DRIFT exposes even a previously dormant LFO without rewriting
+        // the patch's stored LFO depth. Zero is the exact legacy behavior.
+        lfo1_.set_depth(clamp(p.lfo1_depth+performance_drift_smoothed_*.65f,0.f,1.f));
         float lfo_val = shape_modulation(lfo1_.process(), p.motion_curve);
 
-        // 1. Synth Voices Generation
         float filter_env = 0.0f;
         const auto& prior_state=chrono_body_.get_state();
         float fast=clamp(std::sqrt(std::max(0.0f,prior_state.energy_fast))*2.0f,0.0f,1.0f);
+        float old_slow=clamp(std::sqrt(std::max(0.f,prior_state.energy_slow))*2.f,0.f,1.f);
+        const auto gesture=evaluate_performance_field(
+            performance_drift_smoothed_,performance_fracture_smoothed_,lfo_val,
+            fast,old_slow,clamp(prior_state.velocity/900.f,-1.f,1.f),
+            last_velocity_,aftertouch_);
+        // 1. Existing synth voices and cross-FM, now played as one gesture.
         float fm_mod=fm_motion_.process(lfo_val*p.mod_lfo_fm + fast*p.mod_state_fast_fm);
-        voice_manager_.set_fm_amount(clamp(p.osc_fm_amount + fm_mod*.45f,0.0f,1.0f));
+        voice_manager_.set_fm_amount(clamp(p.osc_fm_amount + fm_mod*.45f+
+                                          gesture.fm_offset,0.0f,1.0f));
         voice_manager_.set_vibrato(std::sin(static_cast<float>(modulation_counter_)*TWO_PI*5.3f/sample_rate_) * p.vibrato_depth_semitones + aftertouch_*p.vibrato_depth_semitones*.35f);
         float synth_weight=0.0f;
         float synth_sample = voice_manager_.process_split(filter_env, synth_weight);
@@ -488,7 +511,7 @@ void MonkeysEarEngine::process_block(
         float slow=clamp(std::sqrt(std::max(0.0f,state.energy_slow))*2.0f,0.0f,1.0f);
 
         // 5. State Variable Filter (with envelope and LFO modulation)
-        float filter_motion=cutoff_motion_.process(lfo_val*p.mod_lfo_cutoff + direction*p.mod_state_direction_filter + aftertouch_*p.aftertouch_filter + (last_velocity_-.5f)*p.velocity_tone);
+        float filter_motion=cutoff_motion_.process(lfo_val*p.mod_lfo_cutoff + direction*p.mod_state_direction_filter + aftertouch_*p.aftertouch_filter + (last_velocity_-.5f)*p.velocity_tone + gesture.filter_offset);
         float resonance_mod=resonance_motion_.process(lfo_val*p.mod_lfo_resonance);
         float mod_env = filter_env*env_amt + filter_motion;
         float filtered = filter_.process(stateful_source, clamp(mod_env,-1.0f,1.0f), 1.0f);
@@ -496,8 +519,10 @@ void MonkeysEarEngine::process_block(
         // 6. Tube Drive Stage (with dynamic cathode sag memory)
         float drive_mod=drive_motion_.process(lfo_val*p.mod_lfo_drive + audio_envelope_*p.mod_audio_envelope_drive + aftertouch_*p.aftertouch_drive);
         if((modulation_counter_++ & 15u)==0u){
-            drive_tube_.set_drive(clamp(p.macros[MACRO_DRIVE]+drive_mod*.5f,0.0f,1.0f));
-            tube_rack_.set_drive_modulation(clamp((p.macros[MACRO_DRIVE]-.30f)*.9f+drive_mod*.5f,-1.0f,1.0f));
+            drive_tube_.set_drive(clamp(p.macros[MACRO_DRIVE]+drive_mod*.5f+
+                                       gesture.drive_offset,0.0f,1.0f));
+            tube_rack_.set_drive_modulation(clamp((p.macros[MACRO_DRIVE]-.30f)*.9f+drive_mod*.5f+
+                                                  gesture.drive_offset,-1.0f,1.0f));
             resonator_cab_.set_body_size(clamp(.6f+p.macros[MACRO_BODY]*1.4f+slow*p.mod_state_slow_resonator,0.4f,2.2f));
             float base_cutoff=40.0f*std::pow(450.0f,p.macros[MACRO_CUTOFF]);
             base_cutoff*=std::pow(2.0f,p.filter_key_tracking*(static_cast<float>(current_midi_note_)-60.0f)/12.0f);
@@ -515,12 +540,16 @@ void MonkeysEarEngine::process_block(
         if(p.input_route_mode==2) weight = weight_lowpass_.process(ext_sample) * p.fundamental_mix + tracked_sub*p.sub_mix;
         else if(p.input_route_mode==1) weight = lerp(synth_weight, weight_lowpass_.process(ext_sample)*p.fundamental_mix+tracked_sub*p.sub_mix, p.macros[MACRO_MIC_BLEND]);
         weight=weight_lowpass_.process(weight);
-        float sub_move=sub_motion_.process(lfo_val*p.mod_lfo_sub_blend + slow*p.mod_state_slow_balance);
+        float sub_move=sub_motion_.process(lfo_val*p.mod_lfo_sub_blend + slow*p.mod_state_slow_balance+
+                                           gesture.sub_offset);
         float character_layer=resonated*p.character_level;
         float weight_layer=weight*p.source_level*clamp(1.0f+sub_move*.6f,0.1f,1.8f);
         float center_hz=midi_to_freq(static_cast<float>(current_midi_note_));
         if(p.input_route_mode!=0&&external_sub_.confidence()>.30f)center_hz=external_sub_.tracked_frequency_hz();
-        SoundSpaceSources space_sources{lfo_val,filter_env,fast,slow,direction,aftertouch_,last_velocity_,audio_envelope_};
+        SoundSpaceSources space_sources{
+            clamp(lfo_val+gesture.space_lfo,-1.0f,1.0f),
+            filter_env,fast,slow,direction,aftertouch_,last_velocity_,audio_envelope_
+        };
         float recombined=sound_space_.process(character_layer,weight_layer,center_hz,space_sources);
         float eq_freq=lfo_val*p.mod_lfo_eq_frequency*.75f;
         float eq_gain=lfo_val*p.mod_lfo_eq_gain*9.0f;

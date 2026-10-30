@@ -34,7 +34,7 @@ static const TUID kMonkeysEarControllerCID = INLINE_UID(
     0x4D6F6E6B, 0x65797345, 0x61724374, 0x726C7202
 );
 
-static constexpr int kNumParams = 176;
+static constexpr int kNumParams = 178;
 // Root + existing coherent, independently navigable instrument subsystems.
 static constexpr int kUnitCount = 15;
 static constexpr const char* kUnitNames[kUnitCount]={
@@ -44,7 +44,7 @@ static constexpr const char* kUnitNames[kUnitCount]={
     "Master / Routing"
 };
 static int32 unit_for_parameter(int32 id){
-    if(id<=7||id==79||id==172||id==173)return 1;
+    if(id<=7||id==79||id==172||id==173||id==176||id==177)return 1;
     if(id==8||id==18||id==80||id==81)return 14;
     if((id>=9&&id<=12)||(id>=19&&id<=27)||(id>=70&&id<=78)||(id>=161&&id<=164))return 2;
     if((id>=28&&id<=36)||(id>=165&&id<=168))return 3;
@@ -58,7 +58,7 @@ static int32 unit_for_parameter(int32 id){
     return 0;
 }
 static constexpr uint32 kStateMagic = 0x4D453032u; // ME02
-static constexpr uint32 kStateVersion = 6u;
+static constexpr uint32 kStateVersion = 7u;
 
 // Avoid C++ fast-math assumptions when host automation includes NaN/Inf.
 static bool valid_normalized(ParamValue value) {
@@ -140,6 +140,8 @@ struct SharedPluginState {
         params[173].store(0.0f); // expanded palette; legacy ID79 unchanged
         params[174].store(0.0f); // opt-in host tempo; historic patches keep manual clock
         params[175].store(0.0f); // straight rhythmic phase at factory defaults
+        params[176].store(0.0f); // neutral DRIFT gesture
+        params[177].store(0.0f); // neutral FRACTURE gesture
         for (int i = 0; i < kNumParams; ++i) dirty[i].store(false);
     }
 };
@@ -777,6 +779,10 @@ public:
             std::snprintf(title,sizeof(title),"RHYTHM: Follow Host Clock");
         } else if(paramIndex==175){
             std::snprintf(title,sizeof(title),"RHYTHM: Groove Swing");
+        } else if(paramIndex==176){
+            std::snprintf(title,sizeof(title),"PERFORM: Drift");
+        } else if(paramIndex==177){
+            std::snprintf(title,sizeof(title),"PERFORM: Fracture");
         } else {
             std::snprintf(title,sizeof(title),"%s",titles[paramIndex]);
         }
@@ -989,6 +995,12 @@ public:
             return kResultOk;
         } else if (midiControllerNumber == 93) {
             id = 4; // CC 93 -> Delay Echo
+            return kResultOk;
+        } else if (midiControllerNumber == 20) {
+            id = 176; // Optional assignable hardware knob: DRIFT
+            return kResultOk;
+        } else if (midiControllerNumber == 21) {
+            id = 177; // Optional assignable hardware knob: FRACTURE
             return kResultOk;
         } else if (midiControllerNumber == 129) {
             id = 80; // VST3 legacy MIDI pitch bend controller

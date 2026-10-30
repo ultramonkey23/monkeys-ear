@@ -87,5 +87,39 @@
       "listening_kit": "OFFLINE_WORKFLOW_TOOL_WITH_REAL_CONSUMER: deliberately outside real-time DSP and useful as blind comparison infrastructure."
     },
     "unknowns": "Previous separately maintained local implementation and active agent worktree were not accessible; the count is a verified lower bound, not portfolio-wide exhaustiveness."
+  },
+  "performance_field_wave": {
+    "date": "2026-10-30",
+    "kind": "canonical_instrument_integration",
+    "intent": "Playable two-axis DRIFT/FRACTURE gestural control of existing FM, filter, ChronoState, subharmonic, tube and Sound Space routes; no parallel prototype or sound engine",
+    "source_paths": [
+      "include/monkeys_ear/performance_field.h",
+      "include/monkeys_ear/mono_key_stack.h",
+      "include/monkeys_ear/voice.h",
+      "src/voice.cpp",
+      "include/monkeys_ear/preset.h",
+      "src/preset.cpp",
+      "include/monkeys_ear/engine.h",
+      "src/engine.cpp",
+      "vst3/vst3_entry.cpp",
+      "vst3/native_editor.cpp",
+      "vst3/preset_param_snapshot.h",
+      "test/test_dsp_core.cpp",
+      "test/test_vst3_host_probe.cpp"
+    ],
+    "verified_local": {
+      "performance_field_header": "same byte SHA as staged GitHub blob; 200000 evaluations pass normal and ASan/UBSan; neutral exact, bounded, XY coupled, NaN safe",
+      "mono_key_stack_header": "same byte SHA as staged GitHub blob; fixed-size priority, note ID/channel, capacity and clear pass normal and ASan/UBSan"
+    },
+    "unverified": [
+      "full product native GCC/Clang or MSVC compilation",
+      "full VoiceManager or Monkey's Ear audio-thread tests",
+      "Windows VST3 host-probe execution",
+      "Arturia USB performance and REAPER audio/editor behavior",
+      "aliasing, level-matched perception, musical desirability, 44.1/48/96k quality"
+    ],
+    "compatibility": "host IDs 0..175 retained, 176/177 appended; old snapshots and presets neutral; initial host count 178, v7, all factory settings captured by existing shared projection",
+    "known_repair": "host probe duplicate bend_id declaration corrected in this wave",
+    "next_proof": "Compile and run existing native suite and Windows VST3 host probe, then REAPER/Arturia and blind/listening review with existing research/listening/blind_kit.py"
   }
 }
