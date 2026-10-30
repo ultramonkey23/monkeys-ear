@@ -7,6 +7,8 @@ StereoDelay::StereoDelay()
     : sample_rate_(48000.0f),
       time_l_(0.300f),
       time_r_(0.450f),
+      target_time_l_(0.300f),
+      target_time_r_(0.450f),
       feedback_(0.35f),
       cross_feedback_(0.25f),
       high_damping_(0.30f),
@@ -19,15 +21,28 @@ StereoDelay::StereoDelay()
 }
 
 void StereoDelay::set_sample_rate(float sr) {
-    sample_rate_ = std::max(1000.0f, sr);
+    // Host setup is the sole place permitted to enlarge delay storage.
+    // Class-level 3.5s range must remain true at 44.1/48/96/192/384 kHz.
+    sample_rate_=clamp(sr,1000.0f,384000.0f);
+    const size_t required=std::max(MAX_DELAY_SAMPLES,
+        static_cast<size_t>(std::ceil(sample_rate_*3.5f))+8);
+    if(buffer_l_.size()!=required){
+        buffer_l_.assign(required,0.0f);
+        buffer_r_.assign(required,0.0f);
+        write_pos_=0;
+        damp_l_=damp_r_=0.0f;
+    }
+    time_slew_coefficient_=1.0f-std::exp(-1.0f/(0.035f*sample_rate_));
+    time_l_=target_time_l_;
+    time_r_=target_time_r_;
 }
 
 void StereoDelay::set_time_left(float seconds) {
-    time_l_ = clamp(seconds, 0.001f, 3.5f);
+    target_time_l_ = clamp(seconds, 0.001f, 3.5f);
 }
 
 void StereoDelay::set_time_right(float seconds) {
-    time_r_ = clamp(seconds, 0.001f, 3.5f);
+    target_time_r_ = clamp(seconds, 0.001f, 3.5f);
 }
 
 void StereoDelay::set_feedback(float fb) {
@@ -52,19 +67,22 @@ void StereoDelay::reset() {
     write_pos_ = 0;
     damp_l_ = 0.0f;
     damp_r_ = 0.0f;
+    time_l_=target_time_l_;
+    time_r_=target_time_r_;
 }
 
 float StereoDelay::read_interpolated(const std::vector<float>& buf, float delay_samples) const {
+    const size_t capacity=buf.size();
     float r_pos = static_cast<float>(write_pos_) - delay_samples;
-    while (r_pos < 0.0f) r_pos += static_cast<float>(MAX_DELAY_SAMPLES);
-    while (r_pos >= static_cast<float>(MAX_DELAY_SAMPLES)) r_pos -= static_cast<float>(MAX_DELAY_SAMPLES);
+    while (r_pos < 0.0f) r_pos += static_cast<float>(capacity);
+    while (r_pos >= static_cast<float>(capacity)) r_pos -= static_cast<float>(capacity);
 
     int idx1 = static_cast<int>(r_pos);
     float frac = r_pos - static_cast<float>(idx1);
 
-    int idx0 = (idx1 - 1 + MAX_DELAY_SAMPLES) % MAX_DELAY_SAMPLES;
-    int idx2 = (idx1 + 1) % MAX_DELAY_SAMPLES;
-    int idx3 = (idx1 + 2) % MAX_DELAY_SAMPLES;
+    int idx0 = (idx1 - 1 + capacity) % capacity;
+    int idx2 = (idx1 + 1) % capacity;
+    int idx3 = (idx1 + 2) % capacity;
 
     float y0 = buf[idx0];
     float y1 = buf[idx1];
@@ -81,14 +99,14 @@ float StereoDelay::read_interpolated(const std::vector<float>& buf, float delay_
 }
 
 void StereoDelay::process(float in_l, float in_r, float& out_l, float& out_r) {
-    if (mix_ < 0.001f) {
-        out_l = in_l;
-        out_r = in_r;
-        return;
-    }
+    // Tick the feedback delay while dry. A later fade-in must not reveal
+    // a frozen buffer from an earlier, unrelated performance moment.
 
-    float delay_samples_l = time_l_ * sample_rate_;
-    float delay_samples_r = time_r_ * sample_rate_;
+    // Tape-like time changes glide rather than moving the tap abruptly.
+    time_l_+=(target_time_l_-time_l_)*time_slew_coefficient_;
+    time_r_+=(target_time_r_-time_r_)*time_slew_coefficient_;
+    const float delay_samples_l=time_l_*sample_rate_;
+    const float delay_samples_r=time_r_*sample_rate_;
 
     float delayed_l = read_interpolated(buffer_l_, delay_samples_l);
     float delayed_r = read_interpolated(buffer_r_, delay_samples_r);
@@ -109,7 +127,7 @@ void StereoDelay::process(float in_l, float in_r, float& out_l, float& out_r) {
     buffer_l_[write_pos_] = sanitize(in_l + fb_l);
     buffer_r_[write_pos_] = sanitize(in_r + fb_r);
 
-    write_pos_ = (write_pos_ + 1) % MAX_DELAY_SAMPLES;
+    write_pos_ = (write_pos_ + 1) % buffer_l_.size();
 
     // Wet/Dry mix
     out_l = sanitize(lerp(in_l, delayed_l, mix_));

@@ -48,6 +48,11 @@ target_link_libraries(monkeys_ear_test_runner PRIVATE monkeys_ear_core)
 add_executable(monkeys_ear_tube_rack_probe test/test_tube_rack.cpp)
 target_link_libraries(monkeys_ear_tube_rack_probe PRIVATE monkeys_ear_core)
 
+# Exercise the *production* FDN in a no-heap, no-reset, continuous-room-morph
+# proof. Deliberately separate test process to count global operator new calls.
+add_executable(monkeys_ear_reverb_rt_probe test/test_reverb_rt.cpp)
+target_link_libraries(monkeys_ear_reverb_rt_probe PRIVATE monkeys_ear_core)
+
 # Small isolated characterization harness for the pitch evidence layer. Keep it
 # separate from the large DSP suite so adversarial tracker work stays bounded.
 add_executable(monkeys_ear_vocal_tracker_probe test/test_vocal_tracker_probe.cpp)

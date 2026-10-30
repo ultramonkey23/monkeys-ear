@@ -118,7 +118,9 @@ public:
             DEFAULT_CHARSET,OUT_DEFAULT_PRECIS,CLIP_DEFAULT_PRECIS,
             CLEARTYPE_QUALITY,DEFAULT_PITCH,L"Segoe UI");
     }
-    ~NativeEditor() override {
+    // VST3 FUnknown has no virtual destructor; delete occurs through this
+    // concrete class's release(). An 'override' here prevents compilation.
+    ~NativeEditor() {
         removed();
         if(title_font_)DeleteObject(title_font_);
         if(body_font_)DeleteObject(body_font_);

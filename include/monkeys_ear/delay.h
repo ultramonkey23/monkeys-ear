@@ -23,8 +23,11 @@ public:
 
 private:
     float sample_rate_;
-    float time_l_;
+    float time_l_;  // current smoothed read delay
     float time_r_;
+    float target_time_l_;
+    float target_time_r_;
+    float time_slew_coefficient_=1.0f;
     float feedback_;
     float cross_feedback_;
     float high_damping_;

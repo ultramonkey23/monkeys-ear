@@ -154,5 +154,41 @@
       "Host automation replay and UI idle CPU benchmark at typical audio buffers",
       "Arturia keyboard gameplay, pleasantness and dynamic movement in a mix"
     ]
+  },
+  "reverb_rt_wave": {
+    "date": "2026-10-30",
+    "authority": "real Monkey's Ear audio engine, canonical master",
+    "intent": "Remove real-time allocation/reset and frozen tails from the existing FDN reverb and stereo echo, preserve 3.5-second echo range at high host sample rates and zero plugin latency",
+    "product_paths": [
+      "include/monkeys_ear/fdn_reverb.h",
+      "src/fdn_reverb.cpp",
+      "include/monkeys_ear/delay.h",
+      "src/delay.cpp",
+      "vst3/native_editor.cpp"
+    ],
+    "verified_local": {
+      "exact_product_fdn_source_sha": "e23790d4722d7a75d4cf726a6e992572ae7a1fbe",
+      "exact_product_fdn_header_sha": "5416323ad12cd5a0a46bbe4a8b41c2f512ded242",
+      "exact_test_source_sha": "2cc12769c40cc34121632f8aee092a33d9b6383c",
+      "compiler": "GCC 14.2 C++20 -O3 -ffast-math -Wall -Wextra",
+      "stress": "44.1/48/96/192 kHz reverb 2-second room/decay morph per rate, including extreme room bounds; zero allocations through instrumented operator new; unchanged-room setters exactly preserve output, wet=0 keeps tail clocking; finite nonzero decay. Stereo delay: correct 3-second echo at both 96 and 192kHz (old 192000-sample ring wrapped), zero allocations during echo-time sweeps, finite output and no frozen dry/wet tail.",
+      "sanitizer": "ASan/UBSan -O1 with production FDN + stereo delay in same executable; passed no reports",
+      "exact_delay_source_sha": "a96f85b8846a11aa3875dcf2e0dd52e410b4753a",
+      "exact_delay_header_sha": "779daa9c0137c52d13c858940826c7ceb57d95e5"
+    },
+    "respected_concurrent_work": {
+      "commit": "3f7472d54217fa4c0694a8ac7b60da1b64728252",
+      "status": "host transport, 26s tail, output silence flags, build-toolchain portability preserved unchanged",
+      "ownership": "do not replicate, overwrite, or reinterpret concurrent Code Prime work"
+    },
+    "not_verified": [
+      "Full product CMake/Windows build and REAPER/Arturia live execution",
+      "Host VST3 native editor Win32 compile and runtime",
+      "Whole-instrument end-to-end allocation audit and 32/64/128 buffer deadline",
+      "Listening grade: level-matched tonal fidelity and quality of continuous room morph",
+      "Other FX subsystem real-time safety outside this reverb path",
+      "Perceptual effect of pitch-gliding echo time on new presets and legacy patches; matched-level blind listening"
+    ],
+    "next_product_proof": "Run Windows run_tests.bat with mandatory reverb probe, VST3 host probe and full audio suite; record first REAPER/Arturia play and blind musical comparisons"
   }
 }

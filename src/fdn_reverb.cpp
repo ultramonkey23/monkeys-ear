@@ -19,24 +19,27 @@ FDNReverb::FDNReverb()
       stereo_width_(0.85f),
       mix_(0.25f),
       pre_delay_pos_(0) {
-    pre_delay_buffer_.resize(19200, 0.0f); // up to 100ms @ 192kHz
+    prepare_buffers(); // constructor is outside real-time processing
     damp_states_.fill(0.0f);
-    write_indices_.fill(0);
-    recalculate();
 }
 
 void FDNReverb::set_sample_rate(float sr) {
-    sample_rate_ = std::max(1000.0f, sr);
-    recalculate();
+    // setupProcessing prepares buffers before the first process callback.
+    sample_rate_=clamp(sr,1000.0f,384000.0f);
+    prepare_buffers();
 }
 
 void FDNReverb::set_room_size(float size) {
-    room_size_ = clamp(size, 0.4f, 2.5f);
+    const float next=clamp(size,0.4f,2.5f);
+    if(next==room_size_)return; // unrelated parameters must not restart the tail
+    room_size_=next;
     recalculate();
 }
 
 void FDNReverb::set_decay_time(float t60_s) {
-    decay_time_ = clamp(t60_s, 0.1f, 20.0f);
+    const float next=clamp(t60_s,0.1f,20.0f);
+    if(next==decay_time_)return;
+    decay_time_=next;
     recalculate();
 }
 
@@ -63,40 +66,60 @@ void FDNReverb::reset() {
     std::fill(pre_delay_buffer_.begin(), pre_delay_buffer_.end(), 0.0f);
     damp_states_.fill(0.0f);
     write_indices_.fill(0);
+    current_taps_=target_taps_;
+    current_decay_gains_=target_decay_gains_;
     pre_delay_pos_ = 0;
     for (auto& diff : input_diffusers_) {
         diff.reset();
     }
 }
 
-void FDNReverb::recalculate() {
-    float sr_scale = sample_rate_ / 44100.0f;
-
-    // Initialize 4 diffusion allpass stages
-    size_t diff_delays[4] = {
-        static_cast<size_t>(142 * sr_scale * room_size_),
-        static_cast<size_t>(237 * sr_scale * room_size_),
-        static_cast<size_t>(379 * sr_scale * room_size_),
-        static_cast<size_t>(511 * sr_scale * room_size_)
-    };
-    for (size_t i = 0; i < 4; ++i) {
-        input_diffusers_[i].init(std::max<size_t>(10, diff_delays[i]), 0.6f);
+void FDNReverb::prepare_buffers() {
+    const float scale=sample_rate_/44100.0f;
+    // Max room of 2.5x plus interpolation guard. No vector resize,
+    // allocation or deallocation can occur inside process or automation.
+    for(size_t i=0;i<NUM_DELAYS;++i){
+        const size_t capacity=std::max<size_t>(32,
+            static_cast<size_t>(std::ceil(BASE_DELAYS[i]*scale*2.5f))+8);
+        delay_buffers_[i].assign(capacity,0.0f);
+        write_indices_[i]=0;
     }
+    constexpr size_t DIFF_DELAYS[4]={142,237,379,511};
+    for(size_t i=0;i<4;++i){
+        const float initial=static_cast<float>(std::max<size_t>(10,
+            static_cast<size_t>(DIFF_DELAYS[i]*scale*room_size_)));
+        const size_t capacity=std::max<size_t>(32,
+            static_cast<size_t>(std::ceil(DIFF_DELAYS[i]*scale*2.5f))+8);
+        input_diffusers_[i].prepare(capacity,initial,.6f,sample_rate_);
+    }
+    // Adapt the fixed pre-delay to the actual host sample rate in setup.
+    pre_delay_buffer_.assign(std::max<size_t>(128,
+        static_cast<size_t>(std::ceil(sample_rate_*.1f))+8),0.f);
+    pre_delay_pos_=0;
+    damp_states_.fill(0.f);
+    slew_coefficient_=1.0f-std::exp(-1.0f/(.035f*sample_rate_));
+    recalculate(true);
+}
 
-    // Initialize 8 FDN delay lines
-    for (size_t i = 0; i < NUM_DELAYS; ++i) {
-        size_t len = static_cast<size_t>(static_cast<float>(BASE_DELAYS[i]) * sr_scale * room_size_);
-        len = std::max<size_t>(16, len);
-        delay_lengths_[i] = len;
-
-        if (delay_buffers_[i].size() != len) {
-            delay_buffers_[i].assign(len, 0.0f);
-            write_indices_[i] = 0;
+void FDNReverb::recalculate(bool snap) noexcept {
+    const float scale=sample_rate_/44100.0f;
+    constexpr size_t DIFF_DELAYS[4]={142,237,379,511};
+    for(size_t i=0;i<4;++i)
+        input_diffusers_[i].set_delay(static_cast<float>(std::max<size_t>(10,
+            static_cast<size_t>(DIFF_DELAYS[i]*scale*room_size_))));
+    for(size_t i=0;i<NUM_DELAYS;++i){
+        const size_t length=std::max<size_t>(16,
+            static_cast<size_t>(BASE_DELAYS[i]*scale*room_size_));
+        const float taps=static_cast<float>(std::min(
+            length,delay_buffers_[i].size()-2));
+        target_taps_[i]=taps;
+        const float delay_seconds=taps/sample_rate_;
+        target_decay_gains_[i]=std::pow(10.0f,
+                          -3.0f*delay_seconds/decay_time_);
+        if(snap){
+            current_taps_[i]=target_taps_[i];
+            current_decay_gains_[i]=target_decay_gains_[i];
         }
-
-        // T60 decay formula: gain = 10^(-3 * delay_time / T60)
-        float delay_time_s = static_cast<float>(len) / sample_rate_;
-        decay_gains_[i] = std::pow(10.0f, -3.0f * delay_time_s / decay_time_);
     }
 }
 
@@ -127,11 +150,8 @@ void FDNReverb::apply_hadamard_matrix(std::array<float, NUM_DELAYS>& s) const {
 }
 
 void FDNReverb::process(float in_l, float in_r, float& out_l, float& out_r) {
-    if (mix_ < 0.001f) {
-        out_l = in_l;
-        out_r = in_r;
-        return;
-    }
+    // Even at zero wet mix the live network must keep advancing: otherwise
+    // a later automation raise resurrects a frozen, unrelated old tail.
 
     // Input mono mix for reverb engine
     float in_mono = 0.5f * (in_l + in_r);
@@ -153,14 +173,21 @@ void FDNReverb::process(float in_l, float in_r, float& out_l, float& out_r) {
 
     // Read delay lines output
     std::array<float, NUM_DELAYS> delay_outputs;
-    for (size_t i = 0; i < NUM_DELAYS; ++i) {
-        delay_outputs[i] = delay_buffers_[i][write_indices_[i]];
-    }
-
-    // Apply per-delay one-pole damping filter & T60 decay gain
-    for (size_t i = 0; i < NUM_DELAYS; ++i) {
-        damp_states_[i] = lerp(delay_outputs[i], damp_states_[i], damping_);
-        delay_outputs[i] = damp_states_[i] * decay_gains_[i];
+    for(size_t i=0;i<NUM_DELAYS;++i){
+        // A continuously slewed fractional read tap changes the perceived
+        // room without reallocating buffers, clearing tails or clicky jumps.
+        current_taps_[i]+=(target_taps_[i]-current_taps_[i])*slew_coefficient_;
+        current_decay_gains_[i]+=(target_decay_gains_[i]-
+                                  current_decay_gains_[i])*slew_coefficient_;
+        const auto& line=delay_buffers_[i];
+        float read_pos=static_cast<float>(write_indices_[i])-current_taps_[i];
+        if(read_pos<0.0f)read_pos+=static_cast<float>(line.size());
+        const size_t idx=static_cast<size_t>(read_pos);
+        const size_t next=(idx+1)%line.size();
+        delay_outputs[i]=lerp(line[idx],line[next],
+            read_pos-static_cast<float>(idx));
+        damp_states_[i]=lerp(delay_outputs[i],damp_states_[i],damping_);
+        delay_outputs[i]=damp_states_[i]*current_decay_gains_[i];
     }
 
     // Mix delay lines into stereo outputs (decorrelated left and right taps)
@@ -190,7 +217,7 @@ void FDNReverb::process(float in_l, float in_r, float& out_l, float& out_r) {
         float next_sample = delay_outputs[i] + diffused * sign;
         // Soft saturate feedback to prevent any numerical explosion
         delay_buffers_[i][write_indices_[i]] = fast_tanh(next_sample);
-        write_indices_[i] = (write_indices_[i] + 1) % delay_lengths_[i];
+        write_indices_[i] = (write_indices_[i] + 1) % delay_buffers_[i].size();
         sign = -sign;
     }
 
