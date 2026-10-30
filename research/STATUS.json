@@ -218,6 +218,13 @@
       "Complete persistence of fields not exposed as VST3 parameters",
       "Concurrent host UI-thread setState with live process() block overlap under stress"
     ],
-    "next_real_world_gate": "Windows run_tests.bat (required snapshot replay probe + VST3 host probe) then save/reopen multiple personalized presets in REAPER, compare parameter states and audio outputs."
+    "next_real_world_gate": "Windows run_tests.bat (required snapshot replay probe + VST3 host probe) then save/reopen multiple personalized presets in REAPER, compare parameter states and audio outputs.",
+    "initial_factory_alignment": {
+      "status": "source integrated, Windows host test pending",
+      "observed_before": "Instrument lead DSP loaded Brightness .72, cross FM .25, hard-sync true, osc2 fifth while SharedPluginState began at .65/0/false/0; first getState silently stored the wrong sound. FX vocal initial snapshot similarly diverged.",
+      "repair": "MonkeysEarComponent constructor calls existing sync_patch_controls_for_state after loading factory lead or vocal resonator. No new parameter IDs, DSP paths or factory definitions.",
+      "regression": "Windows VST3 host probe asserts untouched instrument (IDs 0 10 11 12) and FX (IDs 0 3 6 113) snapshots equal their loaded preset values.",
+      "unverified": "Real Windows plugin build and physical DAW host project first save/reopen."
+    }
   }
 }

@@ -221,6 +221,11 @@ public:
         } else {
             engine_.load_preset(monkeys_ear::PresetManager::create_factory_lead());
         }
+        // The host may save this component before the first audio callback.
+        // Its initial state must represent the ACTUAL loaded preset, not
+        // stale guessed defaults in SharedPluginState. Use the exact same
+        // reverse projection as normal factory selection and the controller.
+        sync_patch_controls_for_state();
     }
 
     virtual ~MonkeysEarComponent() = default;

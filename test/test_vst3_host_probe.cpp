@@ -144,6 +144,29 @@ int main() {
                 "shared engine FX variant requests the same required transport fields");
     fx_transport->release();
     CHECK_STAGE(fx_comp->getBusCount(kAudio,kInput)==1 && fx_comp->getBusCount(kAudio,kOutput)==1 && fx_comp->getBusCount(kEvent,kInput)==1,"FX bus topology");
+    // The processor is already running its factory patch before any MIDI or
+    // controller connection. Saving immediately must serialize that same
+    // sound, rather than SharedPluginState's old guessed initial defaults.
+    MemoryStream fresh_instrument,fresh_fx;
+    CHECK_STAGE(instr_comp->getState(&fresh_instrument)==kResultOk &&
+                fx_comp->getState(&fresh_fx)==kResultOk,
+                "initial instrument and FX factory states are saveable");
+    const auto initial_param=[](const MemoryStream& state,int id){
+        float value=0.f;
+        std::memcpy(&value,state.bytes.data()+12u+
+                    static_cast<size_t>(id)*sizeof(float),sizeof(float));
+        return value;
+    };
+    CHECK_STAGE(std::abs(initial_param(fresh_instrument,0)-.72f)<1e-6f &&
+                std::abs(initial_param(fresh_instrument,10)-.25f)<1e-6f &&
+                initial_param(fresh_instrument,12)==1.f &&
+                std::abs(initial_param(fresh_instrument,11)-(.5f+7.f/48.f))<1e-6f,
+                "untouched lead snapshot matches the loaded Brightness, FM, hard sync and fifth");
+    CHECK_STAGE(std::abs(initial_param(fresh_fx,0)-.80f)<1e-6f &&
+                std::abs(initial_param(fresh_fx,3)-.85f)<1e-6f &&
+                initial_param(fresh_fx,113)==1.f &&
+                initial_param(fresh_fx,6)==1.f,
+                "untouched vocal FX snapshot matches its actual audio and vocal controls");
 
     PClassInfo2 info2{};
     CHECK_STAGE(factory2->getClassInfo2(2,&info2)==kResultOk,"read controller class info");
