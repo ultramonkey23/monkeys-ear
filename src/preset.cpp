@@ -120,6 +120,19 @@ std::string PresetData::serialize() const {
     const auto& tuning=t.tuning;
     oss<<"VOCAL_TUNING_BUILTIN="<<static_cast<int>(tuning.builtin)<<"\nVOCAL_TUNING_ROOT="<<tuning.root_cents<<"\nVOCAL_TUNING_PERIOD="<<tuning.period_cents<<"\nVOCAL_TUNING_COUNT="<<static_cast<int>(tuning.degree_count)<<"\nVOCAL_TUNING_LABEL="<<tuning.name()<<"\n";
     for(uint8_t i=0;i<tuning.degree_count;++i){const auto& d=tuning.degrees[i];oss<<"VOCAL_DEGREE_"<<static_cast<int>(i)<<"="<<d.cents<<","<<d.gravity<<","<<d.ascending_gravity<<","<<d.descending_gravity<<","<<(d.enabled?1:0)<<","<<d.metadata<<"\n";}
+    // Tube rack is part of the SAME patch as the rest of the instrument.
+    oss<<"TUBE_ENABLE="<<(tube_rack.enabled?1:0)<<"\nTUBE_PARALLEL="<<(tube_rack.parallel?1:0)
+       <<"\nTUBE_SUPPLY="<<tube_rack.shared_supply<<"\nTUBE_OUTPUT="<<tube_rack.output
+       <<"\nTUBE_ADAA="<<(tube_rack.antialias?1:0)<<"\n";
+    for(size_t i=0;i<tube_rack.slots.size();++i){
+        const auto& t=tube_rack.slots[i];
+        oss<<"TUBE"<<i<<"_ENABLE="<<(t.enabled?1:0)<<"\nTUBE"<<i<<"_FLAVOR="<<t.flavor
+           <<"\nTUBE"<<i<<"_DRIVE="<<t.drive<<"\nTUBE"<<i<<"_BIAS="<<t.bias
+           <<"\nTUBE"<<i<<"_LOAD="<<t.plate_load<<"\nTUBE"<<i<<"_SAG="<<t.sag
+           <<"\nTUBE"<<i<<"_COUPLING="<<t.coupling<<"\nTUBE"<<i<<"_MIX="<<t.mix<<"\n";
+    }
+    oss<<"LFO_TEMPO_SYNC="<<(lfo_tempo_sync?1:0)<<"\nTEMPO_BPM="<<tempo_bpm
+       <<"\nLFO_SUBDIVISION="<<lfo_subdivision<<"\n";
     return oss.str();
 }
 
@@ -171,6 +184,9 @@ bool PresetData::deserialize(const std::string& data) {
         else if (key == "LFO1_RATE") lfo1_rate_hz = std::stof(val_str);
         else if (key == "LFO1_DEPTH") lfo1_depth = std::stof(val_str);
         else if (key == "ROUTE_MODE") input_route_mode = std::stoi(val_str);
+        else if (key == "LFO_TEMPO_SYNC") lfo_tempo_sync=std::stoi(val_str)!=0;
+        else if (key == "TEMPO_BPM") tempo_bpm=clamp(std::stof(val_str),40.0f,240.0f);
+        else if (key == "LFO_SUBDIVISION") lfo_subdivision=clamp(std::stoi(val_str),0,11);
         else if (key == "FILTER_MODE_A") filter_mode_a=std::stoi(val_str);
         else if (key == "FILTER_MODE_B") filter_mode_b=std::stoi(val_str);
         else if (key == "FILTER_CUTOFF_B") filter_cutoff_b_hz=std::stof(val_str);
@@ -228,6 +244,23 @@ bool PresetData::deserialize(const std::string& data) {
         else if(key=="SPACE_PHASE")sound_space.phase_offset_cycles=std::stof(val_str);
         else if(key=="SPACE_PHASE_COUPLE")sound_space.phase_coupling=std::stof(val_str);
         else if(key.rfind("SPACE_ROUTE",0)==0){int i=key[11]-'0';if(i>=0&&i<4){auto suffix=key.substr(13);if(suffix=="SOURCE")sound_space.routes[i].source=std::stoi(val_str);else if(suffix=="DEST")sound_space.routes[i].destination=std::stoi(val_str);else if(suffix=="DEPTH")sound_space.routes[i].depth=std::stof(val_str);}}
+        else if(key=="TUBE_ENABLE")tube_rack.enabled=std::stoi(val_str)!=0;
+        else if(key=="TUBE_PARALLEL")tube_rack.parallel=std::stoi(val_str)!=0;
+        else if(key=="TUBE_SUPPLY")tube_rack.shared_supply=clamp(std::stof(val_str),0.0f,1.0f);
+        else if(key=="TUBE_OUTPUT")tube_rack.output=clamp(std::stof(val_str),0.0f,1.0f);
+        else if(key=="TUBE_ADAA")tube_rack.antialias=std::stoi(val_str)!=0;
+        else if(key.size()>6 && key.rfind("TUBE",0)==0 && key[4]>='0' && key[4]<='3' && key[5]=='_'){
+            auto& t=tube_rack.slots[static_cast<size_t>(key[4]-'0')];
+            const auto f=key.substr(6);
+            if(f=="ENABLE")t.enabled=std::stoi(val_str)!=0;
+            else if(f=="FLAVOR")t.flavor=clamp(std::stoi(val_str),0,kTubeFlavorCount-1);
+            else if(f=="DRIVE")t.drive=clamp(std::stof(val_str),0.0f,1.0f);
+            else if(f=="BIAS")t.bias=clamp(std::stof(val_str),-1.0f,1.0f);
+            else if(f=="LOAD")t.plate_load=clamp(std::stof(val_str),0.0f,1.0f);
+            else if(f=="SAG")t.sag=clamp(std::stof(val_str),0.0f,1.0f);
+            else if(f=="COUPLING")t.coupling=clamp(std::stof(val_str),0.0f,1.0f);
+            else if(f=="MIX")t.mix=clamp(std::stof(val_str),0.0f,1.0f);
+        }
         else if(key=="VOCAL_ENABLED")vocal_expression.enabled=std::stoi(val_str)!=0;
         else if(key=="VOCAL_CORRECTION")vocal_expression.correction_strength=std::stof(val_str);
         else if(key=="VOCAL_DRIFT")vocal_expression.drift_retention=std::stof(val_str);
@@ -459,6 +492,61 @@ PresetData PresetManager::create_sound_space(){
     p.sound_space.enabled=true;p.sound_space.pitch_bound_cents=19;p.sound_space.harmonic_bound_cents=58;p.sound_space.modal_bound_cents=44;p.sound_space.movement_hz=.73f;p.sound_space.attraction=.61f;p.sound_space.resistance=.59f;p.sound_space.repulsion=.68f;p.sound_space.frequency_freedom=.88f;p.sound_space.energy_widen=.55f;p.sound_space.attack_freedom=.42f;p.sound_space.release_relaxation=.72f;p.sound_space.pitch_mix=.09f;p.sound_space.harmonic_mix=.20f;p.sound_space.modal_mix=.18f;p.sound_space.spectral_depth_db=8.5f;p.sound_space.spectral_priority=.66f;p.sound_space.phase_offset_cycles=.08f;p.sound_space.phase_coupling=.46f;
     p.sound_space.routes[0]={0,1,.55f};p.sound_space.routes[1]={3,2,.62f};p.sound_space.routes[2]={2,5,.48f};p.sound_space.routes[3]={5,6,.72f};
     p.lfo1_rate_hz=.37f;p.lfo1_depth=1.0f;p.master_gain_db=-9.0f;return p;
+}
+
+
+PresetData PresetManager::create_tube_foundry() {
+    PresetData p=create_factory_lead();
+    p.name="TUBE FOUNDRY";
+    p.tube_rack.enabled=true;
+    p.tube_rack.slots[0].flavor=0;  // 12AX7: input
+    p.tube_rack.slots[1].flavor=8;  // EF86: asymmetric texture
+    p.tube_rack.slots[2].flavor=11; // EL84: lively gain
+    p.tube_rack.slots[3].flavor=13; // KT88: output headroom
+    p.tube_rack.shared_supply=0.62f;
+    p.tube_rack.slots[1].bias=-0.22f;
+    p.tube_rack.slots[2].drive=0.42f;
+    p.macros[MACRO_DRIVE]=0.48f;
+    p.mod_lfo_drive=0.28f;
+    p.lfo1_depth=0.85f;
+    p.lfo_tempo_sync=true;p.tempo_bpm=122.0f;p.lfo_subdivision=6;
+    p.amp_attack=0.010f;p.amp_sustain=0.67f;p.amp_release=0.38f;
+    p.master_gain_db=-9.0f;
+    return p;
+}
+
+PresetData PresetManager::create_clockwork_sub() {
+    PresetData p=create_feral_wobble();
+    p.name="CLOCKWORK SUB";
+    p.tube_rack.enabled=true;p.tube_rack.parallel=true;
+    p.tube_rack.slots[0].flavor=9;  // 6V6
+    p.tube_rack.slots[1].flavor=3;  // 12AU7
+    p.tube_rack.slots[2].flavor=12; // EL34
+    p.tube_rack.slots[3].flavor=10; // 6L6GC
+    p.tube_rack.shared_supply=0.70f;
+    p.tube_rack.slots[2].bias=0.30f;
+    p.lfo_tempo_sync=true;p.tempo_bpm=105.0f;p.lfo_subdivision=5;
+    p.mod_lfo_cutoff=0.64f;p.mod_lfo_fm=0.26f;
+    p.amp_sustain=0.80f;p.amp_release=0.20f;
+    p.master_gain_db=-10.0f;
+    return p;
+}
+
+PresetData PresetManager::create_glass_chamber() {
+    PresetData p=create_sound_space();
+    p.name="GLASS CHAMBER";
+    p.tube_rack.enabled=true;
+    p.tube_rack.slots[0].flavor=7;  // 6DJ8
+    p.tube_rack.slots[1].flavor=4;  // 5751
+    p.tube_rack.slots[2].flavor=6;  // 6SN7
+    p.tube_rack.slots[3].flavor=13; // KT88
+    p.tube_rack.shared_supply=0.22f;
+    for(auto& t:p.tube_rack.slots){t.drive=.16f;t.mix=.42f;}
+    p.lfo_tempo_sync=true;p.tempo_bpm=76.0f;p.lfo_subdivision=2;
+    p.amp_attack=.22f;p.amp_sustain=.58f;p.amp_release=2.6f;
+    p.filter_attack=.38f;p.filter_release=1.8f;
+    p.master_gain_db=-11.0f;
+    return p;
 }
 
 } // namespace monkeys_ear

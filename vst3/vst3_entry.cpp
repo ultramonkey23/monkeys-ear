@@ -5,8 +5,8 @@
 #include <vector>
 #include <string>
 #include <memory>
-#include <mutex>
 #include <cmath>
+#include <cstdio>
 
 using namespace Steinberg;
 using namespace Steinberg::Vst;
@@ -26,9 +26,9 @@ static const TUID kMonkeysEarControllerCID = INLINE_UID(
     0x4D6F6E6B, 0x65797345, 0x61724374, 0x726C7202
 );
 
-static constexpr int kNumParams = 124;
+static constexpr int kNumParams = 172;
 static constexpr uint32 kStateMagic = 0x4D453032u; // ME02
-static constexpr uint32 kStateVersion = 3u;
+static constexpr uint32 kStateVersion = 4u;
 
 static tresult write_plugin_state(IBStream* stream, const std::shared_ptr<struct SharedPluginState>& state);
 static tresult read_plugin_state(IBStream* stream, const std::shared_ptr<struct SharedPluginState>& state);
@@ -87,6 +87,20 @@ struct SharedPluginState {
         params[98].store(0.5f);params[99].store(0.5f);params[100].store(0.5f);
         for(int route=0;route<4;++route){params[101+route*3].store(0.0f);params[102+route*3].store(0.0f);params[103+route*3].store(0.5f);}
         params[113].store(is_fx ? 1.0f : 0.0f); params[114].store(.72f); params[115].store(.62f); params[116].store(.82f); params[117].store(.68f); params[118].store(.58f); params[119].store(.10f); params[120].store(.24f); params[121].store(.88f); params[122].store(.34f); params[123].store(.88f);
+        params[124].store(0.0f);params[125].store(0.0f);params[126].store(.35f);params[127].store(.5f);params[128].store(1.0f);
+        for(int i=0;i<4;++i){
+            const int b=129+8*i;
+            params[b].store(1.0f);
+            params[b+1].store((static_cast<float>(i)+.1f)/monkeys_ear::kTubeFlavorCount);
+            params[b+2].store(.32f-.03f*i);
+            params[b+3].store(.5f);params[b+4].store(.5f);
+            params[b+5].store(.3f);params[b+6].store(.2f);
+            params[b+7].store(.65f-.06f*i);
+        }
+        const auto env_norm=[](float seconds){return std::sqrt(std::max(0.0f,(seconds-.001f)/6.0f));};
+        params[161].store(env_norm(.005f));params[162].store(env_norm(.15f));params[163].store(.70f);params[164].store(env_norm(.25f));
+        params[165].store(env_norm(.010f));params[166].store(env_norm(.20f));params[167].store(.30f);params[168].store(env_norm(.30f));
+        params[169].store(0.0f);params[170].store(.40f);params[171].store((4.1f)/12.0f);
         for (int i = 0; i < kNumParams; ++i) dirty[i].store(false);
     }
 };
@@ -104,11 +118,24 @@ static tresult read_plugin_state(IBStream* stream, const std::shared_ptr<SharedP
     uint32 magic=0,version=0,count=0;
     if(!stream_read(stream,&magic,4)||!stream_read(stream,&version,4)||!stream_read(stream,&count,4))return kInternalError;
     if(magic!=kStateMagic||version>kStateVersion||count>static_cast<uint32>(kNumParams))return kResultFalse;
-    for(uint32 i=0;i<count;++i){float v=0;if(!stream_read(stream,&v,4))return kInternalError;state->params[i].store(std::clamp(v,0.0f,1.0f));state->dirty[i].store(true);} return kResultOk;
+    for(uint32 i=0;i<count;++i){
+        float v=0;
+        if(!stream_read(stream,&v,4))return kInternalError;
+        state->params[i].store(std::clamp(v,0.0f,1.0f));
+        state->dirty[i].store(true);
+    }
+    // Recall of a v3/124-parameter session must turn off newly added rack
+    // controls even when the same component was previously running a newer
+    // patch. Missing suffix fields may not inherit stale instance state.
+    if(count<static_cast<uint32>(kNumParams)){
+        const SharedPluginState defaults(false);
+        for(uint32 i=count;i<static_cast<uint32>(kNumParams);++i){
+            state->params[i].store(defaults.params[i].load());
+            state->dirty[i].store(true);
+        }
+    }
+    return kResultOk;
 }
-
-static std::mutex g_state_mutex;
-static std::shared_ptr<SharedPluginState> g_last_created_state = nullptr;
 
 // ── VST3 Component (Shared DSP Engine for Instrument & FX) ────────────────
 class MonkeysEarComponent : public IComponent,
@@ -118,10 +145,6 @@ public:
     explicit MonkeysEarComponent(bool is_fx = false)
         : ref_count_(1), is_fx_(is_fx), active_(false), processing_(false) {
         state_ = std::make_shared<SharedPluginState>(is_fx_);
-        {
-            std::lock_guard<std::mutex> lock(g_state_mutex);
-            g_last_created_state = state_;
-        }
         engine_.init(48000.0f, 512);
         if (is_fx_) {
             engine_.load_preset(monkeys_ear::PresetManager::create_factory_vocal_resonator());
@@ -383,8 +406,42 @@ public:
     }
 
 private:
+    void sync_patch_controls_for_state() {
+        // A program selection changes many synth controls at once. Snapshot
+        // the appended controls from the *actual* preset, so getState does not
+        // serialize old "rack off" defaults while the new rack is audible.
+        const auto& p=engine_.get_current_preset();
+        const auto update=[this](int id,float value){
+            state_->params[id].store(value);
+            state_->dirty[id].store(false);
+        };
+        update(124,p.tube_rack.enabled?1.f:0.f);
+        update(125,p.tube_rack.parallel?1.f:0.f);
+        update(126,p.tube_rack.shared_supply);
+        update(127,p.tube_rack.output);
+        update(128,p.tube_rack.antialias?1.f:0.f);
+        for(int i=0;i<4;++i){
+            const auto& t=p.tube_rack.slots[static_cast<size_t>(i)];
+            const int b=129+8*i;
+            update(b,t.enabled?1.f:0.f);
+            update(b+1,(static_cast<float>(t.flavor)+.1f)/monkeys_ear::kTubeFlavorCount);
+            update(b+2,t.drive);
+            update(b+3,(t.bias+1.f)*.5f);
+            update(b+4,t.plate_load);update(b+5,t.sag);
+            update(b+6,t.coupling);update(b+7,t.mix);
+        }
+        const auto env=[](float seconds){return std::sqrt(std::clamp((seconds-.001f)/6.f,0.f,1.f));};
+        update(161,env(p.amp_attack));update(162,env(p.amp_decay));
+        update(163,p.amp_sustain);update(164,env(p.amp_release));
+        update(165,env(p.filter_attack));update(166,env(p.filter_decay));
+        update(167,p.filter_sustain);update(168,env(p.filter_release));
+        update(169,p.lfo_tempo_sync?1.f:0.f);
+        update(170,(std::clamp(p.tempo_bpm,40.f,240.f)-40.f)/200.f);
+        update(171,(std::clamp(p.lfo_subdivision,0,11)+.1f)/12.f);
+    }
     void apply_param_to_engine(ParamID id, float value) {
         engine_.set_parameter_normalized(static_cast<int>(id), value);
+        if(id==79)sync_patch_controls_for_state();
     }
 
     std::atomic<uint32> ref_count_;
@@ -401,16 +458,8 @@ class MonkeysEarController : public IEditController,
                              public IConnectionPoint {
 public:
     MonkeysEarController()
-        : ref_count_(1), handler_(nullptr) {
-        {
-            std::lock_guard<std::mutex> lock(g_state_mutex);
-            if (g_last_created_state) {
-                state_ = g_last_created_state;
-            } else {
-                state_ = std::make_shared<SharedPluginState>();
-            }
-        }
-    }
+        : ref_count_(1), handler_(nullptr), state_(std::make_shared<SharedPluginState>()) {}
+
 
     virtual ~MonkeysEarController() = default;
 
@@ -477,10 +526,19 @@ public:
         if (paramIndex < 0 || paramIndex >= kNumParams) return kInvalidArgument;
 
         info.id = static_cast<ParamID>(paramIndex);
-        info.stepCount = (paramIndex==82||paramIndex==113)?1:((paramIndex>=101&&paramIndex<=112&&((paramIndex-101)%3)<2)?7:0);
+        info.stepCount = (paramIndex==79)?7
+            : (paramIndex==82||paramIndex==113||paramIndex==124||paramIndex==125||paramIndex==128||paramIndex==169)?1
+            : (paramIndex>=129&&paramIndex<=160&&((paramIndex-129)%8)==0)?1
+            : (paramIndex>=129&&paramIndex<=160&&((paramIndex-129)%8)==1)?monkeys_ear::kTubeFlavorCount-1
+            : paramIndex==171?11
+            : ((paramIndex>=101&&paramIndex<=112&&((paramIndex-101)%3)<2)?7:0);
         info.unitId = 0;
         info.flags = (paramIndex==80||paramIndex==81) ? (kIsHidden|kIsReadOnly) : kCanAutomate;
-        info.defaultNormalizedValue = state_ ? state_->params[paramIndex].load() : 0.5;
+        // New controls have stable factory defaults, not a moving snapshot
+        // of the last control value. Existing ID metadata is left compatible.
+        static const SharedPluginState defaults(false);
+        info.defaultNormalizedValue = paramIndex>=124?defaults.params[paramIndex].load()
+            :(state_ ? state_->params[paramIndex].load() : 0.5);
 
         static const char* titles[kNumParams] = {
             "Macro 1: Brightness (Cutoff)",
@@ -515,16 +573,48 @@ public:
             "VOCAL: Enable", "VOCAL: Correction Strength", "VOCAL: Drift Retention", "VOCAL: Vibrato Retention", "VOCAL: Transition", "VOCAL: Envelope Repair", "VOCAL: Spectral Residual", "VOCAL: Character", "VOCAL: Mix", "VOCAL: Soft Sequential Staging", "VOCAL: Aperiodic Protection"
         };
 
-        copy_to_char16(info.title, titles[paramIndex], 128);
-        copy_to_char16(info.shortTitle, titles[paramIndex], 128);
-        copy_to_char16(info.units, "%", 128);
+        char title[96]{};
+        if(paramIndex>=124 && paramIndex<=128){
+            constexpr const char* kGlobal[]={"RACK: Enable","RACK: Parallel Pairs","RACK: Shared Supply","RACK: Output","RACK: Anti-alias"};
+            std::snprintf(title,sizeof(title),"%s",kGlobal[paramIndex-124]);
+        } else if(paramIndex>=129 && paramIndex<=160){
+            constexpr const char* kFields[]={"Enable","Tube Type","Drive","Bias","Plate Load","Cathode Sag","Coupling","Mix"};
+            const int slot=(paramIndex-129)/8,field=(paramIndex-129)%8;
+            std::snprintf(title,sizeof(title),"TUBE %d: %s",slot+1,kFields[field]);
+        } else if(paramIndex>=161 && paramIndex<=168){
+            constexpr const char* kEnvelopes[]={"AMP: Attack","AMP: Decay","AMP: Sustain","AMP: Release","FILTER ENV: Attack","FILTER ENV: Decay","FILTER ENV: Sustain","FILTER ENV: Release"};
+            std::snprintf(title,sizeof(title),"%s",kEnvelopes[paramIndex-161]);
+        } else if(paramIndex>=169){
+            constexpr const char* kTiming[]={"LFO: Tempo Sync","LFO: Tempo BPM","LFO: Subdivision"};
+            std::snprintf(title,sizeof(title),"%s",kTiming[paramIndex-169]);
+        } else {
+            std::snprintf(title,sizeof(title),"%s",titles[paramIndex]);
+        }
+        copy_to_char16(info.title,title,128);
+        copy_to_char16(info.shortTitle,title,128);
+        copy_to_char16(info.units,(paramIndex==170?"BPM":(paramIndex>=161&&paramIndex<=168&&paramIndex!=163&&paramIndex!=167)?"s":paramIndex>=124?"":"%"),128);
 
         return kResultOk;
     }
 
     tresult SMTG_STDCALL getParamStringByValue(ParamID id, ParamValue valueNormalized, char16 string[128]) override {
         char buf[64];
-        if (id == 0) {
+        if(id>=129&&id<=160&&((id-129)%8)==1){
+            int type=std::clamp(static_cast<int>(valueNormalized*monkeys_ear::kTubeFlavorCount),0,monkeys_ear::kTubeFlavorCount-1);
+            snprintf(buf,sizeof(buf),"%s",monkeys_ear::kTubeFlavorNames[type]);
+        }else if(id==124||id==128||id==169){
+            snprintf(buf,sizeof(buf),"%s",valueNormalized>=.5?"On":"Off");
+        }else if(id==125){
+            snprintf(buf,sizeof(buf),"%s",valueNormalized>=.5?"Two parallel pairs":"Four in series");
+        }else if(id==171){
+            static const char* divs[]={"4 bars","2 bars","1 bar","1/2","1/4","1/8","1/16","1/32","1/4 triplet","1/8 triplet","1/8 dotted","1/16 dotted"};
+            snprintf(buf,sizeof(buf),"%s",divs[std::clamp(static_cast<int>(valueNormalized*12.0),0,11)]);
+        }else if(id==170){
+            snprintf(buf,sizeof(buf),"%.1f BPM",40.0+200.0*valueNormalized);
+        }else if(id>=161&&id<=168&&(id!=163&&id!=167)){
+            const double seconds=.001+6.0*valueNormalized*valueNormalized;
+            snprintf(buf,sizeof(buf),seconds<1.0?"%.0f ms":"%.2f s",seconds<1.0?seconds*1000.0:seconds);
+        }else if(id==0) {
             float hz = 40.0f * std::pow(450.0f, static_cast<float>(valueNormalized));
             snprintf(buf, sizeof(buf), "%.1f Hz", hz);
         } else if (id == 8) {
@@ -546,8 +636,10 @@ public:
             const char* modes[] = {"Synth Only", "Hybrid Blend", "External Audio"};
             snprintf(buf, sizeof(buf), "%s", (m >= 0 && m <= 2) ? modes[m] : "Synth");
         } else if (id == 79) {
-            int p=static_cast<int>(valueNormalized*3.99); const char* names[]={"Current","MONOLITH","FERAL WOBBLE","VELVET LEAD"};
-            snprintf(buf,sizeof(buf),"%s",names[std::clamp(p,0,3)]);
+            int p=std::clamp(static_cast<int>(valueNormalized*8.0),0,7);
+            const char* names[]={"Current","MONOLITH","FERAL WOBBLE","VELVET LEAD",
+                "TUBE FOUNDRY","CLOCKWORK SUB","GLASS CHAMBER","SOUND SPACE"};
+            snprintf(buf,sizeof(buf),"%s",names[p]);
         } else if(id>=83&&id<=85){snprintf(buf,sizeof(buf),"%.1f cents",valueNormalized*100.0);}
         else if(id==86){snprintf(buf,sizeof(buf),"%.2f Hz",.02f*std::pow(1000.0f,static_cast<float>(valueNormalized)));}
         else if(id==97){snprintf(buf,sizeof(buf),"%.1f dB",valueNormalized*18.0);}
@@ -684,7 +776,7 @@ public:
     int32 SMTG_STDCALL countClasses() override {
         // Class 0: Instrument Component (VST3i: 0 audio in, 2 audio out, MIDI in)
         // Class 1: Audio FX Processor (VST3: 2 audio in, 2 audio out, MIDI in)
-        // Class 2: Edit Controller (All 19 parameters)
+        // Class 2: Edit Controller (172 stable, grouped instrument parameters)
         return 3;
     }
 
@@ -777,17 +869,10 @@ private:
     std::atomic<uint32> ref_count_;
 };
 
-static MonkeysEarFactory* g_factory = nullptr;
-
 extern "C" {
 
 SMTG_EXPORT_SYMBOL IPluginFactory* SMTG_STDCALL GetPluginFactory() {
-    if (!g_factory) {
-        g_factory = new MonkeysEarFactory();
-    } else {
-        g_factory->addRef();
-    }
-    return g_factory;
+    return new MonkeysEarFactory();
 }
 
 #if defined(_WIN32)

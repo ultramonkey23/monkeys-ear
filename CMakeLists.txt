@@ -15,6 +15,7 @@ add_library(monkeys_ear_core STATIC
     src/voice.cpp
     src/filter.cpp
     src/drive_tube.cpp
+    src/tube_rack.cpp
     src/resonator_cab.cpp
     src/delay.cpp
     src/fdn_reverb.cpp
@@ -41,6 +42,11 @@ target_include_directories(monkeys_ear_core PUBLIC
 add_executable(monkeys_ear_test_runner test/test_dsp_core.cpp)
 target_include_directories(monkeys_ear_test_runner PRIVATE ${CMAKE_CURRENT_SOURCE_DIR}/test)
 target_link_libraries(monkeys_ear_test_runner PRIVATE monkeys_ear_core)
+
+# The four-tube rack is product DSP. Run its focused tests in addition to
+# the whole-engine suite, not as a disconnected prototype executable.
+add_executable(monkeys_ear_tube_rack_probe test/test_tube_rack.cpp)
+target_link_libraries(monkeys_ear_tube_rack_probe PRIVATE monkeys_ear_core)
 
 # Small isolated characterization harness for the pitch evidence layer. Keep it
 # separate from the large DSP suite so adversarial tracker work stays bounded.

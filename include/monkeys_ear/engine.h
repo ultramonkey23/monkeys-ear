@@ -4,6 +4,7 @@
 #include "monkeys_ear/voice.h"
 #include "monkeys_ear/filter.h"
 #include "monkeys_ear/drive_tube.h"
+#include "monkeys_ear/tube_rack.h"
 #include "monkeys_ear/resonator_cab.h"
 #include "monkeys_ear/delay.h"
 #include "monkeys_ear/fdn_reverb.h"
@@ -86,7 +87,8 @@ private:
     ParametricEQ eq_;
     ExternalSubharmonic external_sub_;
     SoundSpaceProcessor sound_space_;
-    TubeDriveStage drive_tube_;
+    TubeDriveStage drive_tube_; // exact legacy path for older patches
+    TubeRack tube_rack_;        // same filter -> cabinet insertion, no DSP fork
     CabinetResonator resonator_cab_;
     StereoDelay delay_;
     FDNReverb fdn_reverb_;

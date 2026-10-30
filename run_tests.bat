@@ -28,6 +28,7 @@ rem Every expected executable is mandatory. The previous "if exist" pattern
 rem could silently skip a missing Vocal host probe and still print ALL PASS.
 for %%T in (
     monkeys_ear_test_runner
+    monkeys_ear_tube_rack_probe
     monkeys_ear_host_probe
     monkeys_ear_vocal_host_probe
     monkeys_ear_vocal_target_chain_probe

@@ -17,14 +17,14 @@
       "history": "research/pitch-correction/RESEARCH_HISTORY.md",
       "evidence_level": "SYNTHETIC_MEASURED",
       "product_integration": "PRODUCT_CHAIN_SYNTHETIC_DRIVEN_20261011",
-            "local_source_audit": "research/pitch-correction/LOCAL_SOURCE_AUDIT_20261011.md",
-            "product_chain_probe": "test/test_vocal_target_chain_probe.cpp",
-            "detector_octave_continuity": "research/pitch-correction/experiments/detector_octave_continuity_v1.py",
-            "detector_octave_continuity_evidence": "SYNTHETIC 2026-10-11: register-scoped octave hysteresis + V/UV hangover; resync passes jump retention, strict fails it informatively; MPM strong-2nd-harmonic persistent bias survives all layers (needs harmonic evidence)",
-            "detector_octave_harmonic": "research/pitch-correction/experiments/detector_octave_harmonic_v1.py",
-            "detector_octave_harmonic_evidence": "SYNTHETIC 2026-10-11: harmonic-evidence register choice (lowest octave candidate whose fundamental is visibly present, VIS_FLOOR 5% of band max) fixes MPM strong-2nd-harmonic persistent bias 1202.9c -> 2.89c with no jump-retention or vibrato cost; costs ~1 register flip per gap episode at onset re-entry (persistence-gated evidence hybrid is next evidence)",
-            "detector_octave_persistence": "research/pitch-correction/experiments/detector_octave_persistence_v1.py",
-            "detector_octave_persistence_evidence": "SYNTHETIC 2026-10-11: persistence-gated evidence adoption (register changes only after N consecutive identical claims) keeps the 2.89c bias repair (1202.89c -> 2.89c at N=2/3/5); declared primary N=3 falsified for onset slips (still ~1.25/s; N=2 worse), sensitivity N=5 removes all gap-episode slips (0.0) with jump/vibrato unchanged; v1 cost-competition+gate variant (preserved) never repaired the bias — one authority per decision; repair move counts 1 legit register delta (0.573/s) on biased corpus"
+      "local_source_audit": "research/pitch-correction/LOCAL_SOURCE_AUDIT_20261011.md",
+      "product_chain_probe": "test/test_vocal_target_chain_probe.cpp",
+      "detector_octave_continuity": "research/pitch-correction/experiments/detector_octave_continuity_v1.py",
+      "detector_octave_continuity_evidence": "SYNTHETIC 2026-10-11: register-scoped octave hysteresis + V/UV hangover; resync passes jump retention, strict fails it informatively; MPM strong-2nd-harmonic persistent bias survives all layers (needs harmonic evidence)",
+      "detector_octave_harmonic": "research/pitch-correction/experiments/detector_octave_harmonic_v1.py",
+      "detector_octave_harmonic_evidence": "SYNTHETIC 2026-10-11: harmonic-evidence register choice (lowest octave candidate whose fundamental is visibly present, VIS_FLOOR 5% of band max) fixes MPM strong-2nd-harmonic persistent bias 1202.9c -> 2.89c with no jump-retention or vibrato cost; costs ~1 register flip per gap episode at onset re-entry (persistence-gated evidence hybrid is next evidence)",
+      "detector_octave_persistence": "research/pitch-correction/experiments/detector_octave_persistence_v1.py",
+      "detector_octave_persistence_evidence": "SYNTHETIC 2026-10-11: persistence-gated evidence adoption (register changes only after N consecutive identical claims) keeps the 2.89c bias repair (1202.89c -> 2.89c at N=2/3/5); declared primary N=3 falsified for onset slips (still ~1.25/s; N=2 worse), sensitivity N=5 removes all gap-episode slips (0.0) with jump/vibrato unchanged; v1 cost-competition+gate variant (preserved) never repaired the bias — one authority per decision; repair move counts 1 legit register delta (0.573/s) on biased corpus"
     }
   },
   "shared": {
@@ -60,5 +60,32 @@
       "packaging/package_voice_vocal.ps1"
     ],
     "claim_ceiling": "Native product source, VST3 wrappers, test harness and packaging paths exist. Full historical local import, current native build, live REAPER use and musical acceptance were not proven by this inspection."
+  },
+  "integration_recovery": {
+    "updated_at": "2026-10-30",
+    "interpretation": "Research candidates remain versioned evidence; executable standalone code cannot silently be presented as a shipped synth capability. This register is not a substitute for live source/runtime checks.",
+    "definite_external_unintegrated_artifacts_at_audit": 1,
+    "four_tube_rack": {
+      "previous": "Standalone conversation ZIP and WAV renders; absent from canonical Monkey's Ear core at audit baseline 597debce",
+      "source_after_this_wave": "PRODUCT_SOURCE_INTEGRATED_PENDING_WHOLE_ENGINE_HOST_PROOF",
+      "paths": [
+        "include/monkeys_ear/tube_rack.h",
+        "src/tube_rack.cpp",
+        "include/monkeys_ear/preset.h",
+        "src/preset.cpp",
+        "src/engine.cpp",
+        "vst3/vst3_entry.cpp",
+        "test/test_tube_rack.cpp"
+      ],
+      "source_choices": 14,
+      "caveat": "Real hardware tube calibration, native full-suite Windows/REAPER and artist listening remain unverified."
+    },
+    "existing_research_families": {
+      "onion_skin_eq": "RESEARCH_EXECUTABLE_NOT_IN_PRODUCT_DSP. Product has existing parametric EQ, but not all proposed onion-skin dynamics. Six named Python scripts are research variants, not six released effects.",
+      "pitch_correction": "PARTIAL_PRODUCT_CHAIN: target/resynthesis integrated and target chain probe exists; detector octave candidate studies remain independent research. Nine Python experiment scripts should not be counted as nine finished plugins.",
+      "quality_experiments": "RESEARCH_REFERENCE_ONLY: one Python suite explores interpolation, quantization and ADAA baselines; no standalone playable module to ship.",
+      "listening_kit": "OFFLINE_WORKFLOW_TOOL_WITH_REAL_CONSUMER: deliberately outside real-time DSP and useful as blind comparison infrastructure."
+    },
+    "unknowns": "Previous separately maintained local implementation and active agent worktree were not accessible; the count is a verified lower bound, not portfolio-wide exhaustiveness."
   }
 }

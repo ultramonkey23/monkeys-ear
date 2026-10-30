@@ -3,6 +3,7 @@
 #include "monkeys_ear/types.h"
 #include "monkeys_ear/sound_space.h"
 #include "monkeys_ear/audio_input.h"
+#include "monkeys_ear/tube_rack.h"
 #include <string>
 #include <array>
 #include <cstring>
@@ -125,6 +126,14 @@ struct PresetData {
     // Appended vocal expression state preserves every legacy preset field.
     VocalExpressionControls vocal_expression;
 
+    // Four tube positions within the same instrument patch, off for old presets.
+    TubeRackControls tube_rack;
+
+    // Optional musical-tempo subdivisions of the existing LFO (free Hz retained).
+    bool lfo_tempo_sync = false;
+    float tempo_bpm = 120.0f;
+    int lfo_subdivision = 4;
+
     PresetData();
     std::string serialize() const;
     bool deserialize(const std::string& data);
@@ -150,6 +159,9 @@ public:
     static PresetData create_feral_wobble();
     static PresetData create_velvet_lead();
     static PresetData create_sound_space();
+    static PresetData create_tube_foundry();
+    static PresetData create_clockwork_sub();
+    static PresetData create_glass_chamber();
 
     PresetData& mutable_current() { return current_; }
 

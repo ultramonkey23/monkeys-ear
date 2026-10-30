@@ -77,13 +77,38 @@ int main() {
     CHECK_STAGE(factory2->getClassInfo2(2,&info2)==kResultOk,"read controller class info");
     IEditController* controller=nullptr; res=factory2->createInstance(info2.cid,IEditController_iid,(void**)&controller);
     CHECK_STAGE(res==kResultOk && controller!=nullptr,"create edit controller");
-    CHECK_STAGE(controller->getParameterCount()==124,"controller exposes 124 parameters");
-    for(int32 i=0;i<124;++i){ParameterInfo pInfo{};CHECK_STAGE(controller->getParameterInfo(i,pInfo)==kResultOk,"read parameter info");}
+    CHECK_STAGE(controller->getParameterCount()==172,"controller exposes 172 stable host parameters");
+    for(int32 i=0;i<172;++i){ParameterInfo pInfo{};CHECK_STAGE(controller->getParameterInfo(i,pInfo)==kResultOk,"read parameter info");}
 
     MemoryStream state_stream;
     CHECK_STAGE(fx_comp->getState(&state_stream)==kResultOk,"serialize FX state");
-    CHECK_STAGE(state_stream.bytes.size()==12u+124u*sizeof(float),"serialized state size");
+    CHECK_STAGE(state_stream.bytes.size()==12u+172u*sizeof(float),"serialized state size");
     state_stream.pos=0; CHECK_STAGE(controller->setComponentState(&state_stream)==kResultOk,"controller accepts component state");
+    ParameterInfo tube_type{},amp_sustain{},division{};
+    CHECK_STAGE(controller->getParameterInfo(154,tube_type)==kResultOk && tube_type.stepCount==13,
+                "tube 4 exposes all 14 types with correct enum metadata");
+    CHECK_STAGE(controller->getParameterInfo(163,amp_sustain)==kResultOk &&
+                controller->getParameterInfo(171,division)==kResultOk && division.stepCount==11,
+                "host exposes sustain and 12 rhythmic divisions");
+    // Controller created after both components must NOT bind implicitly to
+    // the last component; otherwise this edit changes FX without host routing.
+    CHECK_STAGE(controller->setParamNormalized(124,1.0)==kResultOk,"edit controller-local tube enable");
+    MemoryStream a_state,b_state;
+    CHECK_STAGE(instr_comp->getState(&a_state)==kResultOk && fx_comp->getState(&b_state)==kResultOk,
+                "serialize instrument and FX instances independently");
+    float a_enabled=99.f,b_enabled=99.f;
+    std::memcpy(&a_enabled,a_state.bytes.data()+12u+124u*sizeof(float),sizeof(float));
+    std::memcpy(&b_enabled,b_state.bytes.data()+12u+124u*sizeof(float),sizeof(float));
+    CHECK_STAGE(a_enabled==0.f&&b_enabled==0.f,
+                "controller edit never leaks to an unrelated component");
+    MemoryStream legacy;
+    legacy.bytes=state_stream.bytes;legacy.bytes.resize(12u+124u*sizeof(float));
+    const uint32 legacy_version=3,legacy_count=124;
+    std::memcpy(legacy.bytes.data()+4,&legacy_version,4);
+    std::memcpy(legacy.bytes.data()+8,&legacy_count,4);
+    CHECK_STAGE(instr_comp->setState(&legacy)==kResultOk,"read legacy v3 host snapshot without new rack fields");
+    MemoryStream migrated;CHECK_STAGE(instr_comp->getState(&migrated)==kResultOk &&
+        migrated.bytes.size()==12u+172u*sizeof(float),"legacy snapshot migrated with appended controls");
     IMidiMapping* midi_map=nullptr; CHECK_STAGE(controller->queryInterface(IMidiMapping_iid,(void**)&midi_map)==kResultOk && midi_map!=nullptr,"controller exposes MIDI mapping");
     ParamID bend_id=0,pressure_id=0;
     CHECK_STAGE(midi_map->getMidiControllerAssignment(0,0,129,bend_id)==kResultOk && bend_id==80,"pitch-bend mapping");
@@ -104,6 +129,10 @@ int main() {
     float* in_channels[]={in_l.data(),in_r.data()}; float* out_channels[]={out_l.data(),out_r.data()}; AudioBusBuffers inBuses[1]{}; inBuses[0].numChannels=2; inBuses[0].channelBuffers32=in_channels; AudioBusBuffers outBuses[1]{}; outBuses[0].numChannels=2; outBuses[0].channelBuffers32=out_channels;
     ProcessData data{}; data.numSamples=N; data.numInputs=1; data.inputs=inBuses; data.numOutputs=1; data.outputs=outBuses; CHECK_STAGE(fx_proc->process(data)==kResultOk,"process FX audio"); float max_val=0; for(float v:out_l)max_val=std::max(max_val,std::abs(v)); CHECK_STAGE(max_val>.01f,"FX produces audio");
 
-    fx_comp->setActive(false); fx_proc->release(); fx_comp->release(); instr_comp->release(); controller->release(); factory2->release(); factory->release(); FreeLibrary(hMod);
+    fx_comp->setActive(false); fx_proc->release(); fx_comp->release(); instr_comp->release(); controller->release(); factory2->release(); factory->release();
+    IPluginFactory* fresh=getFactory();
+    CHECK_STAGE(fresh!=nullptr && fresh->countClasses()==3,"factory export survives full reference release");
+    fresh->release();
+    FreeLibrary(hMod);
     std::cout<<">>> ALL VST3 HOST BINARY CHECKS PASSED! <<<\n"; return 0;
 }
