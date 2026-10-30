@@ -190,11 +190,12 @@ private:
     template<class A,class B> tresult class_info(int32 i,A* a,B* b){if(i<0||i>1)return kInvalidArgument;auto cid=i==0?kVocalComponentCID:kVocalControllerCID;const char* name=i==0?"Monkey's Ear Vocal":"Monkey's Ear Vocal Controller";if(a){std::memcpy(a->cid,cid,sizeof(TUID));a->cardinality=0x7fffffff;std::strncpy(a->category,i==0?"Audio Module Class":"Component Controller Class",sizeof(a->category)-1);std::strncpy(a->name,name,sizeof(a->name)-1);}if(b){std::memcpy(b->cid,cid,sizeof(TUID));b->cardinality=0x7fffffff;std::strncpy(b->category,i==0?"Audio Module Class":"Component Controller Class",sizeof(b->category)-1);std::strncpy(b->name,name,sizeof(b->name)-1);b->classFlags=0;std::strncpy(b->subCategories,i==0?"Fx|Pitch Shift":"",sizeof(b->subCategories)-1);std::strncpy(b->vendor,"Ultramonkeydog Studios",sizeof(b->vendor)-1);std::strncpy(b->version,monkeys_ear::kVocalProductVersion,sizeof(b->version)-1);std::strncpy(b->sdkVersion,"VST 3.7.0",sizeof(b->sdkVersion)-1);}return kResultOk;}
     std::atomic<uint32> ref_;
 };
-VocalFactory* g_factory=nullptr;
 } // namespace
 
 extern "C" {
-SMTG_EXPORT_SYMBOL IPluginFactory* SMTG_STDCALL GetPluginFactory(){if(!g_factory)g_factory=new VocalFactory();else g_factory->addRef();return g_factory;}
+// Each factory has its own COM reference lifetime. A global factory pointer
+// survives release() as a dangling pointer and races concurrent host loads.
+SMTG_EXPORT_SYMBOL IPluginFactory* SMTG_STDCALL GetPluginFactory(){return new VocalFactory();}
 #if defined(_WIN32)
 BOOL APIENTRY DllMain(HMODULE,DWORD,LPVOID){return TRUE;}
 #endif
