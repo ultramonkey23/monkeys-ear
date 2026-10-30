@@ -256,6 +256,32 @@ struct AudioBusBuffers {
     };
 };
 
+// Host transport context from the VST3 process-data ABI. Fields retain the
+// public SDK's order and native 8-byte alignment (including optional tail).
+struct ProcessContext {
+    enum Flags : uint32 {
+        kPlaying=1u<<1,
+        kProjectTimeMusicValid=1u<<9,
+        kTempoValid=1u<<10
+    };
+    uint32 state=0;
+    double sampleRate=48000.0;
+    int64 projectTimeSamples=0;
+    int64 systemTime=0;
+    int64 continousTimeSamples=0;
+    double projectTimeMusic=0.0;
+    double barPositionMusic=0.0;
+    double cycleStartMusic=0.0;
+    double cycleEndMusic=0.0;
+    double tempo=120.0;
+    int32 timeSigNumerator=4;
+    int32 timeSigDenominator=4;
+    struct Chord { uint8_t keyNote=0,rootNote=0; int16_t chordMask=0; } chord;
+    int32 smpteOffsetSubframes=0;
+    struct FrameRate { uint32 framesPerSecond=0,flags=0; } frameRate;
+    int32 samplesToNextClock=0;
+};
+
 struct ProcessData {
     int32 processMode;
     int32 symbolicSampleSize;
@@ -338,6 +364,37 @@ public:
 
 // IEditController IID: DCD7BBE3-7742448D-A874AACC-979C759E
 static const TUID IEditController_iid = INLINE_UID(0xDCD7BBE3, 0x7742448D, 0xA874AACC, 0x979C759E);
+
+// VST3 IUnitInfo extension: expose a host-native control hierarchy.
+using UnitID=int32;
+using ProgramListID=int32;
+struct UnitInfo {
+    UnitID id;
+    UnitID parentUnitId;
+    char16 name[128];
+    ProgramListID programListId;
+};
+struct ProgramListInfo {
+    ProgramListID id;
+    char16 name[128];
+    int32 programCount;
+};
+class IUnitInfo : public FUnknown {
+public:
+    virtual int32 SMTG_STDCALL getUnitCount()=0;
+    virtual tresult SMTG_STDCALL getUnitInfo(int32 unitIndex,UnitInfo& info)=0;
+    virtual int32 SMTG_STDCALL getProgramListCount()=0;
+    virtual tresult SMTG_STDCALL getProgramListInfo(int32 listIndex,ProgramListInfo& info)=0;
+    virtual tresult SMTG_STDCALL getProgramName(ProgramListID listId,int32 programIndex,char16 name[128])=0;
+    virtual tresult SMTG_STDCALL getProgramInfo(ProgramListID listId,int32 programIndex,const char8* attributeId,char16 value[128])=0;
+    virtual tresult SMTG_STDCALL hasProgramPitchNames(ProgramListID listId,int32 programIndex)=0;
+    virtual tresult SMTG_STDCALL getProgramPitchName(ProgramListID listId,int32 programIndex,int16_t midiPitch,char16 name[128])=0;
+    virtual UnitID SMTG_STDCALL getSelectedUnit()=0;
+    virtual tresult SMTG_STDCALL selectUnit(UnitID unitId)=0;
+    virtual tresult SMTG_STDCALL getUnitByBus(MediaType type,BusDirection dir,int32 busIndex,int32 channel,UnitID& unitId)=0;
+    virtual tresult SMTG_STDCALL setUnitProgramData(int32 listOrUnitId,int32 programIndex,IBStream* data)=0;
+};
+static const TUID IUnitInfo_iid=INLINE_UID(0x3D4BD6B5,0x913A4FD2,0xA886E768,0xA5EB92C1);
 
 class IMidiMapping : public FUnknown {
 public:

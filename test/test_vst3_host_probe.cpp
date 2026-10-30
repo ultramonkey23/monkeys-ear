@@ -108,12 +108,12 @@ int main() {
     CHECK_STAGE(factory2->getClassInfo2(2,&info2)==kResultOk,"read controller class info");
     IEditController* controller=nullptr; res=factory2->createInstance(info2.cid,IEditController_iid,(void**)&controller);
     CHECK_STAGE(res==kResultOk && controller!=nullptr,"create edit controller");
-    CHECK_STAGE(controller->getParameterCount()==174,"controller exposes 174 stable host parameters");
-    for(int32 i=0;i<174;++i){ParameterInfo pInfo{};CHECK_STAGE(controller->getParameterInfo(i,pInfo)==kResultOk,"read parameter info");}
+    CHECK_STAGE(controller->getParameterCount()==176,"controller exposes 176 stable host parameters");
+    for(int32 i=0;i<176;++i){ParameterInfo pInfo{};CHECK_STAGE(controller->getParameterInfo(i,pInfo)==kResultOk,"read parameter info");}
 
     MemoryStream state_stream;
     CHECK_STAGE(fx_comp->getState(&state_stream)==kResultOk,"serialize FX state");
-    CHECK_STAGE(state_stream.bytes.size()==12u+174u*sizeof(float),"serialized state size");
+    CHECK_STAGE(state_stream.bytes.size()==12u+176u*sizeof(float),"serialized state size");
     state_stream.pos=0; CHECK_STAGE(controller->setComponentState(&state_stream)==kResultOk,"controller accepts component state");
     ParameterInfo tube_type{},amp_sustain{},division{};
     CHECK_STAGE(controller->getParameterInfo(154,tube_type)==kResultOk && tube_type.stepCount==13,
@@ -121,6 +121,27 @@ int main() {
     CHECK_STAGE(controller->getParameterInfo(163,amp_sustain)==kResultOk &&
                 controller->getParameterInfo(171,division)==kResultOk && division.stepCount==11,
                 "host exposes envelope sustain and 12 rhythmic divisions");
+    ParameterInfo clock{},groove{};
+    CHECK_STAGE(controller->getParameterInfo(174,clock)==kResultOk &&
+                clock.stepCount==1 && clock.unitId==5 &&
+                controller->getParameterInfo(175,groove)==kResultOk &&
+                groove.unitId==5,
+                "rhythm host clock and groove live in one discoverable unit");
+
+    IUnitInfo* units=nullptr;
+    CHECK_STAGE(controller->queryInterface(IUnitInfo_iid,(void**)&units)==kResultOk && units!=nullptr,
+                "host can request VST3 instrument subsystem tree");
+    CHECK_STAGE(units->getUnitCount()==15,"15 meaningful native host units");
+    UnitInfo root{},tubeRack{},tube1{},tube4{};
+    CHECK_STAGE(units->getUnitInfo(0,root)==kResultOk && root.id==0 && root.parentUnitId==-1 &&
+                units->getUnitInfo(9,tubeRack)==kResultOk && tubeRack.parentUnitId==0 &&
+                units->getUnitInfo(10,tube1)==kResultOk && tube1.parentUnitId==9 &&
+                units->getUnitInfo(13,tube4)==kResultOk && tube4.parentUnitId==9,
+                "four tubes nested within rack instead of 32 ungrouped sliders");
+    CHECK_STAGE(units->getProgramListCount()==0,"unit tree does not advertise fake program data");
+    CHECK_STAGE(units->selectUnit(5)==kResultOk && units->getSelectedUnit()==5,
+                "host can navigate to rhythm subgroup");
+    units->release();
     ParameterInfo old_patch{},new_patch{},pedal{};
     CHECK_STAGE(controller->getParameterInfo(79,old_patch)==kResultOk && old_patch.stepCount==3 &&
                 controller->getParameterInfo(173,new_patch)==kResultOk && new_patch.stepCount==7 &&
@@ -139,6 +160,11 @@ int main() {
                 typed>.25&&typed<.50,"legacy preset editor keeps old name/value");
     CHECK_STAGE(controller->getParamValueByString(173,u"not a preset",typed)!=kResultOk,
                 "invalid typed selector does not silently become midpoint");
+    CHECK_STAGE(controller->getParamValueByString(174,u"On",typed)==kResultOk && typed==1.0,
+                "typed host tempo follows normal switch semantics");
+    CHECK_STAGE(controller->getParamValueByString(175,u"72%",typed)==kResultOk &&
+                std::abs(typed-.72)<1e-8,
+                "groove accepts a readable percent input");
     CHECK_STAGE(controller->setParamNormalized(173,std::numeric_limits<double>::quiet_NaN())==kInvalidArgument,
                 "reject invalid controller automation");
     // Controller created after both components must NOT bind implicitly to
@@ -161,7 +187,7 @@ int main() {
     std::memcpy(legacy.bytes.data()+8,&legacy_count,4);
     CHECK_STAGE(instr_comp->setState(&legacy)==kResultOk,"read legacy v3 host snapshot without new rack fields");
     MemoryStream migrated;CHECK_STAGE(instr_comp->getState(&migrated)==kResultOk &&
-        migrated.bytes.size()==12u+174u*sizeof(float),"legacy snapshot migrated with appended controls");
+        migrated.bytes.size()==12u+176u*sizeof(float),"legacy snapshot migrated with appended controls");
     IMidiMapping* midi_map=nullptr; CHECK_STAGE(controller->queryInterface(IMidiMapping_iid,(void**)&midi_map)==kResultOk && midi_map!=nullptr,"controller exposes MIDI mapping");
     ParamID bend_id=0,pressure_id=0;
     CHECK_STAGE(midi_map->getMidiControllerAssignment(0,0,129,bend_id)==kResultOk && bend_id==80,"pitch-bend mapping");
@@ -175,7 +201,13 @@ int main() {
     CHECK_STAGE(instr_proc->setupProcessing(instr_setup)==kResultOk,"instrument setupProcessing"); CHECK_STAGE(instr_comp->setActive(true)==kResultOk,"activate instrument");
     std::vector<float> instr_l(128),instr_r(128); float* instr_channels[]={instr_l.data(),instr_r.data()}; AudioBusBuffers instr_out{}; instr_out.numChannels=2; instr_out.channelBuffers32=instr_channels;
     OneEventList notes; notes.event.type=kNoteOnEvent; notes.event.noteOn.pitch=48; notes.event.noteOn.velocity=.9f;
-    ProcessData instr_data{}; instr_data.numSamples=128; instr_data.numOutputs=1; instr_data.outputs=&instr_out; instr_data.inputEvents=&notes;
+    ProcessContext context{};
+    context.state=ProcessContext::kTempoValid | ProcessContext::kProjectTimeMusicValid | ProcessContext::kPlaying;
+    context.tempo=97.0;
+    context.projectTimeMusic=5.25;
+    ProcessData instr_data{}; instr_data.numSamples=128; instr_data.numOutputs=1;
+    instr_data.outputs=&instr_out; instr_data.inputEvents=&notes;
+    instr_data.processContext=&context;
     CHECK_STAGE(instr_proc->process(instr_data)==kResultOk,"process instrument note"); float instr_peak=0; for(float v:instr_l)instr_peak=std::max(instr_peak,std::abs(v)); CHECK_STAGE(instr_peak>.001f,"instrument produces audio");
     instr_comp->setActive(false); // clears held voices and effect tails
     CHECK_STAGE(instr_comp->setActive(true)==kResultOk,"reactivate reset instrument");

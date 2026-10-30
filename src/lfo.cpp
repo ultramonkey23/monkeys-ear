@@ -1,6 +1,8 @@
 #include "monkeys_ear/lfo.h"
 #include <cmath>
 #include <algorithm>
+#include <bit>
+#include <cstdint>
 
 namespace monkeys_ear {
 
@@ -35,6 +37,11 @@ void LFO::set_waveform(LFOWaveform wf) {
     waveform_ = wf;
 }
 
+void LFO::set_swing(float amount) {
+    const auto bits=std::bit_cast<std::uint32_t>(amount);
+    swing_=(bits&0x7f800000u)==0x7f800000u?0.0f:clamp(amount,0.0f,1.0f);
+}
+
 void LFO::reset_phase(float phase) {
     phase_ = std::fmod(phase, 1.0f);
     if (phase_ < 0.0f) phase_ += 1.0f;
@@ -51,22 +58,27 @@ float LFO::next_random() {
 
 float LFO::process() {
     float raw = 0.0f;
-
+    // Groove stretches the first half-cycle while preserving one event per beat.
+    // Sample-and-hold keeps its existing one-random-value-per-cycle behavior.
+    const float pivot=0.5f+0.25f*swing_;
+    const float warped=phase_<pivot
+        ? 0.5f*phase_/pivot
+        : 0.5f+0.5f*(phase_-pivot)/(1.0f-pivot);
     switch (waveform_) {
         case LFOWaveform::Sine:
-            raw = std::sin(phase_ * TWO_PI);
+            raw = std::sin(warped * TWO_PI);
             break;
 
         case LFOWaveform::Triangle:
-            raw = 1.0f - 4.0f * std::abs(std::round(phase_ - 0.25f) - (phase_ - 0.25f));
+            raw = 1.0f - 4.0f * std::abs(std::round(warped - 0.25f) - (warped - 0.25f));
             break;
 
         case LFOWaveform::Saw:
-            raw = 2.0f * phase_ - 1.0f;
+            raw = 2.0f * warped - 1.0f;
             break;
 
         case LFOWaveform::Square:
-            raw = (phase_ < 0.5f) ? 1.0f : -1.0f;
+            raw = (warped < 0.5f) ? 1.0f : -1.0f;
             break;
 
         case LFOWaveform::SampleAndHold:

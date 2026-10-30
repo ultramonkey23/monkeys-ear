@@ -1,4 +1,5 @@
 #include "monkeys_ear/engine.h"
+#include "monkeys_ear/lfo.h"
 #include "monkeys_ear/chrono_state.h"
 #include "monkeys_ear/vocal_module.h"
 #include "wav_writer.h"
@@ -443,6 +444,75 @@ void test_multipass_filter_and_eq() {
 
 // Real instrument performance, not a standalone demo: sustain controls
 // existing voice envelopes and the two patch selectors retain their meaning.
+void test_host_clock_and_groove_in_product() {
+    std::cout<<"[TEST] Native Beat Clock, Swing, Fallback and Whole-Patch Recall... ";
+    // Groove must change temporal feel rather than only turning up a depth knob.
+    LFO straight,swung;
+    for(auto* l:{&straight,&swung}) {
+        l->set_sample_rate(1000.0f);
+        l->set_rate_hz(1.0f);
+        l->set_depth(1.0f);
+        l->set_waveform(LFOWaveform::Square);
+        l->reset_phase();
+    }
+    swung.set_swing(1.0f);
+    float mid_straight=0.0f,mid_swung=0.0f;
+    for(int sample=0;sample<1000;++sample) {
+        const float a=straight.process(),b=swung.process();
+        if(sample==600){mid_straight=a;mid_swung=b;}
+    }
+    assert(mid_straight<-.9f&&mid_swung>.9f); // 50/50 vs 75/25 groove
+    bool wrapped_straight=false,wrapped_swung=false;
+    for(int tail=0;tail<4;++tail) {
+        wrapped_straight|=straight.process()>.9f;
+        wrapped_swung|=swung.process()>.9f;
+    }
+    assert(wrapped_straight&&wrapped_swung); // same nominal 1Hz period
+
+    auto patch=PresetManager::create_clockwork_sub();
+    assert(patch.lfo_tempo_sync&&patch.lfo_follow_host_tempo);
+    assert(patch.lfo_groove>.5f);
+    PresetData restored;
+    assert(restored.deserialize(patch.serialize()));
+    assert(restored.lfo_follow_host_tempo&&std::abs(restored.lfo_groove-patch.lfo_groove)<1.e-5f);
+    patch.lfo1_waveform=0;patch.lfo1_depth=1.0f;patch.lfo_groove=0.0f;
+    patch.lfo_subdivision=4; // quarter-note cycle
+    patch.tempo_bpm=120.0f;
+
+    MonkeysEarEngine manual,follow;
+    manual.init(48000,32);follow.init(48000,32);
+    auto fixed=patch; fixed.lfo_follow_host_tempo=false;
+    manual.load_preset(fixed);follow.load_preset(patch);
+    std::array<float,32> zeros{},outL{},outR{};
+    manual.set_host_transport(90.0,true,0.0,true,false);
+    follow.set_host_transport(90.0,true,0.0,true,false);
+    for(int block=0;block<375;++block) {
+        manual.process_block(zeros.data(),zeros.data(),outL.data(),outR.data(),32);
+        follow.process_block(zeros.data(),zeros.data(),outL.data(),outR.data(),32);
+    }
+    // 120 BPM -> 1/2 cycle in 12k samples: sine is 0;
+    // 90 BPM -> 3/8 cycle in 12k samples: sine is ~0.707.
+    assert(std::abs(manual.get_lfo_value()-follow.get_lfo_value())>.5f);
+
+    manual.reset();follow.reset();
+    follow.set_host_transport(0.0,false,0.0,false,false);
+    for(int block=0;block<375;++block) {
+        manual.process_block(zeros.data(),zeros.data(),outL.data(),outR.data(),32);
+        follow.process_block(zeros.data(),zeros.data(),outL.data(),outR.data(),32);
+    }
+    assert(std::abs(manual.get_lfo_value()-follow.get_lfo_value())<.005f);
+
+    // DAW timeline alignment is explicit, not just matching LFO frequency.
+    follow.set_host_transport(120.0,true,0.25,true,true);
+    follow.process_block(zeros.data(),zeros.data(),outL.data(),outR.data(),1);
+    assert(follow.get_lfo_value()>.99f); // sine quarter-phase
+    follow.set_parameter_normalized(175,1.0f);
+    follow.set_host_transport(120.0,true,0.375,true,true);
+    follow.process_block(zeros.data(),zeros.data(),outL.data(),outR.data(),1);
+    assert(follow.get_lfo_value()>.99f); // 75/25 groove shifts the sine peak to beat 0.375
+    std::cout<<"PASS\n";
+}
+
 void test_sustain_pedal_and_patch_selector_compatibility() {
     std::cout << "[TEST] MIDI Sustain, Repeated Notes, Mono, Panic, and Legacy Palette... ";
     constexpr float SR=48000.f;
@@ -817,6 +887,7 @@ int main(int argc, char** argv) {
         test_multipass_filter_and_eq();
         test_preset_roundtrip_and_extremes();
         test_sustain_pedal_and_patch_selector_compatibility();
+        test_host_clock_and_groove_in_product();
         test_motion_causality();
         test_bounded_sound_space();
         run_ab_experiment_and_renders();

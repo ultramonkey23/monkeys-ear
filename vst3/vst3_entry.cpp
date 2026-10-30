@@ -32,9 +32,31 @@ static const TUID kMonkeysEarControllerCID = INLINE_UID(
     0x4D6F6E6B, 0x65797345, 0x61724374, 0x726C7202
 );
 
-static constexpr int kNumParams = 174;
+static constexpr int kNumParams = 176;
+// Root + existing coherent, independently navigable instrument subsystems.
+static constexpr int kUnitCount = 15;
+static constexpr const char* kUnitNames[kUnitCount]={
+    "Monkey's Ear","PLAY / Macros","Oscillators / Voice","Filters / Envelopes",
+    "Four-band EQ","Rhythm / Modulation","ChronoState","Sound Space",
+    "Vocal Expression","Tube Rack","Tube 1","Tube 2","Tube 3","Tube 4",
+    "Master / Routing"
+};
+static int32 unit_for_parameter(int32 id){
+    if(id<=7||id==79||id==172||id==173)return 1;
+    if(id==8||id==18||id==80||id==81)return 14;
+    if((id>=9&&id<=12)||(id>=19&&id<=27)||(id>=70&&id<=78)||(id>=161&&id<=164))return 2;
+    if((id>=28&&id<=36)||(id>=165&&id<=168))return 3;
+    if(id>=13&&id<=17)return 6;
+    if(id>=37&&id<=54)return 4;
+    if((id>=55&&id<=69)||(id>=169&&id<=171)||id>=174)return 5;
+    if(id>=82&&id<=112)return 7;
+    if(id>=113&&id<=123)return 8;
+    if(id>=124&&id<=128)return 9;
+    if(id>=129&&id<=160)return 10+(id-129)/8;
+    return 0;
+}
 static constexpr uint32 kStateMagic = 0x4D453032u; // ME02
-static constexpr uint32 kStateVersion = 5u;
+static constexpr uint32 kStateVersion = 6u;
 
 // Avoid C++ fast-math assumptions when host automation includes NaN/Inf.
 static bool valid_normalized(ParamValue value) {
@@ -114,6 +136,8 @@ struct SharedPluginState {
         params[169].store(0.0f);params[170].store(.40f);params[171].store((4.1f)/12.0f);
         params[172].store(0.0f); // CC64 hold; never recalled into a held note
         params[173].store(0.0f); // expanded palette; legacy ID79 unchanged
+        params[174].store(0.0f); // opt-in host tempo; historic patches keep manual clock
+        params[175].store(0.0f); // straight rhythmic phase at factory defaults
         for (int i = 0; i < kNumParams; ++i) dirty[i].store(false);
     }
 };
@@ -357,13 +381,22 @@ public:
 
     tresult SMTG_STDCALL process(ProcessData& data) override {
         if(data.numSamples<0)return kInvalidArgument;
-
         // Apply the restored component state and any pending local control
         // updates at the beginning of the host block. New host automation
         // points at offset zero override these values.
         for(int i=0;i<kNumParams;++i)
             if(state_->dirty[i].exchange(false))
                 apply_param_to_engine(static_cast<ParamID>(i),state_->params[i].load());
+
+        // Resolve the clock after applying a newly selected patch, so its
+        // first audio block aligns immediately to the host beat.
+        const auto* context=static_cast<const ProcessContext*>(data.processContext);
+        const bool tempo_valid=context&&(context->state & ProcessContext::kTempoValid);
+        const bool beat_valid=context&&(context->state & ProcessContext::kProjectTimeMusicValid);
+        const bool playing=context&&(context->state & ProcessContext::kPlaying);
+        engine_.set_host_transport(context?context->tempo:0.0,tempo_valid,
+                                    context?context->projectTimeMusic:0.0,beat_valid,playing);
+
 
         // Hosts can flush parameters with numSamples=0 and no audio buffers.
         if(data.numSamples==0){
@@ -545,6 +578,8 @@ private:
         update(169,p.lfo_tempo_sync?1.f:0.f);
         update(170,(std::clamp(p.tempo_bpm,40.f,240.f)-40.f)/200.f);
         update(171,(std::clamp(p.lfo_subdivision,0,11)+.1f)/12.f);
+        update(174,p.lfo_follow_host_tempo?1.f:0.f);
+        update(175,p.lfo_groove);
     }
     void apply_param_to_engine(ParamID id, float value) {
         engine_.set_parameter_normalized(static_cast<int>(id), value);
@@ -563,13 +598,45 @@ private:
 // ── VST3 Controller (UI Parameters & MIDI Mapping) ─────────────────────────
 class MonkeysEarController : public IEditController,
                              public IMidiMapping,
-                             public IConnectionPoint {
+                             public IConnectionPoint,
+                             public IUnitInfo {
 public:
     MonkeysEarController()
         : ref_count_(1), handler_(nullptr), state_(std::make_shared<SharedPluginState>()) {}
 
 
     virtual ~MonkeysEarController() = default;
+
+    // Steinberg IUnitInfo supplies a host-native hierarchy for all controls,
+    // including on hosts with no proprietary Monkey's Ear editor.
+    int32 SMTG_STDCALL getUnitCount() override { return kUnitCount; }
+    tresult SMTG_STDCALL getUnitInfo(int32 index, UnitInfo& info) override {
+        if(index<0||index>=kUnitCount)return kInvalidArgument;
+        info.id=index;
+        info.parentUnitId=index==0?-1:((index>=10&&index<=13)?9:0);
+        info.programListId=-1;
+        copy_to_char16(info.name,kUnitNames[index],128);
+        return kResultOk;
+    }
+    int32 SMTG_STDCALL getProgramListCount() override { return 0; }
+    tresult SMTG_STDCALL getProgramListInfo(int32,ProgramListInfo&) override { return kResultFalse; }
+    tresult SMTG_STDCALL getProgramName(ProgramListID,int32,char16[128]) override { return kResultFalse; }
+    tresult SMTG_STDCALL getProgramInfo(ProgramListID,int32,const char8*,char16[128]) override { return kResultFalse; }
+    tresult SMTG_STDCALL hasProgramPitchNames(ProgramListID,int32) override { return kResultFalse; }
+    tresult SMTG_STDCALL getProgramPitchName(ProgramListID,int32,int16_t,char16[128]) override { return kResultFalse; }
+    UnitID SMTG_STDCALL getSelectedUnit() override { return selected_unit_; }
+    tresult SMTG_STDCALL selectUnit(UnitID unit) override {
+        if(unit<0||unit>=kUnitCount)return kInvalidArgument;
+        selected_unit_=unit;return kResultOk;
+    }
+    tresult SMTG_STDCALL getUnitByBus(MediaType type,BusDirection dir,
+                                      int32 bus,int32 channel,UnitID& unit) override {
+        if(bus!=0||channel<0||type!=kEvent||dir!=kInput)return kResultFalse;
+        unit=0;return kResultOk;
+    }
+    tresult SMTG_STDCALL setUnitProgramData(int32,int32,IBStream*) override {
+        return kNotImplemented; // no hidden native program list
+    }
 
     // ── FUnknown ─────────────────────────────────────────────────────────────
     tresult SMTG_STDCALL queryInterface(const TUID _iid, void** obj) override {
@@ -593,6 +660,11 @@ public:
             return kResultOk;
         }
 
+        if (memcmp(_iid, IUnitInfo_iid, sizeof(TUID)) == 0) {
+            *obj = static_cast<IUnitInfo*>(this);
+            addRef();
+            return kResultOk;
+        }
         *obj = nullptr;
         return kResultFalse;
     }
@@ -636,19 +708,19 @@ public:
         info.id = static_cast<ParamID>(paramIndex);
         info.stepCount = (paramIndex==79)?3
             : paramIndex==173?7
-            : paramIndex==172?1
+            : paramIndex==172||paramIndex==174?1
             : (paramIndex==82||paramIndex==113||paramIndex==124||paramIndex==125||paramIndex==128||paramIndex==169)?1
             : (paramIndex>=129&&paramIndex<=160&&((paramIndex-129)%8)==0)?1
             : (paramIndex>=129&&paramIndex<=160&&((paramIndex-129)%8)==1)?monkeys_ear::kTubeFlavorCount-1
             : paramIndex==171?11
             : ((paramIndex>=101&&paramIndex<=112&&((paramIndex-101)%3)<2)?7:0);
-        info.unitId = 0;
-        info.flags = (paramIndex==80||paramIndex==81) ? (kIsHidden|kIsReadOnly) : kCanAutomate;
+        info.unitId = unit_for_parameter(paramIndex);
+        info.flags = (paramIndex==80||paramIndex==81) ? (kIsHidden|kIsReadOnly)
+            : (kCanAutomate | (info.stepCount>1 ? kIsList : 0));
         // New controls have stable factory defaults, not a moving snapshot
         // of the last control value. Existing ID metadata is left compatible.
         static const SharedPluginState defaults(false);
-        info.defaultNormalizedValue = paramIndex>=124?defaults.params[paramIndex].load()
-            :(state_ ? state_->params[paramIndex].load() : 0.5);
+        info.defaultNormalizedValue = defaults.params[paramIndex].load();
 
         static const char* titles[kNumParams] = {
             "Macro 1: Brightness (Cutoff)",
@@ -701,6 +773,10 @@ public:
             std::snprintf(title,sizeof(title),"PLAY: Sustain Pedal (CC64)");
         } else if(paramIndex==173){
             std::snprintf(title,sizeof(title),"PLAY: Sound Palette");
+        } else if(paramIndex==174){
+            std::snprintf(title,sizeof(title),"RHYTHM: Follow Host Clock");
+        } else if(paramIndex==175){
+            std::snprintf(title,sizeof(title),"RHYTHM: Groove Swing");
         } else {
             std::snprintf(title,sizeof(title),"%s",titles[paramIndex]);
         }
@@ -718,7 +794,7 @@ public:
         if(id>=129&&id<=160&&((id-129)%8)==1){
             int type=std::clamp(static_cast<int>(valueNormalized*monkeys_ear::kTubeFlavorCount),0,monkeys_ear::kTubeFlavorCount-1);
             snprintf(buf,sizeof(buf),"%s",monkeys_ear::kTubeFlavorNames[type]);
-        }else if(id==124||id==128||id==169||id==172){
+        }else if(id==124||id==128||id==169||id==172||id==174){
             snprintf(buf,sizeof(buf),"%s",valueNormalized>=.5?"On":"Off");
         }else if(id==125){
             snprintf(buf,sizeof(buf),"%s",valueNormalized>=.5?"Two parallel pairs":"Four in series");
@@ -811,7 +887,7 @@ public:
                 "1/8 triplet","1/8 dotted","1/16 dotted"};
             for(int n=0;n<12;++n)if(matches(divisions[n])){out=(n+.5)/12.0;return kResultOk;}
         }
-        if(id==124||id==125||id==128||id==169||id==172||
+        if(id==124||id==125||id==128||id==169||id==172||id==174||
            (id>=129&&id<=160&&(id-129)%8==0)){
             if(matches("on")||matches("true")||matches("two parallel pairs")){out=1;return kResultOk;}
             if(matches("off")||matches("false")||matches("four in series")){out=0;return kResultOk;}
@@ -913,6 +989,7 @@ private:
     std::atomic<uint32> ref_count_;
     IComponentHandler* handler_;
     std::shared_ptr<SharedPluginState> state_;
+    UnitID selected_unit_=0;
 };
 
 // ── VST3 Plugin Factory ──────────────────────────────────────────────────

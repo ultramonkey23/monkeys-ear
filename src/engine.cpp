@@ -62,6 +62,49 @@ void MonkeysEarEngine::reset() {
     latency_meter_.reset();
 }
 
+namespace {
+// Quarter notes per LFO cycle, including triplet and dotted timing.
+// This is tempo-independent and shared by manual/host clock selection.
+constexpr float kBeatDivisions[12]={
+    16.0f,8.0f,4.0f,2.0f,1.0f,0.5f,0.25f,0.125f,
+    2.0f/3.0f,1.0f/3.0f,0.75f,0.375f
+};
+inline bool finite64(double value) {
+    return (std::bit_cast<std::uint64_t>(value)&0x7ff0000000000000ULL)
+            !=0x7ff0000000000000ULL;
+}
+} // namespace
+
+void MonkeysEarEngine::update_lfo_clock() {
+    const auto& p=preset_manager_.get_current();
+    const float tempo=(p.lfo_follow_host_tempo&&host_tempo_valid_)
+        ? host_tempo_bpm_:p.tempo_bpm;
+    const bool hosted=p.lfo_follow_host_tempo&&host_tempo_valid_;
+    const float rate=p.lfo_tempo_sync
+        ? clamp(tempo,hosted?20.0f:40.0f,hosted?400.0f:240.0f)/60.0f/kBeatDivisions[clamp(p.lfo_subdivision,0,11)]
+        : p.lfo1_rate_hz;
+    lfo1_.set_rate_hz(clamp(rate,0.05f,30.0f));
+}
+
+void MonkeysEarEngine::set_host_transport(double tempo, bool tempo_valid,
+                                           double project_quarters,
+                                           bool quarter_position_valid, bool playing) {
+    const bool valid=tempo_valid&&finite64(tempo)&&tempo>=20.0&&tempo<=400.0;
+    const float bpm=valid?static_cast<float>(tempo):120.0f;
+    if(host_tempo_valid_!=valid || (valid&&host_tempo_bpm_!=bpm)) {
+        host_tempo_valid_=valid;
+        host_tempo_bpm_=bpm;
+        update_lfo_clock();
+    }
+    const auto& p=preset_manager_.get_current();
+    if(playing&&p.lfo_tempo_sync&&p.lfo_follow_host_tempo
+       &&quarter_position_valid&&finite64(project_quarters)) {
+        const double beats=kBeatDivisions[clamp(p.lfo_subdivision,0,11)];
+        const double phase=std::fmod(project_quarters/beats,1.0);
+        lfo1_.reset_phase(static_cast<float>(phase));
+    }
+}
+
 void MonkeysEarEngine::apply_macros() {
     const PresetData& p = preset_manager_.get_current();
 
@@ -149,17 +192,10 @@ void MonkeysEarEngine::apply_macros() {
     chrono_body_.set_frequency(cutoff_hz * 0.75f); // Modal body tuned relative to cutoff
     chrono_body_.set_mix(0.60f);
 
-    // Modulation
-    // Musical timing is a selectable mode of the SAME LFO, not a separate
-    // sequencer or duplicate modulation engine. BPM is manual and recallable.
-    constexpr float beats_per_cycle[12]={
-        16.0f,8.0f,4.0f,2.0f,1.0f,0.5f,0.25f,0.125f,
-        2.0f/3.0f,1.0f/3.0f,0.75f,0.375f
-    };
-    const float rate=p.lfo_tempo_sync
-        ? clamp(p.tempo_bpm,40.0f,240.0f)/60.0f/beats_per_cycle[clamp(p.lfo_subdivision,0,11)]
-        : p.lfo1_rate_hz;
-    lfo1_.set_rate_hz(clamp(rate,0.05f,30.0f));
+    // Retain one LFO and its original modulation destinations. Groove is
+    // a phase warp, not an additional modulation graph.
+    update_lfo_clock();
+    lfo1_.set_swing(p.lfo_groove);
     lfo1_.set_depth(p.lfo1_depth);
     lfo1_.set_waveform(static_cast<LFOWaveform>(clamp(p.lfo1_waveform,0,4)));
     external_sub_.set_ratio(p.sub_ratio_denominator);
@@ -298,6 +334,11 @@ void MonkeysEarEngine::set_parameter_normalized(int id, float v) {
         if(id==169)p.lfo_tempo_sync=v>=0.5f;
         else if(id==170)p.tempo_bpm=40.0f+200.0f*v;
         else p.lfo_subdivision=std::min(11,static_cast<int>(v*12.0f));
+        apply_macros();return;
+    }
+    if(id==174||id==175){
+        if(id==174)p.lfo_follow_host_tempo=v>=0.5f;
+        else p.lfo_groove=v;
         apply_macros();return;
     }
     switch(id){

@@ -132,7 +132,9 @@ std::string PresetData::serialize() const {
            <<"\nTUBE"<<i<<"_COUPLING="<<t.coupling<<"\nTUBE"<<i<<"_MIX="<<t.mix<<"\n";
     }
     oss<<"LFO_TEMPO_SYNC="<<(lfo_tempo_sync?1:0)<<"\nTEMPO_BPM="<<tempo_bpm
-       <<"\nLFO_SUBDIVISION="<<lfo_subdivision<<"\n";
+       <<"\nLFO_SUBDIVISION="<<lfo_subdivision
+       <<"\nLFO_FOLLOW_HOST="<<(lfo_follow_host_tempo?1:0)
+       <<"\nLFO_GROOVE="<<lfo_groove<<"\n";
     return oss.str();
 }
 
@@ -187,6 +189,8 @@ bool PresetData::deserialize(const std::string& data) {
         else if (key == "LFO_TEMPO_SYNC") lfo_tempo_sync=std::stoi(val_str)!=0;
         else if (key == "TEMPO_BPM") tempo_bpm=clamp(std::stof(val_str),40.0f,240.0f);
         else if (key == "LFO_SUBDIVISION") lfo_subdivision=clamp(std::stoi(val_str),0,11);
+        else if (key == "LFO_FOLLOW_HOST") lfo_follow_host_tempo=std::stoi(val_str)!=0;
+        else if (key == "LFO_GROOVE") lfo_groove=clamp(std::stof(val_str),0.0f,1.0f);
         else if (key == "FILTER_MODE_A") filter_mode_a=std::stoi(val_str);
         else if (key == "FILTER_MODE_B") filter_mode_b=std::stoi(val_str);
         else if (key == "FILTER_CUTOFF_B") filter_cutoff_b_hz=std::stof(val_str);
@@ -510,6 +514,7 @@ PresetData PresetManager::create_tube_foundry() {
     p.mod_lfo_drive=0.28f;
     p.lfo1_depth=0.85f;
     p.lfo_tempo_sync=true;p.tempo_bpm=122.0f;p.lfo_subdivision=6;
+    p.lfo_follow_host_tempo=true;p.lfo_groove=.10f;
     p.amp_attack=0.010f;p.amp_sustain=0.67f;p.amp_release=0.38f;
     p.master_gain_db=-9.0f;
     return p;
@@ -526,6 +531,7 @@ PresetData PresetManager::create_clockwork_sub() {
     p.tube_rack.shared_supply=0.70f;
     p.tube_rack.slots[2].bias=0.30f;
     p.lfo_tempo_sync=true;p.tempo_bpm=105.0f;p.lfo_subdivision=5;
+    p.lfo_follow_host_tempo=true;p.lfo_groove=.52f;
     p.mod_lfo_cutoff=0.64f;p.mod_lfo_fm=0.26f;
     p.amp_sustain=0.80f;p.amp_release=0.20f;
     p.master_gain_db=-10.0f;
@@ -543,6 +549,7 @@ PresetData PresetManager::create_glass_chamber() {
     p.tube_rack.shared_supply=0.22f;
     for(auto& t:p.tube_rack.slots){t.drive=.16f;t.mix=.42f;}
     p.lfo_tempo_sync=true;p.tempo_bpm=76.0f;p.lfo_subdivision=2;
+    p.lfo_follow_host_tempo=true;p.lfo_groove=.24f;
     p.amp_attack=.22f;p.amp_sustain=.58f;p.amp_release=2.6f;
     p.filter_attack=.38f;p.filter_release=1.8f;
     p.master_gain_db=-11.0f;

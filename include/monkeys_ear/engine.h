@@ -64,6 +64,12 @@ public:
     void set_input_route_mode(int mode);
     void set_parameter_normalized(int parameter_id, float value);
     void set_aftertouch(float value_0_to_1);
+    // VST3 host transport is an optional source for the existing LFO clock.
+    // Without a valid context, the recallable manual BPM remains authoritative.
+    void set_host_transport(double tempo_bpm, bool tempo_valid,
+                            double project_quarters, bool quarter_position_valid,
+                            bool playing);
+    float get_lfo_value() const { return lfo1_.get_current_value(); }
 
     // Latency & Real-time Metrics Query
     LatencyStats get_latency_stats() const;
@@ -97,6 +103,8 @@ private:
     PresetManager preset_manager_;
 
     float master_volume_;
+    float host_tempo_bpm_=120.0f;
+    bool host_tempo_valid_=false;
     float aftertouch_;
     float audio_envelope_;
     int current_midi_note_;
@@ -109,6 +117,7 @@ private:
     MotionSmoother drive_motion_;
 
     void apply_macros();
+    void update_lfo_clock();
 };
 
 } // namespace monkeys_ear

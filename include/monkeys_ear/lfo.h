@@ -20,6 +20,7 @@ public:
     void set_rate_hz(float rate_hz); // 0.05 Hz to 30.0 Hz
     void set_depth(float depth);     // 0.0 to 1.0
     void set_waveform(LFOWaveform wf);
+    void set_swing(float amount);
     void reset_phase(float phase = 0.0f);
 
     float process();
@@ -29,6 +30,7 @@ private:
     float sample_rate_;
     float rate_hz_;
     float depth_;
+    float swing_=0.0f;
     LFOWaveform waveform_;
 
     float phase_;

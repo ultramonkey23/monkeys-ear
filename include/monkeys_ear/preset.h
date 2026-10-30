@@ -133,6 +133,8 @@ struct PresetData {
     bool lfo_tempo_sync = false;
     float tempo_bpm = 120.0f;
     int lfo_subdivision = 4;
+    bool lfo_follow_host_tempo = false; // opt-in; legacy patches remain manual
+    float lfo_groove = 0.0f;            // 0 = straight, 1 = 75/25 phase swing
 
     PresetData();
     std::string serialize() const;
