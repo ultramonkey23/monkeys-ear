@@ -31,6 +31,7 @@ void MonkeysEarEngine::init(float sample_rate, size_t max_block_size) {
     fm_motion_.set_sample_rate(sample_rate_, 5.0f);
     sub_motion_.set_sample_rate(sample_rate_, 12.0f);
     drive_motion_.set_sample_rate(sample_rate_, 10.0f);
+    master_gain_motion_.set_sample_rate(sample_rate_, 12.0f);
     drive_tube_.set_sample_rate(sample_rate_);
     tube_rack_.set_sample_rate(sample_rate_);
     resonator_cab_.set_sample_rate(sample_rate_);
@@ -41,6 +42,7 @@ void MonkeysEarEngine::init(float sample_rate, size_t max_block_size) {
 
     reset();
     apply_macros();
+    master_gain_motion_.reset(master_volume_); // no startup fade or preset drift
 }
 
 void MonkeysEarEngine::reset() {
@@ -60,6 +62,7 @@ void MonkeysEarEngine::reset() {
     fdn_reverb_.reset();
     safety_limiter_.reset();
     latency_meter_.reset();
+    master_gain_motion_.reset(master_volume_); // deactivation resets audible history
     performance_drift_smoothed_=field_unit(preset_manager_.get_current().performance_drift);
     performance_fracture_smoothed_=field_unit(preset_manager_.get_current().performance_fracture);
 }
@@ -566,8 +569,12 @@ void MonkeysEarEngine::process_block(
         fdn_reverb_.process(delayed_l, delayed_r, reverbed_l, reverbed_r);
 
         // 10. Master Gain & Zero-Latency Safety Limiter
-        float out_l = reverbed_l * master_volume_;
-        float out_r = reverbed_r * master_volume_;
+        // One shared envelope preserves stereo balance. Host automation and
+        // factory patch changes cannot introduce a one-sample output jump.
+        // Steady-state gain is identical to the previous processing path.
+        const float audible_gain=master_gain_motion_.process(master_volume_);
+        float out_l = reverbed_l * audible_gain;
+        float out_r = reverbed_r * audible_gain;
         safety_limiter_.process(out_l, out_r);
 
         output_l[i] = out_l;

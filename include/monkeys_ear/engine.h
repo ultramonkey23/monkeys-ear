@@ -119,6 +119,7 @@ private:
     MotionSmoother fm_motion_;
     MotionSmoother sub_motion_;
     MotionSmoother drive_motion_;
+    MotionSmoother master_gain_motion_; // shared stereo, zero-latency, audio-rate
 
     void apply_macros();
     void update_lfo_clock();

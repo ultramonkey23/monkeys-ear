@@ -226,5 +226,47 @@
       "regression": "Windows VST3 host probe asserts untouched instrument (IDs 0 10 11 12) and FX (IDs 0 3 6 113) snapshots equal their loaded preset values.",
       "unverified": "Real Windows plugin build and physical DAW host project first save/reopen."
     }
+  },
+  "playability_listening_wave": {
+    "date": "2026-10-30",
+    "scope": "Existing Monkey's Ear stereo output/renderer and human-evaluation pipeline, no separate DSP prototype",
+    "baseline_sha": "b4fdf0f4bcafaac7496530134f264dac48fc7205",
+    "changed_product_paths": [
+      "include/monkeys_ear/engine.h",
+      "src/engine.cpp",
+      "test/test_dsp_core.cpp",
+      "README.md"
+    ],
+    "root_cause": "Immediate master_volume_ jump from host automation/preset changes creates potential sample discontinuity; acceptance renderer omitted recent tube/gesture creative presets",
+    "existing_capabilities_reused": [
+      "MotionSmoother from tonal.h/tonal.cpp",
+      "WavWriter native render target",
+      "research/listening/blind_kit.py"
+    ],
+    "implementation": {
+      "output": "Audio-rate 12ms master gain slewing on both output channels after reverb and before existing safety limiter, reset to current gain on init/reset",
+      "acceptance": "Extended existing production render_target with optional duration/release, 8s tube and glass renders, neutral-vs-gesture identical CLOCKWORK SUB performance pair, raw WAVs plus patch text states",
+      "compat": "No new host parameters, host schema or preset fields; all existing 178 stable IDs remain unchanged"
+    },
+    "verified_locally": {
+      "type": "algorithm-characterization, not full product build",
+      "method": "Existing MotionSmoother recurrence transferred from current src/tonal.cpp; GCC and Clang -O3 -ffast-math; GCC ASan/UBSan",
+      "rates_hz": [
+        44100,
+        48000,
+        96000,
+        192000
+      ],
+      "findings": "12ms master fade monotonically descends from 0.85 toward -100dB target and returns without full-amplitude first sample; finite under checks"
+    },
+    "unverified": [
+      "full MonkeysEarEngine native build/run of new 2-engine regression",
+      "WAV outputs from newly extended product renderer",
+      "blind_kit.py processing of actual newly rendered WAVs",
+      "Windows VST3 REAPER host playback, Arturia MIDI control, interactive UI, perceived timbre",
+      "CPU deadline and allocation effects of entire product"
+    ],
+    "next_action": "Execute native runner from current master, run existing blind kit on generated neutral/active pair, evaluate masked preferences and REAPER/Arturia expression. Inspect failures before more features.",
+    "rebased_on": "b9d79a0e0202f0f358c6e86b902f802c0d5ec068"
   }
 }

@@ -514,6 +514,51 @@ void test_host_clock_and_groove_in_product() {
     std::cout<<"PASS\n";
 }
 
+void test_master_gain_performance_slew() {
+    std::cout<<"[TEST] Full Synth Output: smooth volume automation without gain jumps... ";
+    auto preset=PresetManager::create_factory_lead();
+    // Make both engines acoustically identical, then alter only output gain.
+    MonkeysEarEngine baseline,automated;
+    baseline.init(48000.f,128);automated.init(48000.f,128);
+    baseline.load_preset(preset);automated.load_preset(preset);
+    baseline.handle_midi_note_on(60,.86f);
+    automated.handle_midi_note_on(60,.86f);
+    std::array<float,128> in{},baseL{},baseR{},outL{},outR{};
+    double neutral_error=0.0;
+    for(int b=0;b<32;++b){
+        baseline.process_block(in.data(),in.data(),baseL.data(),baseR.data(),128);
+        automated.process_block(in.data(),in.data(),outL.data(),outR.data(),128);
+        for(size_t i=0;i<128;++i)
+            neutral_error+=std::abs(baseL[i]-outL[i])+std::abs(baseR[i]-outR[i]);
+    }
+    assert(neutral_error<1e-8); // unchanged patches keep their original gain
+    automated.set_master_gain_db(-100.f);
+    baseline.process_block(in.data(),in.data(),baseL.data(),baseR.data(),128);
+    automated.process_block(in.data(),in.data(),outL.data(),outR.data(),128);
+    double baseline_energy=0.0,initial_energy=0.0;
+    for(size_t i=0;i<128;++i){
+        assert(std::isfinite(outL[i])&&std::isfinite(outR[i]));
+        baseline_energy+=baseL[i]*baseL[i]+baseR[i]*baseR[i];
+        initial_energy+=outL[i]*outL[i]+outR[i]*outR[i];
+    }
+    // A hard snap to -100 dB would produce ~1e-10 times the old energy.
+    // One 128-sample block must retain most of its previous gain.
+    assert(baseline_energy>1e-10);
+    assert(initial_energy>baseline_energy*.3);
+    for(int b=0;b<100;++b)
+        automated.process_block(in.data(),in.data(),outL.data(),outR.data(),128);
+    double muted_energy=0.0;
+    for(size_t i=0;i<128;++i)muted_energy+=outL[i]*outL[i]+outR[i]*outR[i];
+    assert(muted_energy<initial_energy*.001);
+    automated.set_master_gain_db(0.0f);
+    automated.process_block(in.data(),in.data(),outL.data(),outR.data(),128);
+    double return_energy=0.0;
+    for(size_t i=0;i<128;++i)return_energy+=outL[i]*outL[i]+outR[i]*outR[i];
+    // Returning from mute is a fade-in, not a full-amplitude single sample.
+    assert(return_energy<initial_energy*.4);
+    std::cout<<"PASS\n";
+}
+
 void test_gesture_field_and_mono_held_key_priority() {
     std::cout<<"[TEST] Gestural performance field, bounded DSP and mono key return... ";
     const float NaN=std::numeric_limits<float>::quiet_NaN();
@@ -904,7 +949,7 @@ void run_ab_experiment_and_renders() {
     std::cout << "  - Mode A (Conventional Baseline): Peak = " << peak_a << " (" << 20.0f * std::log10(peak_a) << " dBFS), RMS = " << rms_a << " (" << 20.0f * std::log10(rms_a) << " dBFS)\n";
     std::cout << "  - Mode B (Chrono-Stateful Body):  Peak = " << peak_b << " (" << 20.0f * std::log10(peak_b) << " dBFS), RMS = " << rms_b << " (" << 20.0f * std::log10(rms_b) << " dBFS)\n";
     std::cout << "  - RMS Timbral Deviation:          " << rms_diff << " (" << 20.0f * std::log10(rms_diff) << " dBFS difference)\n" << std::flush;
-    assert(rms_diff > 0.02f); // Significant musical difference proven!
+    assert(rms_diff > 0.02f); // numerical causality only, not human sound preference
 
     // Write A/B comparison WAV files
     WavWriter::write_wav_24bit("monkeys_ear_ab_conventional.wav", conv_left, conv_right, static_cast<uint32_t>(SR));
@@ -992,23 +1037,69 @@ void run_ab_experiment_and_renders() {
     }
 
     // Required musical acceptance renders and serialized presets.
-    auto render_target = [&](const PresetData& preset, const char* stem, int note, bool expressive) {
-        MonkeysEarEngine eng; eng.init(SR,BLOCK_SIZE); eng.load_preset(preset);
-        std::vector<float> left(TOTAL_SAMPLES,0),right(TOTAL_SAMPLES,0); eng.handle_midi_note_on(note,.92f);
-        for(size_t b=0;b<NUM_BLOCKS;++b){float t=static_cast<float>(b*BLOCK_SIZE)/SR;
-            if(expressive){eng.set_aftertouch(clamp(t/2.0f,0.0f,1.0f));eng.handle_midi_pitch_bend(std::sin(TWO_PI*.45f*t)*1.8f);if(t>=1.45f&&t<1.452f)eng.handle_midi_note_on(note+5,.88f);}
+    auto render_target = [&](const PresetData& preset, const char* stem, int note,
+                             bool expressive, size_t duration_seconds,
+                             float release_after_s) {
+        MonkeysEarEngine eng;eng.init(SR,BLOCK_SIZE);eng.load_preset(preset);
+        const size_t total=static_cast<size_t>(SR*duration_seconds);
+        const size_t blocks=total/BLOCK_SIZE;
+        std::vector<float> left(total,0.f),right(total,0.f);
+        eng.handle_midi_note_on(note,.92f);
+        bool released=false,second_note=false;
+        for(size_t b=0;b<blocks;++b) {
+            const float t=static_cast<float>(b*BLOCK_SIZE)/SR;
+            if(expressive){
+                eng.set_aftertouch(clamp(t/2.0f,0.0f,1.0f));
+                eng.handle_midi_pitch_bend(std::sin(TWO_PI*.45f*t)*1.8f);
+                if(!second_note&&t>=1.45f){
+                    eng.handle_midi_note_on(note+5,.88f);
+                    second_note=true;
+                }
+            }
+            if(release_after_s>=0.0f&&!released&&t>=release_after_s){
+                eng.handle_all_notes_off();
+                released=true;
+            }
             eng.process_block(block_in.data(),block_in.data(),blk_out_l.data(),blk_out_r.data(),BLOCK_SIZE);
-            for(size_t s=0;s<BLOCK_SIZE;++s){left[b*BLOCK_SIZE+s]=blk_out_l[s];right[b*BLOCK_SIZE+s]=blk_out_r[s];}
+            for(size_t i=0;i<BLOCK_SIZE;++i){
+                left[b*BLOCK_SIZE+i]=blk_out_l[i];
+                right[b*BLOCK_SIZE+i]=blk_out_r[i];
+            }
         }
-        float peak=0;for(float v:left)peak=std::max(peak,std::abs(v));float rms=rms_of(left,4096);
+        float peak=0.f;
+        double energy=0.0;
+        for(size_t i=0;i<total;++i){
+            peak=std::max(peak,std::max(std::abs(left[i]),std::abs(right[i])));
+            energy+=static_cast<double>(left[i])*left[i]+
+                    static_cast<double>(right[i])*right[i];
+        }
+        const float stereo_rms=static_cast<float>(std::sqrt(energy/(2.0*total)));
         WavWriter::write_wav_24bit(std::string(stem)+".wav",left,right,static_cast<uint32_t>(SR));
-        std::ofstream preset_file(std::string(stem)+".mepreset",std::ios::binary);preset_file<<preset.serialize();preset_file.close();
-        std::cout<<"[TARGET] "<<preset.name<<": "<<stem<<".mepreset + .wav | peak="<<20*std::log10(std::max(peak,1e-9f))<<" dBFS, RMS="<<20*std::log10(std::max(rms,1e-9f))<<" dBFS\n";
+        std::ofstream preset_file(std::string(stem)+".mepreset",std::ios::binary);
+        preset_file<<preset.serialize();preset_file.close();
+        std::cout<<"[TARGET] "<<preset.name<<": "<<stem<<".mepreset + .wav ("
+                 <<duration_seconds<<" s; tail "<<(released?"included":"not captured")
+                 <<") | stereo peak="<<20*std::log10(std::max(peak,1e-9f))
+                 <<" dBFS, RMS="<<20*std::log10(std::max(stereo_rms,1e-9f))
+                 <<" dBFS\n";
     };
-    render_target(PresetManager::create_monolith(),"MONOLITH",36,false);
-    render_target(PresetManager::create_feral_wobble(),"FERAL_WOBBLE",40,false);
-    render_target(PresetManager::create_velvet_lead(),"VELVET_LEAD",57,true);
-    render_target(PresetManager::create_sound_space(),"SOUND_SPACE",48,true);
+    render_target(PresetManager::create_monolith(),"MONOLITH",36,false,TOTAL_SECONDS,-1.f);
+    render_target(PresetManager::create_feral_wobble(),"FERAL_WOBBLE",40,false,TOTAL_SECONDS,-1.f);
+    render_target(PresetManager::create_velvet_lead(),"VELVET_LEAD",57,true,TOTAL_SECONDS,-1.f);
+    render_target(PresetManager::create_sound_space(),"SOUND_SPACE",48,true,TOTAL_SECONDS,-1.f);
+
+    // Musical acceptance renders of the recent instrument work, using the
+    // identical phrase and original product engine. Keep the raw/unmatched
+    // WAVs: research/listening/blind_kit.py already handles unbiased LUFS
+    // matching, true peak, randomized labels and a separate answer key.
+    render_target(PresetManager::create_tube_foundry(),"TUBE_FOUNDRY",45,true,8,2.2f);
+    render_target(PresetManager::create_glass_chamber(),"GLASS_CHAMBER",57,true,8,2.2f);
+    const PresetData clockwork_active=PresetManager::create_clockwork_sub();
+    PresetData clockwork_neutral=clockwork_active;
+    clockwork_neutral.performance_drift=0.0f;
+    clockwork_neutral.performance_fracture=0.0f;
+    render_target(clockwork_neutral,"CLOCKWORK_SUB_NEUTRAL",40,true,8,2.2f);
+    render_target(clockwork_active,"CLOCKWORK_SUB_GESTURE",40,true,8,2.2f);
 
     // ── Real-Time Benchmark Contract ─────────────────────────────────────
     std::cout << "\n[REAL-TIME CONTRACT] Verification across Buffer Sizes:\n";
@@ -1077,6 +1168,7 @@ int main(int argc, char** argv) {
         test_factory_projection_for_native_editor();
         test_arturia_class_midi_keyboard_notes();
         test_gesture_field_and_mono_held_key_priority();
+        test_master_gain_performance_slew();
         test_sustain_pedal_and_patch_selector_compatibility();
         test_host_clock_and_groove_in_product();
         test_motion_causality();

@@ -154,6 +154,24 @@ This source wave reinforces the **existing synth and effects**, not the feature 
 
 The Windows VST3 host regression now checks transport-context interface discovery, the three required bits, 48/96 kHz tail scaling and clearing artificially pre-marked output silence flags. **These are new regression assertions in the committed source; they have not yet been executed in an actual rebuilt Windows plugin or REAPER.** CMake, Win32 graphics embedding, real audio-thread performance, a physical Arturia performance, and level-matched listening remain release gates. This wave does not claim a completed Windows build.
 
+### Playability and listening acceptance wave (source integration)
+
+This wave focuses on expressive **continuity and comparable listening evidence**, not adding a new synth engine or more parameter IDs.
+
+**Zero-latency, smoothed master gain:** the existing `MotionSmoother` now runs once per sample on the shared stereo master gain (12 ms time constant). Changing host parameter 8, drawing output automation, or changing to a preset with another master gain should no longer produce an instantaneous output-gain discontinuity. Both channels use the identical gain for stereo consistency; a reset initializes the current target without an unwanted startup fade. When the master level is unchanged, the output uses the same steady-state gain as before. No heap work, new audio latency or new parameter was added. The already-installed safety limiter remains last.
+
+**Creative sounds in the real renderer:** the native `monkeys_ear_test_runner` now writes eight acceptance preset/WAV pairs, rather than only the older four. The four new WAV stems are `TUBE_FOUNDRY`, `GLASS_CHAMBER`, `CLOCKWORK_SUB_NEUTRAL`, and `CLOCKWORK_SUB_GESTURE`. New sound examples render an **eight-second phrase with a note-off after 2.2 seconds**, exposing tails and movement. The CLOCKWORK SUB pair uses the **same factory patch, note, velocities, MIDI expression, envelopes, timing and sample rate**; only DRIFT/FRACTURE are zeroed in the neutral version. Raw WAVs remain untouched and are not misleadingly gain-normalized by the renderer.
+
+For the existing blind kit (no extra tool invented), rebuild and run the real native runner, then use:
+
+```powershell
+python research/listening/blind_kit.py build/CLOCKWORK_SUB_NEUTRAL.wav build/CLOCKWORK_SUB_GESTURE.wav --out build/clockwork_blind_first
+```
+
+That tool independently applies BS.1770-style gated loudness matching and true-peak guarding, randomizes identities, and preserves a separate answer key. **Do not open the key until human preference ratings are recorded.** The raw originals are still available for comparing intentional level changes; the blinded comparison is specifically about musical character and movement. The existing `research/listening/README.md` and `research/TEST_PROTOCOL.md` remain authoritative for evaluation details.
+
+**Evidence boundary:** a standalone numeric check of the existing production smoothing equations passed GCC and Clang with `-O3 -ffast-math`, plus GCC ASan/UBSan, at 44.1/48/96/192 kHz. The new native whole-engine master gain test, renderer outputs and actual blind listening **are not yet executed** here, and a Windows/REAPER/Arturia host playtest is still mandatory before calling this release-ready. Code/data files alone do not constitute listening quality.
+
 ### Critique and remaining acceptance gates
 
 DRIFT/FRACTURE is a **playable coupling of existing synthesis mechanisms**; its novelty is in the relationships and expressive interaction, not a claim of unprecedented audio algorithms. The field is deliberately bounded, and neutral bypass is exact, but high FRACTURE can increase cross-modulation aliasing and perceived loudness: compare at matched level, 44.1/48/96 kHz, and in an actual mix. Real approval requires blind listening and the musician's judgement, not solely a different waveform or green test. A two-axis gesture also does not replace future per-note MPE or a graphical, editable modulation routing canvas.
