@@ -325,6 +325,14 @@ int main() {
     sibling_controller->release();sibling_b->release();sibling_a->release();
 
     std::cout<<">>> ALL STANDALONE VOCAL VST3 HOST/AUTOMATION CHECKS PASSED! <<<\n";
-    controller->release();processor->release();component->release();factory2->release();factory->release();FreeLibrary(module);
+    controller->release();processor->release();component->release();factory2->release();factory->release();
+
+    // Closing all factory references must not strand a global dangling
+    // factory pointer. Hosts can unload/reload or query the export repeatedly.
+    IPluginFactory* reopened_factory=factory_proc();
+    CHECK_STAGE(reopened_factory!=nullptr && reopened_factory->countClasses()==2,
+                "factory export survives complete reference release");
+    reopened_factory->release();
+    FreeLibrary(module);
     return 0;
 }
