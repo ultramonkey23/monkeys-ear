@@ -27,6 +27,8 @@ public:
 private:
     float sample_rate_;
     float cutoff_hz_;
+    float smoothed_cutoff_hz_=1500.0f;
+    float cutoff_slew_coeff_=1.0f;
     float resonance_;
     FilterMode mode_;
     float drive_;

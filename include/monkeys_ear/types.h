@@ -1,6 +1,7 @@
 #pragma once
 
 #include <cstdint>
+#include <bit>
 #include <cmath>
 #include <algorithm>
 #include <array>
@@ -19,12 +20,18 @@ inline float sanitize(float v) {
     return v;
 }
 
-// Bounded rational tanh approximation. Clamp first so x*x cannot overflow
-// when hostile host/input state reaches a nonlinear stage.
+// Monotone, unity-bounded rational soft clip. The Pade curve has a
+// zero derivative at +/-3, where it reaches exactly +/-1. Evaluating the
+// polynomial beyond +/-3 makes it exceed unity (1.286 at x=9), which
+// turns a supposed saturator into a nonmonotone high-drive timbre spike.
+// Use IEEE bits because the core is built with -ffast-math.
 inline float fast_tanh(float x) {
-    x = std::clamp(sanitize(x), -9.0f, 9.0f);
-    const float x2 = x * x;
-    return x * (27.0f + x2) / (27.0f + 9.0f * x2);
+    const auto bits=std::bit_cast<std::uint32_t>(x);
+    if((bits&0x7f800000u)==0x7f800000u)return 0.0f;
+    x=std::clamp(x,-3.0f,3.0f);
+    if((bits&0x7fffffffu)<0x26901d7du)return 0.0f; // <1e-15
+    const float x2=x*x;
+    return x*(27.0f+x2)/(27.0f+9.0f*x2);
 }
 
 inline float lerp(float a, float b, float t) {

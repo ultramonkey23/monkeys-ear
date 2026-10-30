@@ -31,6 +31,7 @@ rem could silently skip a missing Vocal host probe and still print ALL PASS.
 for %%T in (
     monkeys_ear_test_runner
     monkeys_ear_tube_rack_probe
+    monkeys_ear_tone_algorithms_probe
     monkeys_ear_reverb_rt_probe
     monkeys_ear_snapshot_replay_probe
     monkeys_ear_host_probe

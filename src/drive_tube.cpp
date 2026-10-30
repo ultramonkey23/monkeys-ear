@@ -2,6 +2,11 @@
 #include <cmath>
 
 namespace monkeys_ear {
+namespace {
+inline float triode_transfer(float u) noexcept {
+    return u>=0.0f ? fast_tanh(u) : 0.85f*fast_tanh(u*1.25f);
+}
+}
 
 TubeDriveStage::TubeDriveStage()
     : sample_rate_(48000.0f),
@@ -21,6 +26,7 @@ void TubeDriveStage::set_sample_rate(float sr) {
 
 void TubeDriveStage::set_drive(float drive) {
     drive_ = clamp(drive, 0.0f, 1.0f);
+    warmth_coeff_=lerp(warmth_open_coeff_,warmth_hot_coeff_,drive_);
 }
 
 void TubeDriveStage::set_bias(float bias) {
@@ -37,12 +43,21 @@ void TubeDriveStage::set_mix(float mix) {
 
 void TubeDriveStage::reset() {
     cathode_charge_ = 0.0f;
+    warmth_state_=0.0f;
 }
 
 void TubeDriveStage::recalculate() {
     // Cathode sag time constant ~30ms
     float time_constant_s = 0.030f;
     sag_coeff_ = std::exp(-1.0f / (time_constant_s * sample_rate_));
+    // The strong-excitation response retains body and even harmonics while
+    // attenuating the topmost grit. Like the rack's existing bandwidth model,
+    // both coefficients are prepared at the sample-rate boundary.
+    const float open_hz=std::min(18000.0f,sample_rate_*0.43f);
+    const float hot_hz=std::min(10000.0f,sample_rate_*0.43f);
+    warmth_open_coeff_=1.0f-std::exp(-TWO_PI*open_hz/sample_rate_);
+    warmth_hot_coeff_=1.0f-std::exp(-TWO_PI*hot_hz/sample_rate_);
+    warmth_coeff_=lerp(warmth_open_coeff_,warmth_hot_coeff_,drive_);
 }
 
 float TubeDriveStage::process(float input) {
@@ -62,26 +77,18 @@ float TubeDriveStage::process(float input) {
     // Dynamic bias calculation
     float dynamic_bias = bias_ * 0.4f - (cathode_charge_ * memory_sag_ * 0.15f);
 
-    // Asymmetric triode-style nonlinear waveshaping function:
-    // f(u) = tanh(u + dynamic_bias) + 0.15 * (1.0 - exp(-|u|)) * sign(u)
-    float u = x + dynamic_bias;
-    float saturated = 0.0f;
-
-    if (u >= 0.0f) {
-        // Positive half-cycle: soft compression
-        saturated = fast_tanh(u);
-    } else {
-        // Negative half-cycle: harder clipping with quadratic onset (triode grid current)
-        float u_neg = u * 1.25f;
-        saturated = fast_tanh(u_neg) * 0.85f;
-    }
+    // A biased transfer curve must be measured relative to its own idle
+    // operating point. Without this subtraction a silent synth emits DC,
+    // which eats headroom and biases downstream nonlinear modules.
+    const float saturated=triode_transfer(x+dynamic_bias)-triode_transfer(dynamic_bias);
 
     // Output level compensation so extreme drive maintains musical volume
     float makeup_gain = 1.0f / std::sqrt(1.0f + drive_ * 8.0f);
-    float wet = saturated * makeup_gain;
-
-    // Crossfade dry/wet
-    float out = lerp(input, wet, mix_);
+    float wet=saturated*makeup_gain;
+    warmth_state_+=(wet-warmth_state_)*warmth_coeff_;
+    // Wet-only bandwidth preserves the underlying clean fundamental when
+    // the musician lowers Heat. No extra path or reverb-like ringout.
+    float out=lerp(input,warmth_state_,mix_);
     return sanitize(out);
 }
 

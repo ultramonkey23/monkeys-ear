@@ -268,5 +268,58 @@
     ],
     "next_action": "Execute native runner from current master, run existing blind kit on generated neutral/active pair, evaluate masked preferences and REAPER/Arturia expression. Inspect failures before more features.",
     "rebased_on": "b9d79a0e0202f0f358c6e86b902f802c0d5ec068"
+  },
+  "tone_algorithm_wave": {
+    "date": "2026-10-30",
+    "baseline_master": "b9d79a0e0202f0f358c6e86b902f802c0d5ec068",
+    "intent": "Musically distinct and usable brightness, grit, smoothness, warmth and timbre using existing canonical source; preserve deep sound architecture",
+    "actual_changes": [
+      "common rational saturation bounded, monotone at extreme input; NaN/Inf guarded by IEEE float bits",
+      "legacy triode DC operating-point subtraction and drive-dependent wet-only bandwidth",
+      "ZDF SVF base cutoff ~6ms slew and clean linear bandpass feedback until safety knee; intentional drive remains nonlinear"
+    ],
+    "verified_local": {
+      "source_hashes": {
+        "types_h": "cfda1004463f748ba87906cc3e568845b73d0d64",
+        "filter_h": "e7f4fc3a718a46c9dbdaa77da876cd4b2cd25df9",
+        "filter_cpp": "0f0e7d323329373022e30aa75e735bc6757862f7",
+        "drive_h": "927834e52a8409675caf87c159453bd52c67b9e1",
+        "drive_cpp": "1602d29a70b7f773c0edd1f54c2a4cc8b90408ab",
+        "tone_test": "3d37db9a525c5f0b2d9a3c80d37eea39f3f919e8"
+      },
+      "optimized": "GCC 14.2 -std=c++20 -O3 -ffast-math -Wall -Wextra -Werror PASS",
+      "sanitizer": "Clang 17 -O1 ASan+UBSan PASS",
+      "existing_reverb_delay": "Production FDN + StereoDelay no-heap regression rerun with corrected common saturator; PASS",
+      "tone_250hz": {
+        "hot_second_harmonic": 0.01685,
+        "clean_third_harmonic": 0.00549,
+        "hot_third_harmonic": 0.11156
+      },
+      "tube_rms": {
+        "at_1000hz": 0.30637,
+        "at_9000hz": 0.24461
+      },
+      "filter_4000hz_rms": {
+        "cutoff_700hz": 0.0061,
+        "cutoff_12000hz": 0.2028
+      },
+      "constraints": "All values isolated product DSP tests, not full instrument playback or matched loudness"
+    },
+    "unknown": [
+      "full CMake/Windows product build and Arturia/REAPER host execution",
+      "measured whole-instrument CPU deadline and preset-to-preset audio comparison",
+      "aliasing and intermodulation products for high frequencies or extreme modulation",
+      "level-matched/blind listening outcomes for warmth and pleasantness",
+      "impact of global fast_tanh modification on full vocal/delay/synth perception"
+    ],
+    "future_gate": "Full build and host probe; before/after level-matched instrument WAV at 44.1/48/96k; blind listening for warmth/brightness/edge; alias measurements against product source, optional ADAA/oversampling candidates only after evidence.",
+    "known_tradeoffs": [
+      "The shared rational saturator changes other clients (FDN, limiter, voice subharmonics, vocal). Reverb/delay regression passed, whole graph is unexecuted.",
+      "Tube wet bandwidth is a causal one-pole with frequency-dependent phase/group delay even though no VST3 lookahead or host-reported latency was added.",
+      "Warmth/high-frequency damping does not remove folded alias components below the bandwidth cutoff.",
+      "Novelty and auditory preference remain unproven without matched-level listening."
+    ],
+    "integrated_over": "2993ce90f0a1ca4b208320f0b14aff61586cd6d6",
+    "concurrent_master_preservation": "Kept Code Prime's master gain smoothing, full renderer/blind-listening additions, test updates and playability_listening_wave without replacing them."
   }
 }

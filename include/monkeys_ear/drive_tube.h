@@ -26,6 +26,12 @@ private:
     // Dynamic state: cathode bias tracker (thermal / capacitor charge)
     float cathode_charge_;
     float sag_coeff_;
+    // Drive-dependent tube bandwidth: warm at high excitation without
+    // an extra signal path, heap storage or host-reported lookahead.
+    float warmth_state_=0.0f;
+    float warmth_coeff_=1.0f;
+    float warmth_open_coeff_=1.0f;
+    float warmth_hot_coeff_=1.0f;
 
     void recalculate();
 };

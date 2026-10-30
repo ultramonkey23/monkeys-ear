@@ -18,16 +18,24 @@ StateVariableFilter::StateVariableFilter()
 
 void StateVariableFilter::set_sample_rate(float sr) {
     sample_rate_ = std::max(1000.0f, sr);
+    // Cutoff motion in log-like musical ranges is smoothed at the actual
+    // output sample rate, not in 16-sample automation stair-steps.
+    cutoff_slew_coeff_=1.0f-std::exp(-1.0f/(sample_rate_*0.006f));
+    smoothed_cutoff_hz_=cutoff_hz_;
     update_coefficients();
 }
 
 void StateVariableFilter::set_cutoff(float freq_hz) {
-    cutoff_hz_ = clamp(freq_hz, 20.0f, sample_rate_ * 0.48f);
+    const float next=clamp(freq_hz,20.0f,sample_rate_*0.48f);
+    if(next==cutoff_hz_)return;
+    cutoff_hz_=next;
     update_coefficients();
 }
 
 void StateVariableFilter::set_resonance(float res) {
-    resonance_ = clamp(res, 0.0f, 0.98f);
+    const float next=clamp(res,0.0f,0.98f);
+    if(next==resonance_)return;
+    resonance_=next;
     update_coefficients();
 }
 
@@ -40,8 +48,8 @@ void StateVariableFilter::set_drive(float drive) {
 }
 
 void StateVariableFilter::reset() {
-    s1_ = 0.0f;
-    s2_ = 0.0f;
+    s1_=s2_=0.0f;
+    smoothed_cutoff_hz_=cutoff_hz_;
 }
 
 void StateVariableFilter::update_coefficients() {
@@ -56,7 +64,10 @@ void StateVariableFilter::update_coefficients() {
 
 float StateVariableFilter::process(float input, float env_mod, float env_amount) {
     // Dynamic cutoff calculation with envelope modulation
-    float effective_cutoff = cutoff_hz_;
+    smoothed_cutoff_hz_+=(cutoff_hz_-smoothed_cutoff_hz_)*cutoff_slew_coeff_;
+    if(std::abs(smoothed_cutoff_hz_-cutoff_hz_)<0.001f)
+        smoothed_cutoff_hz_=cutoff_hz_;
+    float effective_cutoff=smoothed_cutoff_hz_;
     if (std::abs(env_amount) > 1e-4f) {
         // Modulate in octaves: +/- 5 octaves
         float octave_shift = env_mod * env_amount * 5.0f;
@@ -85,8 +96,16 @@ float StateVariableFilter::process(float input, float env_mod, float env_amount)
 
     // First integrator: bandpass output
     float bp = g * hp + s1_;
-    // Non-linear feedback saturation prevents runaway self-oscillation
-    bp = fast_tanh(bp);
+    // A CLEAN filter should remain linear at normal signal levels.
+    // The previous unconditional tanh distorted every voice even when
+    // filter drive was zero. With intentional drive, keep the existing
+    // nonlinear feedback. Without drive, engage only a C1 safety knee
+    // above 2.0 to bound pathological high-Q ringing.
+    if(drive_>1.0e-4f)bp=fast_tanh(bp);
+    else if(std::abs(bp)>2.0f) {
+        const float excess=std::abs(bp)-2.0f;
+        bp=std::copysign(2.0f+excess/(1.0f+excess),bp);
+    }
     s1_ = g * hp + bp;
 
     // Second integrator: lowpass output

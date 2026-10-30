@@ -48,6 +48,12 @@ target_link_libraries(monkeys_ear_test_runner PRIVATE monkeys_ear_core)
 add_executable(monkeys_ear_tube_rack_probe test/test_tube_rack.cpp)
 target_link_libraries(monkeys_ear_tube_rack_probe PRIVATE monkeys_ear_core)
 
+# Hard musical-tone invariants for the actual filter, legacy triode and
+# shared saturation curve: brightness response, even/odd dirt, DC-free idle,
+# cutoff movement and warmth bandwidth. Part of the canonical DSP core.
+add_executable(monkeys_ear_tone_algorithms_probe test/test_tone_algorithms.cpp)
+target_link_libraries(monkeys_ear_tone_algorithms_probe PRIVATE monkeys_ear_core)
+
 # Exercise the *production* FDN in a no-heap, no-reset, continuous-room-morph
 # proof. Deliberately separate test process to count global operator new calls.
 add_executable(monkeys_ear_reverb_rt_probe test/test_reverb_rt.cpp)

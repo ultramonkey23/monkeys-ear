@@ -31,3 +31,7 @@ Pitch: retain detector/intent/expression/resynthesis separation. Add MPM/NSDF as
 ## Evidence and promotion
 
 Keep synthetic results SYNTHETIC. A reference-paper result does not prove a local implementation. Preserve rejected experiments and limitations. Before product integration inspect the local source, run existing tests, compare real audio, measure CPU/latency and obtain listening evidence where sound quality is claimed. No new framework, module, or Lab authority is created by this research.
+
+### Product tone-algorithm baseline — 2026-10-30 (new live source)
+
+The production baseline uses a unity-bounded rational saturation function, a clean/intentional-drive split for the existing ZDF SVF feedback, an ~6 ms base-cutoff slew, and a DC-compensated legacy tube transfer with a bounded drive-dependent wet bandwidth. The linked `monkeys_ear_tone_algorithms_probe` compiles actual product DSP rather than an independent algorithm sketch. The first spectral/pressure tests are amplitude-domain and single-source only. **They do not establish anti-aliasing quality or listening preference**. In particular, the existing four-tube rack's ADAA work remains separate from the legacy triode path. Do not automatically promote 2×/4× oversampling or ADAA into the product without an equal-loudness alias/phase/transient/CPU comparison against the current exact implementation. Refer to README Tone algorithms and research/STATUS.json for this time-scoped wave evidence.
