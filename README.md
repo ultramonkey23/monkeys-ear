@@ -1,5 +1,24 @@
 # Monkey's Ear (ME-01)
 
+**A playable instrument and a sound-design workbench — built for musicians, not just benchmarks.**
+
+Monkey's Ear is an independent family of VST3 instruments and effects from Ultramonkeydog Studios. Its idea is simple: start with a sound you can actually play, then push it somewhere stranger without losing the ability to shape and recall what you made.
+
+The current Windows-oriented instrument source includes an eight-sound palette, eight immediate performance macros, synth and filter controls, tube coloration, subharmonics, delay and reverb, tempo-synced movement, MIDI input and sustain, a two-axis **DRIFT / FRACTURE** performance surface, and deeper sound-shaping pages. The separate Voice/Vocal VST3 is a distinct, still pre-release module. The long-term ecosystem connects useful standalone modules; that connected musical experience is not a completed release claim.
+
+**What musicians can try in a local development build**
+
+- **CLOCKWORK SUB:** play a bass/synth phrase, sync movement to the DAW tempo, then shape its weight and motion.
+- **GLASS CHAMBER:** explore slower, airier evolving textures with the existing modal Sound Space.
+- **TUBE FOUNDRY:** work through the tube coloration and amp/filter balance, deliberately rather than relying on magic presets.
+- **PERFORM:** move DRIFT / FRACTURE while holding or replaying notes, then save, reopen and compare what actually comes back.
+
+The controls and DSP are implemented in source. **This is not an announcement of a ready-to-install, musician-accepted commercial plugin.** The latest integrated Windows VST3/editor/host regression is still awaiting a complete real REAPER execution, physical playing evaluation, and level-matched blind listening. Historical isolated benchmark numbers below do not certify the newly integrated product or every DAW.
+
+[Musician-first demo, tester and release evidence kit](docs/MUSICIAN_PREVIEW_AND_DISTRIBUTION.md) · [Product contract](docs/PRODUCT_CONTRACT.md) · [Build and developer validation](#build--run)
+
+---
+
 > **Production-grade low-latency digital instrument and sound-design environment.**
 > Combining pitch-locked weight construction, synthesis, live audio processing, multipass filtering, modulation, parametric EQ, amplification, delay, and reverb.
 
