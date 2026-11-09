@@ -13,6 +13,13 @@ The product is:
 
 No subsystem may redefine the product around itself.
 
+### Product horizon — standalone mobile DAW
+Monkey's Ear includes a creator-directed **future standalone Android/mobile DAW** in its product intent, in addition to the existing REAPER-hosted VST3 ecosystem. Mobile is **touch-first**, but not touch-only: it must support external MIDI hardware, physical typing/computer keyboards as playable musical input where supported, and a touch piano roll/sequencers. Its musical workflow combines **patterns, loops, sequencing and live performance**, with deeply controllable quantization. Caustic is a workflow reference, **not a mandate to clone Caustic or a claim that mobile is built**.
+
+**Interoperability intent:** share sounds and compatible presets with Monkey's Ear for REAPER; bridge detailed audio editing through **time-aligned stem export/import**. Do not impose full bidirectional editable project parity as a requirement the creator did not choose. Preset portability must be proved against actual engine/format compatibility; samples, patch metadata and rendered stems are distinct artifacts. The mobile DAW **must work completely without AI**; AI may enhance but cannot own or gate any core musical behavior.
+
+Canonical intent: [`docs/MOBILE_DAW_PRODUCT_VISION.md`](docs/MOBILE_DAW_PRODUCT_VISION.md). This is future product direction, **not** implementation, test, device, or release evidence.
+
 ---
 
 ## 2. HARD REAL-TIME AUDIO CONTRACT
@@ -56,6 +63,7 @@ See `docs/STANDALONE_MODULE_STANDARD.md` (historical filename; content is the co
 ## 4. MASTER CONVERGENCE & LAB BOUNDARIES
 
 - Code Prime remains the sole intentional mutation boundary for Lab-routed product code work. An explicitly authorized direct GitHub maintenance operation must still comply with the Lab's operator-sovereignty and provenance law.
+- **Prototyping, experimentation and research-backed trials are parts of full production**, not a separate non-production program. Build and evolve them in the canonical product on `master` under the existing Lab mutation owner, with truthful implementation/proof/release states; an experiment is not automatically ready to ship, but its status is not a reason for a throwaway repo, feature branch, or disconnected implementation. Reuse real capabilities and preserve the production spine; differentiate experiment evidence from accepted user-facing functionality.
 - **`master` is the sole canonical development and integration branch.** Never select `main` as a development target, create agent-chosen feature/transport branches or pull requests, or use another branch as a fallback when direct `master` mutation is blocked.
 - Existing Code Prime-owned bounded ephemeral validation worktrees are implementation details, not persistent alternate branch authorities; accepted work must converge directly onto `master`, with normal push and remote readback. Do not overwrite concurrent or uncommitted work.
 - Any surviving `main` ref is a temporary compatibility alias, never a separate source of truth. It must only fast-forward from validated `master` and remain synchronized until the GitHub default branch is changed to `master` and the alias is safely retired. Until then, explicitly target `master` in all GitHub API/agent operations rather than relying on the repository default.

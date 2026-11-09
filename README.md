@@ -6,6 +6,8 @@ Monkey's Ear is an independent family of VST3 instruments and effects from Ultra
 
 The current Windows-oriented instrument source includes an eight-sound palette, eight immediate performance macros, synth and filter controls, tube coloration, subharmonics, delay and reverb, tempo-synced movement, MIDI input and sustain, a two-axis **DRIFT / FRACTURE** performance surface, and deeper sound-shaping pages. The separate Voice/Vocal VST3 is a distinct, still pre-release module. The long-term ecosystem connects useful standalone modules; that connected musical experience is not a completed release claim.
 
+**Future product direction — Monkey's Ear Mobile:** a standalone **touch-first Android music-production app**, evolving into a pattern/loop/sequence/live mobile DAW with **MIDI and ordinary hardware keyboard input**, touch piano roll and deep quantization; shared sounds/compatible presets with the REAPER ecosystem; and **time-aligned stems for desktop audio editing**. Core music-making never requires AI. **This is product intent, not a shipping or implemented Android feature.** [Mobile DAW product vision](docs/MOBILE_DAW_PRODUCT_VISION.md).
+
 **What musicians can try in a local development build**
 
 - **CLOCKWORK SUB:** play a bass/synth phrase, sync movement to the DAW tempo, then shape its weight and motion.
