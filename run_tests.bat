@@ -35,6 +35,7 @@ for %%T in (
     monkeys_ear_reverb_rt_probe
     monkeys_ear_snapshot_replay_probe
     monkeys_ear_pattern_transport_probe
+    monkeys_ear_stem_bundle_probe
     monkeys_ear_host_probe
     monkeys_ear_vocal_host_probe
     monkeys_ear_vocal_target_chain_probe

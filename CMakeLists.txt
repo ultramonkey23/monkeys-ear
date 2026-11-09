@@ -52,6 +52,14 @@ target_link_libraries(monkeys_ear_pattern_transport_probe PRIVATE monkeys_ear_co
 target_compile_definitions(monkeys_ear_pattern_transport_probe PRIVATE
     MONKEYS_EAR_PATTERN_INTEGRATION=1)
 
+# Actual PCM stem export: the standalone tests read WAV bytes and metadata,
+# and the integrated target renders two different existing Monkey's Ear sounds
+# through the same PatternPlayer -> MonkeysEarEngine path before stem export.
+add_executable(monkeys_ear_stem_bundle_probe test/test_stem_bundle.cpp)
+target_link_libraries(monkeys_ear_stem_bundle_probe PRIVATE monkeys_ear_core)
+target_compile_definitions(monkeys_ear_stem_bundle_probe PRIVATE
+    MONKEYS_EAR_STEM_INTEGRATION=1)
+
 # The four-tube rack is product DSP. Run its focused tests in addition to
 # the whole-engine suite, not as a disconnected prototype executable.
 add_executable(monkeys_ear_tube_rack_probe test/test_tube_rack.cpp)
