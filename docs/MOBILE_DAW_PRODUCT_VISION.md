@@ -67,3 +67,43 @@ Large usable controls and an immediate, fluid instrument/sequencer workspace are
 A faithful future implementation will need to demonstrate: a working offline/AI-free Android session; responsive touch piano-roll and sequencer editing; MIDI/controller and physical computer keyboard pathways; real loop/pattern/live capture and replay; reversible precise quantization with groove/microtiming; usable production of a musical arrangement; reliable, correctly aligned stem exports imported into REAPER; and actually compatible sounds/presets transferred both ways where the participating engines support them. Device/user proof, runtime load and precise import alignment are required before claiming success.
 
 **Present evidence boundary (2026-11-08):** the inspected GitHub `master` source and existing REAPER/VST3 contracts describe native C++ instruments/effects and preset machinery. This document authorizes the *product direction*; it does not claim an Android DAW, physical keyboard mapping, touch piano roll, multitrack stem exchange or live Android sequencing already exists. A separate local checkout, active agent work or deployed runtime may contain additional facts that this remote-only inspection did not observe.
+
+
+## 6. Musical identity and creator influences (intent, not genre confinement)
+
+Monkey's Ear should remain original, darkly imaginative when desired, physically playable, and deliberately controllable. Take inspiration from Cody's **death metal, underground hip-hop, RPG/roguelite, anime/manga and horror** interests without turning the DAW into a single-genre template or borrowing other artists' assets, melodies or trademarks.
+
+The strongest creative intersection is **violent rhythmic precision with human swing, uncanny living timbre, and scene-level musical storytelling**. Existing Monkey's Ear musical behaviors — tube/cathode memory, independent fundamental/sub weight, responsive filters, Sound Space, ChronoState, DRIFT / FRACTURE performance — are stronger foundations than generic lists of third-party synth types. Their mobile usability, actual sound fidelity and expressive control must be tested rather than presumed.
+
+### Four full-production musical witness sessions
+
+These are *musician stories and design pressure*, not a requirement to ship four separate app modes:
+
+- **FERAL RHYTHM:** capture fast double-kicks/blastbeats and odd-meter guitar/synth riffs from a physical keyboard or MIDI controller, correct timing precisely without losing accents, vary patterns and bounce full aligned rhythm/bass/texture stems. Touch offers editing, not an inaccurate mandatory drum-pad performance path.
+- **DUST & SWING:** record/import a rights-owned sample, chop into phrases, place off-grid drums, layer a heavy sub, overdub a live take, compare raw vs intentionally late swing, resample a degraded texture, and move the result into REAPER.
+- **ABYSS / HORROR:** make an evolving resonant room, whisper/noise texture or dissonant drone, gesture through DRIFT / FRACTURE, capture motion as recallable automation, build tension across loop/scene transitions, and preserve an exact rendered audio identity in stems.
+- **SAVAGE SCORE:** construct a recurring character/area motif, transition among exploration/combat/boss variants using patterns and scenes, handle unusual meters and smooth tail/section transitions, and export labelled sections/stems suitable for further soundtrack editing.
+
+Each witness must run **without AI**; AI, when available, can only propose musician-editable variations. Each needs an actual musical outcome Cody can play, inspect, hear, reject or keep. No synthetic score can claim that a groove is heavy or a texture is frightening.
+
+### Touch design vocabulary to evaluate
+
+A **blackened studio instrument, not a touchscreen spreadsheet**: tactile rack silhouettes, clearly legible beats/notes, unambiguous recording/armed states, contrast against deep neutrals, and restrained spectral/ember accents for meaningful information. This is creative art direction, **not finalized visual assets or prescribed palette**. Use bold, discoverable controls for primary gestures and an independently reachable deep surface for unusual synthesis. Evaluate a performance pad carrying the existing DRIFT/FRACTURE gesture field; don't replace precise piano-roll note editing or ordinary knobs with mandatory X/Y gestures.
+
+### Direct workflow sketches
+
+`AUDITION SOUND -> RECORD OR DRAW PATTERN -> VARY / HUMANIZE -> PERFORM OR LAUNCH -> ARRANGE / AUTOMATE -> MIX / RESAMPLE -> EXPORT STEMS -> EDIT IN REAPER`
+
+This is one project with multiple views and edit tools, **not** disconnected sessions or a separate beatmaking prototype. The same material survives save/reopen, phone/tablet adaptations and optional AI loss.
+
+## 7. Core creative principles that shall not drift
+
+1. **Raw performance is evidence, quantization is intent.** Keep original notes/timing available, and let the artist tune precision or imperfection.
+2. **Touch-first is not touch-exclusive.** Ordinary external keyboard and real MIDI paths are musician requirements, not accessibility afterthoughts; finger pads are not the sole accuracy input.
+3. **Pattern, loop, song and live are peers.** Avoid a narrow linear-only DAW or pattern-only groove toy. Deep melodic and drum sequencing are first-class.
+4. **Musical strangeness is controllable and recallable.** Inspired by existing Sound Space and relational-state work; never impose random behavior that can't be replayed, disabled or bounded.
+5. **Shared ingredients, rendered edits:** sound and genuinely compatible presets can travel; stems carry the musical audio for REAPER editing. Do not require editable project parity.
+6. **Nothing central requires AI, an account or online access.** Real offline composition, recording, playback, sound design, editing, saving and exporting remain possible.
+7. **All experimentation stays inside production.** Preserve truthful implemented/tested/played/accepted statuses, the canonical `master` branch and existing Lab ownership instead of spinning out untracked prototypes.
+
+**Related implementation and research owners:** [Mobile engineering/proof](MOBILE_DAW_ENGINEERING.md) and [External and Lab research intake](MOBILE_DAW_RESEARCH_NOTES.md). These expand this one mobile product vision; they do not override it.

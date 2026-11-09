@@ -18,7 +18,7 @@ Monkey's Ear includes a creator-directed **future standalone Android/mobile DAW*
 
 **Interoperability intent:** share sounds and compatible presets with Monkey's Ear for REAPER; bridge detailed audio editing through **time-aligned stem export/import**. Do not impose full bidirectional editable project parity as a requirement the creator did not choose. Preset portability must be proved against actual engine/format compatibility; samples, patch metadata and rendered stems are distinct artifacts. The mobile DAW **must work completely without AI**; AI may enhance but cannot own or gate any core musical behavior.
 
-Canonical intent: [`docs/MOBILE_DAW_PRODUCT_VISION.md`](docs/MOBILE_DAW_PRODUCT_VISION.md). This is future product direction, **not** implementation, test, device, or release evidence.
+Canonical intent: [`docs/MOBILE_DAW_PRODUCT_VISION.md`](docs/MOBILE_DAW_PRODUCT_VISION.md); engineering/reality-proof boundaries: [`docs/MOBILE_DAW_ENGINEERING.md`](docs/MOBILE_DAW_ENGINEERING.md); external and Lab research intake: [`docs/MOBILE_DAW_RESEARCH_NOTES.md`](docs/MOBILE_DAW_RESEARCH_NOTES.md). This is future product direction, **not** implementation, test, device, or release evidence.
 
 ---
 
