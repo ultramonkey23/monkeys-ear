@@ -1,3 +1,6 @@
+#ifdef NDEBUG
+#undef NDEBUG // Probe assertions must run in Release builds.
+#endif
 #include "monkeys_ear/pattern_transport.h"
 #include <array>
 #include <algorithm>
