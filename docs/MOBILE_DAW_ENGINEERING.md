@@ -117,3 +117,17 @@ Do not rename these stages `non-production prototypes` or move them to branches.
 | Creative quality | comparison fixtures and level matched audio | creator judgment, retained presets/songs, not automated aesthetic scoring |
 
 **Release truth:** the inspected remote repo does not establish a compiled Android app, REAPER stem round-trip or touch device test. Current local work/active agents remain UNKNOWN. This contract is a target for the existing production process.
+
+## Executed Wave 1 — shared pattern/quantize to existing audio engine (2026-11-08)
+
+**Implementation in production source (not a throwaway proof-of-concept):**
+- `include/monkeys_ear/pattern_transport.h` now defines `PatternNote` with persistent raw timing/identity, deliberate per-note nudges, configurable tempo/PPQ/loop/grid/strength/swing; `PatternProgram` compiles validated, fixed-capacity, immutable note-on/off events and preserves the previously valid program on rejected input. No MIDI event or project edit modifies the original recorded onset.
+- `PatternPlayer` renders compiled events through **the current `MonkeysEarEngine` MIDI note-on/off and audio block APIs**, splitting blocks exactly at event frame positions, replaying loops with note-off ordering, passing input audio pointers through, and allowing DSP effect tails when playback stops. It has no heap/locks/I/O inside `process()`.
+- `test/test_pattern_transport.cpp` exercises quantization strength/swing/nudges, sample-frame timing, duplicate/invalid input rejection, odd-meter loops, block-size-independent playback, audio input pointer continuity, stopping and loop wrap; the full CMake target also runs actual sound through existing `MonkeysEarEngine` on a local build. `run_tests.bat` requires the new target rather than conditionally skipping it.
+- The project uses `-ffast-math` globally; initial ordinary `isfinite` input checks were falsified by an optimized local test. Production code now uses bit-level finite validation before numeric timing conversion.
+
+**Actually executed in the isolated build container:** standalone production header and event-engine test compiled and PASSED with GCC C++20 `-O3 -ffast-math -Werror`, and GCC AddressSanitizer/UndefinedBehaviorSanitizer. That is real **sequencer timing execution** with a deterministic fake event/audio consumer; it is NOT a complete Android build or REAPER host result.
+
+**Evidence boundary:** a GitHub source commit and test registration do not prove the full `monkeys_ear_core` CMake/Windows build executed. The CMake integration test using actual `MonkeysEarEngine` is present but execution on Cody's machine/Windows REAPER or Android hardware remains UNKNOWN until the actual installed Lab runs it. No touch piano roll, Android transport, multitrack arrangement, variable-tempo map, human playing or stems implementation is claimed by this wave.
+
+**Next consumer pressure:** schedule edits from physical keyboard/MIDI/touch into the same canonical raw-note model, add first-class pattern/scene arrangement and richer reversible quantization, and produce an actual WAV/stem render accepted by REAPER. Do not create a different sequencer when implementing mobile input adapters.

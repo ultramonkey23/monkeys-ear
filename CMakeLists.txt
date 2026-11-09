@@ -43,6 +43,15 @@ add_executable(monkeys_ear_test_runner test/test_dsp_core.cpp)
 target_include_directories(monkeys_ear_test_runner PRIVATE ${CMAKE_CURRENT_SOURCE_DIR}/test)
 target_link_libraries(monkeys_ear_test_runner PRIVATE monkeys_ear_core)
 
+# Product pattern/loop quantization program: compile-time note identity and
+# sample-frame scheduling feed the SAME real synth/FX engine via MIDI calls.
+# The cross-platform mock checks exact timing, while this target also renders
+# audio through MonkeysEarEngine (no separate demonstration synthesizer).
+add_executable(monkeys_ear_pattern_transport_probe test/test_pattern_transport.cpp)
+target_link_libraries(monkeys_ear_pattern_transport_probe PRIVATE monkeys_ear_core)
+target_compile_definitions(monkeys_ear_pattern_transport_probe PRIVATE
+    MONKEYS_EAR_PATTERN_INTEGRATION=1)
+
 # The four-tube rack is product DSP. Run its focused tests in addition to
 # the whole-engine suite, not as a disconnected prototype executable.
 add_executable(monkeys_ear_tube_rack_probe test/test_tube_rack.cpp)
