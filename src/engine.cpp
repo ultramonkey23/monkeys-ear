@@ -86,7 +86,7 @@ void MonkeysEarEngine::update_lfo_clock() {
         ? host_tempo_bpm_:p.tempo_bpm;
     const bool hosted=p.lfo_follow_host_tempo&&host_tempo_valid_;
     const float rate=p.lfo_tempo_sync
-        ? clamp(tempo,hosted?20.0f:40.0f,hosted?400.0f:240.0f)/60.0f/kBeatDivisions[clamp(p.lfo_subdivision,0,11)]
+        ? clamp(tempo,hosted?20.0f:40.0f,hosted?400.0f:240.0f)/60.0f/kBeatDivisions[std::clamp(p.lfo_subdivision,0,11)]
         : p.lfo1_rate_hz;
     lfo1_.set_rate_hz(clamp(rate,0.05f,30.0f));
 }
@@ -104,7 +104,7 @@ void MonkeysEarEngine::set_host_transport(double tempo, bool tempo_valid,
     const auto& p=preset_manager_.get_current();
     if(playing&&p.lfo_tempo_sync&&p.lfo_follow_host_tempo
        &&quarter_position_valid&&finite64(project_quarters)) {
-        const double beats=kBeatDivisions[clamp(p.lfo_subdivision,0,11)];
+        const double beats=kBeatDivisions[std::clamp(p.lfo_subdivision,0,11)];
         const double phase=std::fmod(project_quarters/beats,1.0);
         lfo1_.reset_phase(static_cast<float>(phase));
     }
