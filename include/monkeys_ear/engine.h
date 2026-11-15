@@ -113,6 +113,9 @@ private:
     float last_velocity_;
     float performance_drift_smoothed_=0.0f;
     float performance_fracture_smoothed_=0.0f;
+    // Causal stereo DC blocking after the nonlinear chain and before limiting.
+    float output_dc_coefficient_=0.f;
+    float output_dc_x_[2]={},output_dc_y_[2]={};
     size_t modulation_counter_;
     MotionSmoother cutoff_motion_;
     MotionSmoother resonance_motion_;

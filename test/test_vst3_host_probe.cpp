@@ -548,13 +548,35 @@ int main() {
                 instr_out.silenceFlags==0u,
                 "after note-off, effect tails cannot be suppressed by stale flags");
     TwoPointChanges gain_ramp(8,64,.85,0.0);
-    instr_data.inputParameterChanges=&gain_ramp;
-    CHECK_STAGE(instr_proc->process(instr_data)==kResultOk,"render two automation values in one audio block");
-    float gain_first=0.f,gain_second=0.f;
-    for(int i=0;i<64;++i)gain_first=std::max(gain_first,std::abs(instr_l[i]));
-    for(int i=64;i<128;++i)gain_second=std::max(gain_second,std::abs(instr_l[i]));
-    CHECK_STAGE(gain_first>1.e-7f && gain_second<gain_first*.10f,
-                "master gain automation takes effect at offset 64, not block start");
+    // Compare identical fresh processors: a 12 ms gain smoother must not be
+    // expected to fall 90% in 64 samples, and oscillator peaks are not gain.
+    IComponent *gain_a=nullptr,*gain_b=nullptr;
+    CHECK_STAGE(factory2->createInstance(info0.cid,IComponent_iid,(void**)&gain_a)==kResultOk &&
+                factory2->createInstance(info0.cid,IComponent_iid,(void**)&gain_b)==kResultOk,
+                "create independent processors for gain timing comparison");
+    IAudioProcessor *proc_a=nullptr,*proc_b=nullptr;
+    CHECK_STAGE(gain_a->queryInterface(IAudioProcessor_iid,(void**)&proc_a)==kResultOk &&
+                gain_b->queryInterface(IAudioProcessor_iid,(void**)&proc_b)==kResultOk &&
+                proc_a->setupProcessing(instr_setup)==kResultOk && proc_b->setupProcessing(instr_setup)==kResultOk &&
+                gain_a->setActive(true)==kResultOk && gain_b->setActive(true)==kResultOk,
+                "prepare identical gain comparison processors");
+    std::vector<float> a_l(128),a_r(128),b_l(128),b_r(128);
+    float* a_channels[]={a_l.data(),a_r.data()}; float* b_channels[]={b_l.data(),b_r.data()};
+    AudioBusBuffers a_out{},b_out{}; a_out.numChannels=b_out.numChannels=2;
+    a_out.channelBuffers32=a_channels; b_out.channelBuffers32=b_channels;
+    OneEventList gain_note; gain_note.event.type=kNoteOnEvent; gain_note.event.noteOn.pitch=60; gain_note.event.noteOn.velocity=.9f;
+    TwoPointChanges gain_constant(8,64,.85,.85);
+    ProcessData a_data{},b_data{}; a_data.numSamples=b_data.numSamples=128;
+    a_data.numOutputs=b_data.numOutputs=1; a_data.outputs=&a_out; b_data.outputs=&b_out;
+    a_data.inputEvents=b_data.inputEvents=&gain_note; a_data.inputParameterChanges=&gain_constant; b_data.inputParameterChanges=&gain_ramp;
+    CHECK_STAGE(proc_a->process(a_data)==kResultOk && proc_b->process(b_data)==kResultOk,
+                "render matched reference and offset gain automation");
+    float before_delta=0.f,after_delta=0.f;
+    for(int i=0;i<64;++i)before_delta=std::max(before_delta,std::abs(a_l[i]-b_l[i]));
+    for(int i=64;i<128;++i)after_delta=std::max(after_delta,std::abs(a_l[i]-b_l[i]));
+    CHECK_STAGE(before_delta<1.e-7f && after_delta>1.e-6f,
+                "smoothed gain automation changes audio only from offset 64 onward");
+    gain_a->setActive(false);gain_b->setActive(false);proc_a->release();proc_b->release();gain_a->release();gain_b->release();
     ProcessData flush{};flush.numSamples=0;flush.inputParameterChanges=&gain_ramp;
     CHECK_STAGE(instr_proc->process(flush)==kResultOk,
                 "accept host zero-sample parameter flush");

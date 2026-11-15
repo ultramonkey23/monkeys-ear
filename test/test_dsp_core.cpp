@@ -1,3 +1,6 @@
+#ifdef NDEBUG
+#undef NDEBUG // The full DSP battery must also execute its checks in Release builds.
+#endif
 #include "monkeys_ear/engine.h"
 #include "../vst3/preset_param_snapshot.h"
 #include "monkeys_ear/lfo.h"
@@ -862,6 +865,64 @@ void test_bounded_sound_space() {
     std::cout<<"PASS (bound="<<maximum<<"c, yield="<<min_cut<<" dB -> "<<recovered<<" dB, peak="<<peak<<")\n";
 }
 
+// Exercise the actual selectable instrument palette, including the quiet
+// period before MIDI and host reset. This is a signal-integrity screen, not
+// a claim that spectral artifacts or musical quality are resolved.
+void test_factory_palette_signal_integrity() {
+    using Factory = PresetData (*)();
+    const std::array<Factory,8> factories={{
+        &PresetManager::create_factory_lead,&PresetManager::create_monolith,
+        &PresetManager::create_feral_wobble,&PresetManager::create_velvet_lead,
+        &PresetManager::create_tube_foundry,&PresetManager::create_clockwork_sub,
+        &PresetManager::create_glass_chamber,&PresetManager::create_sound_space}};
+    std::cout << "[TEST] Factory palette silent reset and MIDI signal integrity...\n";
+    for (float rate : {44100.f,48000.f,96000.f}) for (auto make : factories) {
+        MonkeysEarEngine engine; engine.init(rate,128); auto patch=make(); engine.load_preset(patch); engine.reset();
+        std::array<float,128> left{},right{};
+        float silent_peak=0.f, musical_peak=0.f;
+        for(int block=0;block<4;++block) {
+            engine.process_block(nullptr,nullptr,left.data(),right.data(),left.size());
+            for(float v:left){assert(std::isfinite(v));silent_peak=std::max(silent_peak,std::abs(v));}
+            for(float v:right){assert(std::isfinite(v));silent_peak=std::max(silent_peak,std::abs(v));}
+        }
+        assert(silent_peak<1.e-6f);
+        for(int note : {36,60,84}) {
+            engine.handle_midi_note_on(note,.8f);
+            for(int block=0;block<24;++block) {
+                engine.process_block(nullptr,nullptr,left.data(),right.data(),left.size());
+                for(float v:left){assert(std::isfinite(v));musical_peak=std::max(musical_peak,std::abs(v));}
+                for(float v:right){assert(std::isfinite(v));musical_peak=std::max(musical_peak,std::abs(v));}
+            }
+            engine.handle_midi_note_off(note);
+        }
+        assert(musical_peak>1.e-6f && musical_peak<=1.01f);
+        engine.reset();
+        engine.process_block(nullptr,nullptr,left.data(),right.data(),left.size());
+        for(float v:left)assert(std::abs(v)<1.e-6f);
+        for(float v:right)assert(std::abs(v)<1.e-6f);
+        std::cout << "  " << patch.name << " @ " << rate << " Hz peak=" << musical_peak << "\n";
+    }
+}
+
+void test_preset_output_dc_rejection() {
+    std::cout << "[TEST] Factory preset output DC rejection...\n";
+    for(float rate : {44100.f,48000.f,96000.f}) {
+        MonkeysEarEngine engine;engine.init(rate,128);
+        engine.load_preset(PresetManager::create_feral_wobble());
+        engine.handle_midi_note_on(40,.8f);
+        std::array<float,128> l{},r{};double sum_l=0.,sum_r=0.;size_t count=0;
+        const int blocks=static_cast<int>(rate*1.5f/128.f);
+        for(int b=0;b<blocks;++b){
+            engine.process_block(nullptr,nullptr,l.data(),r.data(),l.size());
+            if(b<static_cast<int>(rate*.5f/128.f))continue;
+            for(size_t i=0;i<l.size();++i){sum_l+=l[i];sum_r+=r[i];++count;}
+        }
+        const double mean_l=sum_l/count,mean_r=sum_r/count;
+        assert(std::abs(mean_l)<.01 && std::abs(mean_r)<.01);
+        std::cout << "  " << rate << " Hz DC means=" << mean_l << ", " << mean_r << "\n";
+    }
+}
+
 // ── Test 5: A/B Experiment & Multi-Timbre Render ──────────────────────────
 void run_ab_experiment_and_renders() {
     std::cout << "\n=======================================================\n";
@@ -1178,6 +1239,8 @@ int main(int argc, char** argv) {
         test_host_clock_and_groove_in_product();
         test_motion_causality();
         test_bounded_sound_space();
+        test_factory_palette_signal_integrity();
+        test_preset_output_dc_rejection();
         run_ab_experiment_and_renders();
         return 0;
     } catch (const std::exception& e) {

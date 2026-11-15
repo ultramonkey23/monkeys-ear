@@ -80,6 +80,16 @@ The critical next proof is a rebuilt whole instrument, full Windows VST3 host pr
 
 ## Real-Time Performance & Proof
 
+The shared instrument/FX output now removes DC with a causal 5 Hz stereo
+high-pass before the safety limiter. In the existing 48 kHz factory renders,
+FERAL WOBBLE's one-second channel-averaged means fell from approximately
+0.045/0.040/0.038 to 0.00085/0.00082/-0.00104; VELVET LEAD fell from
+0.023/0.029/0.026 to 0.00094/0.00002/-0.00038. These are output-level
+measurements, not proof that all audible buzz or aliasing has been removed.
+The high-pass changes very-low-frequency response and needs listening review.
+The factory palette battery exercises silent idle/reset and MIDI output across
+44.1, 48 and 96 kHz. Human listening and real REAPER MIDI remain separate work.
+
 Verified on Windows x64 @ 48kHz (Build with CMake + Ninja + GCC 14.2):
 
 | Buffer Size | Block Deadline | Measured Avg Block Time | Measured Max Block Time | Deadline Margin | Deadline Misses |

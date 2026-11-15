@@ -15,6 +15,7 @@ MonkeysEarEngine::MonkeysEarEngine()
 
 void MonkeysEarEngine::init(float sample_rate, size_t max_block_size) {
     sample_rate_ = sample_rate > 0.0f ? sample_rate : 48000.0f;
+    output_dc_coefficient_=std::exp(-TWO_PI*5.0f/sample_rate_);
     max_block_size_ = max_block_size > 0 ? max_block_size : 512;
 
     voice_manager_.set_sample_rate(sample_rate_);
@@ -61,6 +62,7 @@ void MonkeysEarEngine::reset() {
     delay_.reset();
     fdn_reverb_.reset();
     safety_limiter_.reset();
+    output_dc_x_[0]=output_dc_x_[1]=output_dc_y_[0]=output_dc_y_[1]=0.f;
     latency_meter_.reset();
     master_gain_motion_.reset(master_volume_); // deactivation resets audible history
     performance_drift_smoothed_=field_unit(preset_manager_.get_current().performance_drift);
@@ -575,6 +577,13 @@ void MonkeysEarEngine::process_block(
         const float audible_gain=master_gain_motion_.process(master_volume_);
         float out_l = reverbed_l * audible_gain;
         float out_r = reverbed_r * audible_gain;
+        const auto dc_block=[this](float input,int channel) {
+            input=sanitize(input);
+            const float output=sanitize(input-output_dc_x_[channel]+output_dc_coefficient_*output_dc_y_[channel]);
+            output_dc_x_[channel]=input; output_dc_y_[channel]=output;
+            return output;
+        };
+        out_l=dc_block(out_l,0);out_r=dc_block(out_r,1);
         safety_limiter_.process(out_l, out_r);
 
         output_l[i] = out_l;
