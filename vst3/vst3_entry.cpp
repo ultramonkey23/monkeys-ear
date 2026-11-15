@@ -35,7 +35,7 @@ static const TUID kMonkeysEarControllerCID = INLINE_UID(
     0x4D6F6E6B, 0x65797345, 0x61724374, 0x726C7202
 );
 
-static constexpr int kNumParams = 178;
+static constexpr int kNumParams = 202;
 // Root + existing coherent, independently navigable instrument subsystems.
 static constexpr int kUnitCount = 15;
 static constexpr const char* kUnitNames[kUnitCount]={
@@ -46,11 +46,11 @@ static constexpr const char* kUnitNames[kUnitCount]={
 };
 static int32 unit_for_parameter(int32 id){
     if(id<=7||id==79||id==172||id==173||id==176||id==177)return 1;
-    if(id==8||id==18||id==80||id==81)return 14;
-    if((id>=9&&id<=12)||(id>=19&&id<=27)||(id>=70&&id<=78)||(id>=161&&id<=164))return 2;
+    if(id==8||id==18||id==80||id==81||id>=198)return 14;
+    if((id>=9&&id<=12)||(id>=19&&id<=27)||(id>=70&&id<=78)||(id>=161&&id<=164)||(id>=178&&id<=191))return 2;
     if((id>=28&&id<=36)||(id>=165&&id<=168))return 3;
     if(id>=13&&id<=17)return 6;
-    if(id>=37&&id<=54)return 4;
+    if((id>=37&&id<=54)||(id>=192&&id<=197))return 4;
     if((id>=55&&id<=69)||(id>=169&&id<=171)||id>=174)return 5;
     if(id>=82&&id<=112)return 7;
     if(id>=113&&id<=123)return 8;
@@ -59,7 +59,7 @@ static int32 unit_for_parameter(int32 id){
     return 0;
 }
 static constexpr uint32 kStateMagic = 0x4D453032u; // ME02
-static constexpr uint32 kStateVersion = 7u;
+static constexpr uint32 kStateVersion = 8u;
 
 // Avoid C++ fast-math assumptions when host automation includes NaN/Inf.
 static bool valid_normalized(ParamValue value) {
@@ -145,6 +145,30 @@ struct SharedPluginState {
         params[175].store(0.0f); // straight rhythmic phase at factory defaults
         params[176].store(0.0f); // neutral DRIFT gesture
         params[177].store(0.0f); // neutral FRACTURE gesture
+        params[178].store(0.0f); // Wave A Family: Core (Osc 1 Wave)
+        params[179].store(0.5f); // Wave B: Formant
+        params[180].store(0.0f); // Wave Morph
+        params[181].store(0.5f); // Phase Warp (50%)
+        params[182].store(0.0f); // Wave Fold
+        params[183].store(0.0f); // Osc Unison (1)
+        params[184].store(0.24f);// Unison Detune (12 cents)
+        params[185].store(0.0f); // Sub Harmonics
+        params[186].store(0.5f); // Env -> Morph (0)
+        params[187].store(0.0f); // LFO -> Morph (0)
+        params[188].store(0.25f);// Gen Shape
+        params[189].store(0.50f);// Gen Odd/Even
+        params[190].store(0.55f);// Gen Spectral Tilt
+        params[191].store(0.35f);// Gen Formant Peak
+        params[192].store(0.0f); // Onion EQ Enable (Off)
+        params[193].store(0.5f); // Onion Intent (Yield)
+        params[194].store(0.65f);// Onion Amount
+        params[195].store(0.55f);// Onion Sensitivity
+        params[196].store(0.70f);// Onion Low Protect
+        params[197].store(0.60f);// Onion Transient Protect
+        params[198].store(0.375f);// Eco Link Mode (Publish)
+        params[199].store(0.0f); // Eco Channel (Ch 1)
+        params[200].store(0.75f);// Eco Peer Gain
+        params[201].store(0.0f); // Eco Pitch Follow
         for (int i = 0; i < kNumParams; ++i) dirty[i].store(false);
     }
 };
@@ -779,6 +803,13 @@ public:
             : (paramIndex>=129&&paramIndex<=160&&((paramIndex-129)%8)==0)?1
             : (paramIndex>=129&&paramIndex<=160&&((paramIndex-129)%8)==1)?monkeys_ear::kTubeFlavorCount-1
             : paramIndex==171?11
+            : paramIndex==178?5
+            : paramIndex==179?8
+            : paramIndex==183?4
+            : paramIndex==192?1
+            : paramIndex==193?2
+            : paramIndex==198?3
+            : paramIndex==199?7
             : ((paramIndex>=101&&paramIndex<=112&&((paramIndex-101)%3)<2)?7:0);
         info.unitId = unit_for_parameter(paramIndex);
         // Pitch bend and pressure are hidden from ordinary editing, but must
@@ -850,6 +881,18 @@ public:
             std::snprintf(title,sizeof(title),"PERFORM: Drift");
         } else if(paramIndex==177){
             std::snprintf(title,sizeof(title),"PERFORM: Fracture");
+        } else if(paramIndex>=178&&paramIndex<=201){
+            static constexpr const char* extTitles[24] = {
+                "OSC: Wave A Family", "OSC: Wave B Morph Target", "OSC: Wave Morph",
+                "OSC: Phase Warp / PWM", "OSC: Wave Fold", "OSC: Unison Voices",
+                "OSC: Unison Detune", "OSC: Sub Harmonics", "OSC: Env -> Morph",
+                "OSC: LFO -> Morph", "GEN: Core Shape", "GEN: Odd / Even",
+                "GEN: Spectral Tilt", "GEN: Formant Peak",
+                "ONION: Enable", "ONION: Intent", "ONION: Amount",
+                "ONION: Sensitivity", "ONION: Low Protect", "ONION: Transient Protect",
+                "ECO: Link Mode", "ECO: Channel", "ECO: Peer Gain", "ECO: Pitch Follow"
+            };
+            std::snprintf(title,sizeof(title),"%s",extTitles[paramIndex-178]);
         } else {
             std::snprintf(title,sizeof(title),"%s",titles[paramIndex]);
         }
@@ -934,6 +977,29 @@ public:
         else if(id==113){snprintf(buf,sizeof(buf),"%s",valueNormalized>=.5?"Dual Layer On":"Bypass");}
         else if(id==117){snprintf(buf,sizeof(buf),"%.1f ms",2.0+(1.0-static_cast<float>(valueNormalized))*58.0);}
         else if(id==122){snprintf(buf,sizeof(buf),"%.0f %% second stage",valueNormalized*100.0);}
+        else if(id==178){
+            static constexpr const char* waf[]={"Core (Osc1)","Formant","BrassFold","Organ","GlassBell","Generator"};
+            const int n=std::clamp(static_cast<int>(valueNormalized*6.0),0,5);
+            snprintf(buf,sizeof(buf),"%s",waf[n]);
+        }
+        else if(id==179){
+            static constexpr const char* wbf[]={"Saw","Pulse","Triangle","Sine","Formant","BrassFold","Organ","GlassBell","Generator"};
+            const int n=std::clamp(static_cast<int>(valueNormalized*9.0),0,8);
+            snprintf(buf,sizeof(buf),"%s",wbf[n]);
+        }
+        else if(id==183){ snprintf(buf,sizeof(buf),"%d voices",1+std::clamp(static_cast<int>(valueNormalized*5.0),0,4)); }
+        else if(id==184){ snprintf(buf,sizeof(buf),"%.1f cents",valueNormalized*50.0); }
+        else if(id==186){ snprintf(buf,sizeof(buf),"%+.0f %%",(valueNormalized*2.0-1.0)*100.0); }
+        else if(id==192){ snprintf(buf,sizeof(buf),"%s",valueNormalized>=0.5?"On":"Bypass"); }
+        else if(id==193){
+            static constexpr const char* intents[]={"Equal","Yield","Preserve"};
+            snprintf(buf,sizeof(buf),"%s",intents[std::clamp(static_cast<int>(valueNormalized*3.0),0,2)]);
+        }
+        else if(id==198){
+            static constexpr const char* modes[]={"Off","Publish","Follow","Link (Pub+Sub)"};
+            snprintf(buf,sizeof(buf),"%s",modes[std::clamp(static_cast<int>(valueNormalized*4.0),0,3)]);
+        }
+        else if(id==199){ snprintf(buf,sizeof(buf),"Ch %d",1+std::clamp(static_cast<int>(valueNormalized*8.0),0,7)); }
         else if(id>=101&&id<=112&&((id-101)%3)<2){
             int n=static_cast<int>(valueNormalized*7.99);const char* src[]={"LFO","Envelope","Fast Energy","Slow Energy","Direction","Aftertouch","Velocity","Audio Energy"};const char* dst[]={"Pitch Bound","Harmonic Bound","Modal Bound","Movement Rate","Attraction","Spectral Depth","Phase","Harmonic Mix"};
             snprintf(buf,sizeof(buf),"%s",((id-101)%3)==0?src[std::clamp(n,0,7)]:dst[std::clamp(n,0,7)]);

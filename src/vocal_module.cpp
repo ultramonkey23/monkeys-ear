@@ -30,10 +30,27 @@ void VocalModule::prepare(float sample_rate, uint32_t max_block_size) noexcept {
     max_block_size_=std::max<uint32_t>(1u,std::min<uint32_t>(max_block_size,65536u));
     processor_.set_sample_rate(sample_rate_); local_pitch_tracker_.set_sample_rate(sample_rate_); processor_.set_gain(0.0f); processor_.set_mix(1.0f);
     processor_.set_highpass_enabled(false); processor_.set_vocal_controls(controls_); processor_.reset();
+    eco_analyzer_.set_sample_rate(sample_rate_);
+    eco_analyzer_.reset();
+    eco_bus_.ensure_connected();
+    last_eco_synth_frame_id_ = 0;
+    last_tracked_hz_ = 0.0f;
+    last_tracked_conf_ = 0.0f;
+    eco_peer_linked_ = false;
     local_pitch_hz_=local_pitch_confidence_=0.f; clear_ecosystem_evidence(); health_={true,true,true};
 }
 
-void VocalModule::reset() noexcept { processor_.reset(); local_pitch_tracker_.reset(); local_pitch_hz_=local_pitch_confidence_=0.f; clear_ecosystem_evidence(); health_.finite_output=true; }
+void VocalModule::reset() noexcept {
+    processor_.reset();
+    local_pitch_tracker_.reset();
+    eco_analyzer_.reset();
+    local_pitch_hz_=local_pitch_confidence_=0.f;
+    last_tracked_hz_ = 0.0f;
+    last_tracked_conf_ = 0.0f;
+    eco_peer_linked_ = false;
+    clear_ecosystem_evidence();
+    health_.finite_output=true;
+}
 void VocalModule::set_controls(const VocalExpressionControls& controls) noexcept {
     controls_=controls;
     auto processor_controls=controls_;
@@ -70,16 +87,41 @@ void VocalModule::process_block(const float* input_l,const float* input_r,float*
     if(!output_l||!output_r){health_.state_valid=false;return;}
     // Shared evidence enriches local analysis but does not automatically seize
     // authority: it wins only when valid and at least as confident as local evidence.
+    if (eco_link_enabled_) {
+        EcosystemStreamFrame sf{};
+        if (eco_bus_.read_synth_or_any(eco_slot_, sf) && sf.frame_id != last_eco_synth_frame_id_) {
+            last_eco_synth_frame_id_ = sf.frame_id;
+            if (sf.note_gate > 0.5f && sf.pitch_confidence > 0.25f) {
+                const float hz = 440.0f * std::pow(2.0f, clamp(sf.pitch_cents, -4800.0f, 4800.0f) / 1200.0f);
+                if (ecosystem_finite(hz) && hz >= 20.0f && hz <= 5000.0f) {
+                    shared_pitch_hz_ = hz;
+                    shared_pitch_confidence_ = clamp(sf.pitch_confidence, 0.0f, 1.0f);
+                    shared_pitch_samples_remaining_ = static_cast<uint32_t>(sample_rate_ * 0.10f);
+                    shared_pitch_valid_ = true;
+                    eco_peer_linked_ = true;
+                }
+            }
+        } else if (!shared_pitch_valid_) {
+            eco_peer_linked_ = false;
+        }
+    } else {
+        eco_peer_linked_ = false;
+    }
+
+    float block_tracked_hz = 0.0f;
+    float block_conf = 0.0f;
+    float block_rms_sq = 0.0f;
     const uint32_t n=std::min(num_samples,max_block_size_);
     for(uint32_t i=0;i<n;++i){
         const float l=input_l?sanitize(input_l[i]):0.0f,r=input_r?sanitize(input_r[i]):l;
-        if(shared_pitch_valid_ && shared_pitch_samples_remaining_==0)clear_ecosystem_evidence();
+        if(shared_pitch_valid_ && shared_pitch_samples_remaining_==0){ clear_ecosystem_evidence(); eco_peer_linked_ = false; }
         if(shared_pitch_samples_remaining_>0)--shared_pitch_samples_remaining_;
         if(bypass_){output_l[i]=l;output_r[i]=r;continue;}
         const float mid=.5f*(l+r),side=.5f*(l-r);
         // The existing causal external tracker is the module's local authority.
         // A connected ecosystem may enrich it only when its evidence is stronger.
         local_pitch_tracker_.process(mid);
+        (void)eco_analyzer_.process_sample(mid, mid);
         const float detected_hz=local_pitch_tracker_.tracked_frequency_hz();
         const float detected_confidence=local_pitch_tracker_.confidence();
         const bool use_manual=local_pitch_confidence_>=detected_confidence;
@@ -88,6 +130,9 @@ void VocalModule::process_block(const float* input_l,const float* input_r,float*
         const bool use_shared=shared_pitch_valid_&&shared_pitch_confidence_>=local_confidence;
         const float tracked_hz=use_shared?shared_pitch_hz_:local_hz;
         const float confidence=use_shared?shared_pitch_confidence_:local_confidence;
+        block_tracked_hz = tracked_hz;
+        block_conf = confidence;
+        block_rms_sq += mid * mid;
         const float conditioned=processor_.process_sample(mid,0.0f);
         const float wet_mid=processor_.process_vocal_sample(conditioned,tracked_hz,confidence);
         const float module_mix=clamp(sanitize(controls_.mix),0.0f,1.0f);
@@ -95,6 +140,20 @@ void VocalModule::process_block(const float* input_l,const float* input_r,float*
         float out_l=sanitize(mixed_mid+side),out_r=sanitize(mixed_mid-side);
         if(!std::isfinite(out_l)||!std::isfinite(out_r)){out_l=l;out_r=r;health_.finite_output=false;}
         output_l[i]=out_l;output_r[i]=out_r;
+    }
+    last_tracked_hz_ = block_tracked_hz;
+    last_tracked_conf_ = block_conf;
+    if (eco_link_enabled_ && !bypass_ && n > 0) {
+        EcosystemStreamFrame vpub{};
+        vpub.frame_id = ++vocal_pub_frame_id_;
+        vpub.role = 2;
+        vpub.active = true;
+        vpub.pitch_cents = (block_tracked_hz > 20.0f) ? (1200.0f * std::log2(block_tracked_hz / 440.0f)) : 0.0f;
+        vpub.pitch_confidence = block_conf;
+        vpub.loudness = clamp(std::sqrt(block_rms_sq / static_cast<float>(n)), 0.0f, 1.0f);
+        vpub.note_gate = (vpub.loudness > 0.01f && block_conf > 0.25f) ? 1.0f : 0.0f;
+        vpub.spectral_occupancy = eco_analyzer_.self_occupancy();
+        eco_bus_.publish_vocal(eco_slot_, vpub);
     }
     // Oversized blocks fall back to dry after max_block_size_, but time still
     // advances and must not keep a shared pitch alive into the next block.

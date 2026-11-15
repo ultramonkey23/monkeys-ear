@@ -119,10 +119,100 @@ float ParametricEQ::process(float input, float frequency_mod_octaves, float gain
 void ExternalSubharmonic::set_sample_rate(float sr) { sample_rate_ = std::max(1000.0f, sr); reset(); }
 void ExternalSubharmonic::reset() {
     previous_input_=0; samples_since_crossing_=0; previous_period_=0; stale_samples_=0;
-    phase_=0; tracked_frequency_hz_=0; confidence_=0; envelope_=0;
+    phase_=0; tracked_frequency_hz_=0; zc_frequency_hz_=0; adopted_frequency_hz_=0;
+    pending_candidate_hz_=0; pending_persist_count_=0; unvoiced_hops_=0;
+    hop_counter_=0; ring_write_pos_=0; ring_filled_=0;
+    confidence_=0; envelope_=0;
+    ring_buffer_.fill(0.0f);
+}
+
+float ExternalSubharmonic::normalized_autocorr(float candidate_hz) const noexcept {
+    if (candidate_hz < 50.0f || ring_filled_ < kAnalysisWin) return 0.0f;
+    const size_t lag = static_cast<size_t>(std::round(sample_rate_ / candidate_hz));
+    if (lag < 8 || lag + kAnalysisWin > ring_filled_ || lag >= kRingSize) return 0.0f;
+
+    float num = 0.0f, e0 = 0.0f, e1 = 0.0f;
+    for (size_t i = 0; i < kAnalysisWin; ++i) {
+        const size_t idx0 = (ring_write_pos_ + kRingSize - 1 - i) & (kRingSize - 1);
+        const size_t idx1 = (ring_write_pos_ + kRingSize - 1 - (i + lag)) & (kRingSize - 1);
+        const float x0 = ring_buffer_[idx0];
+        const float x1 = ring_buffer_[idx1];
+        num += x0 * x1;
+        e0 += x0 * x0;
+        e1 += x1 * x1;
+    }
+    const float denom = std::sqrt(std::max(1e-12f, e0 * e1));
+    return clamp(num / denom, -1.0f, 1.0f);
+}
+
+float ExternalSubharmonic::hann_goertzel_mag(float candidate_hz) const noexcept {
+    if (candidate_hz < 40.0f || ring_filled_ < kAnalysisWin) return 0.0f;
+    const float omega = TWO_PI * candidate_hz / sample_rate_;
+    const float coeff = 2.0f * std::cos(omega);
+    float q0 = 0.0f, q1 = 0.0f, q2 = 0.0f;
+    constexpr float kInvNm1 = 1.0f / static_cast<float>(kAnalysisWin - 1);
+    for (size_t i = 0; i < kAnalysisWin; ++i) {
+        const size_t idx = (ring_write_pos_ + kRingSize - kAnalysisWin + i) & (kRingSize - 1);
+        const float win = 0.5f * (1.0f - std::cos(TWO_PI * static_cast<float>(i) * kInvNm1));
+        q0 = coeff * q1 - q2 + ring_buffer_[idx] * win;
+        q2 = q1;
+        q1 = q0;
+    }
+    const float mag2 = std::max(0.0f, q1 * q1 + q2 * q2 - q1 * q2 * coeff);
+    return std::sqrt(mag2);
+}
+
+void ExternalSubharmonic::evaluate_harmonic_evidence() noexcept {
+    if (envelope_ <= 0.008f || zc_frequency_hz_ < 55.0f || ring_filled_ < kAnalysisWin) {
+        if (++unvoiced_hops_ >= 4) {
+            pending_persist_count_ = 0;
+            pending_candidate_hz_ = 0.0f;
+        }
+        return;
+    }
+    unvoiced_hops_ = 0;
+
+    float best_hz = zc_frequency_hz_;
+    const float mag_zc = hann_goertzel_mag(zc_frequency_hz_);
+    const float ac_zc = normalized_autocorr(zc_frequency_hz_);
+
+    // Check sub-octave (f/2) and sub-twelfth (f/3): requires BOTH strong normalized autocorr
+    // AND real non-residual fundamental energy in the spectrum so missing-F0 isn't hallucinated.
+    if (mag_zc > 1e-4f) {
+        for (int div = 2; div <= 3; ++div) {
+            const float sub_hz = zc_frequency_hz_ / static_cast<float>(div);
+            if (sub_hz < 55.0f) continue;
+            const float ac_sub = normalized_autocorr(sub_hz);
+            const float mag_sub = hann_goertzel_mag(sub_hz);
+            const float vis_ratio = mag_sub / mag_zc;
+            if (ac_sub >= std::max(0.72f, ac_zc * 0.90f) && vis_ratio >= 0.14f) {
+                best_hz = sub_hz;
+                break; // lowest supported fundamental wins
+            }
+        }
+    }
+
+    // Single-authority persistence gate: require kPersistFrames consecutive agreeing hops
+    if (pending_candidate_hz_ > 0.0f &&
+        std::abs(best_hz - pending_candidate_hz_) <= pending_candidate_hz_ * 0.08f) {
+        ++pending_persist_count_;
+    } else {
+        pending_candidate_hz_ = best_hz;
+        pending_persist_count_ = 1;
+    }
+
+    if (pending_persist_count_ >= kPersistFrames) {
+        adopted_frequency_hz_ = pending_candidate_hz_;
+    } else if (adopted_frequency_hz_ <= 0.0f) {
+        adopted_frequency_hz_ = zc_frequency_hz_;
+    }
 }
 
 float ExternalSubharmonic::process(float input) {
+    ring_buffer_[ring_write_pos_] = sanitize(input);
+    ring_write_pos_ = (ring_write_pos_ + 1) & (kRingSize - 1);
+    if (ring_filled_ < kRingSize) ++ring_filled_;
+
     float abs_in = std::abs(input);
     float env_coeff = abs_in > envelope_ ? 0.02f : 0.0008f;
     envelope_ += (abs_in - envelope_) * env_coeff;
@@ -136,13 +226,27 @@ float ExternalSubharmonic::process(float input) {
                 ? 1.0f - std::abs(static_cast<float>(period-previous_period_)) / static_cast<float>(previous_period_)
                 : 0.0f;
             confidence_ += (clamp(stability, 0.0f, 1.0f) - confidence_) * 0.35f;
-            tracked_frequency_hz_ += (candidate - tracked_frequency_hz_) * 0.25f;
+            if (zc_frequency_hz_ <= 0.0f) zc_frequency_hz_ = candidate;
+            else zc_frequency_hz_ += (candidate - zc_frequency_hz_) * 0.30f;
             previous_period_ = period;
             stale_samples_ = 0;
         } else confidence_ *= 0.8f;
         samples_since_crossing_ = 0;
     }
     previous_input_ = input;
+
+    const int hop = std::clamp(static_cast<int>(sample_rate_ * 0.005f), 128, 512);
+    if (++hop_counter_ >= hop) {
+        hop_counter_ = 0;
+        evaluate_harmonic_evidence();
+    }
+
+    const float target_hz = (adopted_frequency_hz_ > 0.0f) ? adopted_frequency_hz_ : zc_frequency_hz_;
+    if (target_hz > 0.0f) {
+        if (tracked_frequency_hz_ <= 0.0f) tracked_frequency_hz_ = target_hz;
+        else tracked_frequency_hz_ += (target_hz - tracked_frequency_hz_) * 0.03f;
+    }
+
     if (stale_samples_ > static_cast<int>(sample_rate_ * 0.05f)) confidence_ *= 0.999f;
     if (tracked_frequency_hz_ > 0.0f) {
         phase_ += tracked_frequency_hz_ / (sample_rate_ * static_cast<float>(ratio_denominator_));

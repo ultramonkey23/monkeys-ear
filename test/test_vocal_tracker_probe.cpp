@@ -54,11 +54,14 @@ int main() {
         return 1;
     }
 
-    // Deliberately characterize rather than require the correct octave yet.
-    // A later arbitration change can tighten these expectations after evidence.
+    const bool strong_second_f0 = std::abs(strong_second.hz - 110.0f) < 2.0f;
     const bool strong_second_octave = std::abs(strong_second.hz - 220.0f) < 2.0f;
     const bool missing_f0_octave = std::abs(missing_fundamental.hz - 220.0f) < 2.0f;
     std::cout << "  octave flags: strong2=" << strong_second_octave
               << ", missingF0=" << missing_f0_octave << "\n";
+    if (!strong_second_f0 || strong_second_octave || !missing_f0_octave) {
+        std::cerr << "FAIL: harmonic-evidence persistence octave resolution check failed\n";
+        return 1;
+    }
     return 0;
 }

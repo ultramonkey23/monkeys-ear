@@ -192,8 +192,8 @@ int main() {
     CHECK_STAGE(factory2->getClassInfo2(2,&info2)==kResultOk,"read controller class info");
     IEditController* controller=nullptr; res=factory2->createInstance(info2.cid,IEditController_iid,(void**)&controller);
     CHECK_STAGE(res==kResultOk && controller!=nullptr,"create edit controller");
-    CHECK_STAGE(controller->getParameterCount()==178,"controller exposes 178 stable host parameters");
-    for(int32 i=0;i<178;++i){ParameterInfo pInfo{};CHECK_STAGE(controller->getParameterInfo(i,pInfo)==kResultOk,"read parameter info");}
+    CHECK_STAGE(controller->getParameterCount()==202,"controller exposes 202 stable host parameters");
+    for(int32 i=0;i<202;++i){ParameterInfo pInfo{};CHECK_STAGE(controller->getParameterInfo(i,pInfo)==kResultOk,"read parameter info");}
 
     RecordingHandler edits;
     CHECK_STAGE(controller->setComponentHandler(&edits)==kResultOk,
@@ -284,7 +284,7 @@ int main() {
 
     MemoryStream state_stream;
     CHECK_STAGE(fx_comp->getState(&state_stream)==kResultOk,"serialize FX state");
-    CHECK_STAGE(state_stream.bytes.size()==12u+178u*sizeof(float),"serialized state size");
+    CHECK_STAGE(state_stream.bytes.size()==12u+202u*sizeof(float),"serialized state size");
     state_stream.pos=0; CHECK_STAGE(controller->setComponentState(&state_stream)==kResultOk,"controller accepts component state");
     ParameterInfo tube_type{},amp_sustain{},division{};
     CHECK_STAGE(controller->getParameterInfo(154,tube_type)==kResultOk && tube_type.stepCount==13,
@@ -370,7 +370,7 @@ int main() {
     std::memcpy(legacy.bytes.data()+8,&legacy_count,4);
     CHECK_STAGE(instr_comp->setState(&legacy)==kResultOk,"read legacy v3 host snapshot without new rack fields");
     MemoryStream migrated;CHECK_STAGE(instr_comp->getState(&migrated)==kResultOk &&
-        migrated.bytes.size()==12u+178u*sizeof(float),"legacy snapshot migrated with appended controls");
+        migrated.bytes.size()==12u+202u*sizeof(float),"legacy snapshot migrated with appended controls");
     // A v6/176-parameter project must adopt *neutral* gesture axes.
     MemoryStream previous_wave;
     previous_wave.bytes=a_state.bytes;
@@ -382,8 +382,8 @@ int main() {
                 "load previous wave's 176-parameter instrument state");
     MemoryStream migrated6;
     CHECK_STAGE(instr_comp->getState(&migrated6)==kResultOk &&
-                migrated6.bytes.size()==12u+178u*sizeof(float),
-                "migrate v6 session to 178 without losing old parameters");
+                migrated6.bytes.size()==12u+202u*sizeof(float),
+                "migrate v6 session to 202 without losing old parameters");
     float default_drift=99,default_fracture=99;
     std::memcpy(&default_drift,migrated6.bytes.data()+12u+176u*sizeof(float),4);
     std::memcpy(&default_fracture,migrated6.bytes.data()+12u+177u*sizeof(float),4);
@@ -432,7 +432,7 @@ int main() {
     // reopen. Execute a real IComponent::setState/process/getState round-trip.
     MemoryStream edited_patch;
     CHECK_STAGE(instr_comp->getState(&edited_patch)==kResultOk &&
-                edited_patch.bytes.size()==12u+178u*sizeof(float),
+                edited_patch.bytes.size()==12u+202u*sizeof(float),
                 "capture instrument snapshot before edited-patch recall");
     const auto patch_override=[&](int id,float value){
         std::memcpy(edited_patch.bytes.data()+12u+
@@ -508,7 +508,7 @@ int main() {
                 "sounding stereo instrument clears stale host silence flags");
     MemoryStream selected_patch_state;
     CHECK_STAGE(instr_comp->getState(&selected_patch_state)==kResultOk &&
-                selected_patch_state.bytes.size()==12u+178u*sizeof(float),
+                selected_patch_state.bytes.size()==12u+202u*sizeof(float),
                 "host can serialize live selected factory patch");
     float selected_tube=0,selected_groove=0;
     std::memcpy(&selected_tube,selected_patch_state.bytes.data()+12u+124u*sizeof(float),4);
@@ -529,7 +529,7 @@ int main() {
                 "perform FRACTURE through host parameter events");
     MemoryStream gesture_state;
     CHECK_STAGE(instr_comp->getState(&gesture_state)==kResultOk &&
-                gesture_state.bytes.size()==12u+178u*sizeof(float),
+                gesture_state.bytes.size()==12u+202u*sizeof(float),
                 "serialize audible performance field with the actual patch");
     float recorded_drift=0.f,recorded_fracture=0.f;
     std::memcpy(&recorded_drift,gesture_state.bytes.data()+12u+176u*sizeof(float),4);

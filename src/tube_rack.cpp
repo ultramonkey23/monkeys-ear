@@ -155,7 +155,8 @@ float TubeRack::process_stage(size_t i,float input) noexcept {
     s.hp_x=clean(shaped);s.hp_y=clean(hp);
     s.lp_y=clean(s.lp_y+(hp-s.lp_y)*s.lp_coeff);
     s.activity=std::min(1.f,e*.25f);
-    return clean(clamp(lerp(input,clamp(s.lp_y,-3.f,3.f),s.runtime_mix),-6.f,6.f));
+    float smooth_y=3.0f*fast_tanh(s.lp_y*(1.0f/3.0f));
+    return clean(clamp(lerp(input,smooth_y,s.runtime_mix),-6.f,6.f));
 }
 float TubeRack::process(float input) noexcept {
     input=clamp(clean(input),-6.f,6.f);

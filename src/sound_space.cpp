@@ -79,13 +79,18 @@ float SoundSpaceProcessor::process(float character,float weight,float center_hz,
     }
 
     float modal=0.0f,max_m=0.0f; constexpr float ratios[MODES]={1.49f,2.03f,2.91f,4.17f};
+    const float sr_safe=std::max(1.0f,sample_rate_);
+    const float decay_s=lerp(0.0015f,0.0070f,clamp(controls_.resistance,0.0f,1.0f));
+    const float r=std::exp(-1.0f/(decay_s*sr_safe));
+    const float b0=(1.0f-r)*1.35f;
     for(size_t i=0;i<MODES;++i){
         float freedom=lerp(0.12f,1.0f,static_cast<float>(i+1)/MODES*controls_.frequency_freedom);
         float mc=modal_fields_[i].process(modal_b*freedom*energy_scale,rate*(0.63f+0.11f*i),attract,controls_.resistance,controls_.repulsion,drive,dt);
-        max_m=std::max(max_m,std::abs(mc)); float hz=clamp(center_hz*ratios[i]*std::pow(2.0f,mc/1200.0f),30.0f,sample_rate_*0.44f);
-        float r=0.986f+0.011f*controls_.resistance,theta=TWO_PI*hz/sample_rate_;
-        float y=character+2.0f*r*std::cos(theta)*resonators_[i].y1-r*r*resonators_[i].y2;
-        resonators_[i].y2=resonators_[i].y1;resonators_[i].y1=clamp(y,-8.0f,8.0f);modal+=y*0.045f;
+        max_m=std::max(max_m,std::abs(mc)); float hz=clamp(center_hz*ratios[i]*std::pow(2.0f,mc/1200.0f),30.0f,sr_safe*0.44f);
+        float theta=TWO_PI*hz/sr_safe;
+        float y=b0*character+2.0f*r*std::cos(theta)*resonators_[i].y1-r*r*resonators_[i].y2;
+        float y_sat=2.0f*fast_tanh(y*0.5f);
+        resonators_[i].y2=resonators_[i].y1;resonators_[i].y1=y_sat;modal+=y_sat*0.25f;
     }
 
     float low_coeff=1.0f-std::exp(-TWO_PI*clamp(center_hz*1.8f,55.0f,420.0f)/sample_rate_);
@@ -105,7 +110,7 @@ float SoundSpaceProcessor::process(float character,float weight,float center_hz,
     const float excitation=clamp((std::abs(character)+std::abs(weight))*4.0f,0.0f,1.0f);
     const float response=excitation>excitation_envelope_?0.001f:0.050f;
     excitation_envelope_+=(excitation-excitation_envelope_)*(1.0f-std::exp(-1.0f/(response*sample_rate_)));
-    float out=weight+phase_character+excitation_envelope_*(controls_.pitch_mix*pitch_layer+harm_mix*harmonic)+controls_.modal_mix*modal;
+    float out=weight+phase_character+excitation_envelope_*(controls_.pitch_mix*pitch_layer+harm_mix*harmonic+controls_.modal_mix*modal);
     metrics_={cents,max_h,max_m,spectral_gain_db_,weight_fast_,weight_slow_};
     return sanitize(out);
 }

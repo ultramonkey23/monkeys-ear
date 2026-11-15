@@ -40,6 +40,7 @@ for %%T in (
     monkeys_ear_vocal_host_probe
     monkeys_ear_vocal_target_chain_probe
     monkeys_ear_vocal_tracker_probe
+    monkeys_ear_upgrade_probe
 ) do (
     if not exist "%%T.exe" (
         echo [FAIL] Required test executable %%T.exe is missing

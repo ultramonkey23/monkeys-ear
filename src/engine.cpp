@@ -27,6 +27,8 @@ void MonkeysEarEngine::init(float sample_rate, size_t max_block_size) {
     eq_.set_sample_rate(sample_rate_);
     external_sub_.set_sample_rate(sample_rate_);
     sound_space_.set_sample_rate(sample_rate_);
+    onion_eq_.set_sample_rate(sample_rate_);
+    eco_bus_.ensure_connected();
     cutoff_motion_.set_sample_rate(sample_rate_, 7.0f);
     resonance_motion_.set_sample_rate(sample_rate_, 10.0f);
     fm_motion_.set_sample_rate(sample_rate_, 5.0f);
@@ -56,6 +58,10 @@ void MonkeysEarEngine::reset() {
     eq_.reset();
     external_sub_.reset();
     sound_space_.reset();
+    onion_eq_.reset();
+    eco_peer_active_ = false;
+    eco_peer_pitch_cents_ = 0.0f;
+    eco_peer_confidence_ = 0.0f;
     drive_tube_.reset();
     tube_rack_.reset();
     resonator_cab_.reset();
@@ -215,6 +221,7 @@ void MonkeysEarEngine::apply_macros() {
     eq_.set_bypass(p.eq_bypass);
     eq_.set_gain_compensation(p.eq_gain_compensation);
     sound_space_.set_controls(p.sound_space);
+    sync_oscillator_morph_and_generator();
 }
 
 void MonkeysEarEngine::set_macro(MacroId id, float value) {
@@ -289,6 +296,31 @@ void MonkeysEarEngine::set_input_route_mode(int mode) {
 
 void MonkeysEarEngine::set_aftertouch(float value) { aftertouch_ = clamp(value,0.0f,1.0f); }
 
+void MonkeysEarEngine::sync_oscillator_morph_and_generator() {
+    const PresetData& p = preset_manager_.get_current();
+    const int eff_a = (p.wave_a_family == 0)
+        ? std::max(0, std::min(3, p.synth_waveform))
+        : std::max(4, std::min(kWaveFamilyCount - 1, p.wave_a_family + 3));
+    const int eff_b = std::max(0, std::min(kWaveFamilyCount - 1, p.wave_b));
+    WaveformGeneratorParams gen{
+        p.gen_shape, p.gen_odd_even, p.gen_tilt, p.gen_formant,
+        p.phase_warp, p.wave_fold
+    };
+    voice_manager_.set_generator_params(gen);
+    voice_manager_.set_wave_morph_controls(
+        eff_a, eff_b, p.wave_morph, p.phase_warp, p.wave_fold,
+        clamp(p.osc_unison, 1, 5), p.unison_detune_cents,
+        p.sub_harmonics, p.env_to_morph);
+    onion_eq_.set_controls({
+        p.onion_enabled,
+        static_cast<OnionSkinIntent>(clamp(p.onion_intent, 0, 2)),
+        p.onion_amount,
+        p.onion_sensitivity,
+        p.onion_low_protect,
+        p.onion_transient_protect
+    });
+}
+
 void MonkeysEarEngine::set_parameter_normalized(int id, float v) {
     // The product is compiled with fast-math: use IEEE exponent bits, not
     // std::isfinite(), to reject hostile VST3 values before clamping.
@@ -352,6 +384,37 @@ void MonkeysEarEngine::set_parameter_normalized(int id, float v) {
         if(id==176)p.performance_drift=v;
         else p.performance_fracture=v;
         // The audio callback smooths both axes; no heavyweight DSP reset.
+        return;
+    }
+    if(id>=178&&id<=201){
+        switch(id){
+            case 178: p.wave_a_family=std::min(5,static_cast<int>(v*6.0f)); break;
+            case 179: p.wave_b=std::min(8,static_cast<int>(v*9.0f)); break;
+            case 180: p.wave_morph=v; break;
+            case 181: p.phase_warp=v; break;
+            case 182: p.wave_fold=v; break;
+            case 183: p.osc_unison=1+std::min(4,static_cast<int>(v*5.0f)); break;
+            case 184: p.unison_detune_cents=v*50.0f; break;
+            case 185: p.sub_harmonics=v; break;
+            case 186: p.env_to_morph=(v*2.0f)-1.0f; break;
+            case 187: p.lfo_to_morph=v; break;
+            case 188: p.gen_shape=v; break;
+            case 189: p.gen_odd_even=v; break;
+            case 190: p.gen_tilt=v; break;
+            case 191: p.gen_formant=v; break;
+            case 192: p.onion_enabled=v>=0.5f; break;
+            case 193: p.onion_intent=std::min(2,static_cast<int>(v*3.0f)); break;
+            case 194: p.onion_amount=v; break;
+            case 195: p.onion_sensitivity=v; break;
+            case 196: p.onion_low_protect=v; break;
+            case 197: p.onion_transient_protect=v; break;
+            case 198: p.eco_mode=std::min(3,static_cast<int>(v*4.0f)); break;
+            case 199: p.eco_slot=std::min(7,static_cast<int>(v*8.0f)); break;
+            case 200: p.eco_peer_weight=v; break;
+            case 201: p.eco_pitch_follow=v; break;
+            default: break;
+        }
+        sync_oscillator_morph_and_generator();
         return;
     }
     switch(id){
@@ -458,6 +521,24 @@ void MonkeysEarEngine::process_block(
     const float drift_target=field_unit(p.performance_drift);
     const float fracture_target=field_unit(p.performance_fracture);
 
+    if (p.eco_mode == 2 || p.eco_mode == 3) {
+        EcosystemStreamFrame peer{};
+        if (eco_bus_.read_vocal(p.eco_slot, peer)) {
+            eco_peer_active_ = true;
+            eco_peer_pitch_cents_ = peer.pitch_cents;
+            eco_peer_confidence_ = peer.pitch_confidence;
+            onion_eq_.set_peer_occupancy(peer.spectral_occupancy, p.eco_peer_weight);
+        } else {
+            eco_peer_active_ = false;
+            onion_eq_.set_peer_occupancy({}, 0.0f);
+        }
+    } else {
+        eco_peer_active_ = false;
+        onion_eq_.set_peer_occupancy({}, 0.0f);
+    }
+
+    float block_energy_sq = 0.0f;
+
     for (size_t i = 0; i < num_samples; ++i) {
         // Performance field: smooth manual/host gesture edits before they
         // meet existing nonlinear synth paths (no zipper or new DSP graph).
@@ -467,6 +548,7 @@ void MonkeysEarEngine::process_block(
         // the patch's stored LFO depth. Zero is the exact legacy behavior.
         lfo1_.set_depth(clamp(p.lfo1_depth+performance_drift_smoothed_*.65f,0.f,1.f));
         float lfo_val = shape_modulation(lfo1_.process(), p.motion_curve);
+        voice_manager_.set_lfo_morph_mod(lfo_val * p.lfo_to_morph);
 
         float filter_env = 0.0f;
         const auto& prior_state=chrono_body_.get_state();
@@ -551,6 +633,10 @@ void MonkeysEarEngine::process_block(
         float weight_layer=weight*p.source_level*clamp(1.0f+sub_move*.6f,0.1f,1.8f);
         float center_hz=midi_to_freq(static_cast<float>(current_midi_note_));
         if(p.input_route_mode!=0&&external_sub_.confidence()>.30f)center_hz=external_sub_.tracked_frequency_hz();
+        if(eco_peer_active_ && p.eco_pitch_follow > 0.01f && eco_peer_confidence_ > 0.25f) {
+            float peer_hz = 440.0f * std::pow(2.0f, eco_peer_pitch_cents_ / 1200.0f);
+            center_hz = lerp(center_hz, clamp(peer_hz, 40.0f, 1800.0f), p.eco_pitch_follow);
+        }
         SoundSpaceSources space_sources{
             clamp(lfo_val+gesture.space_lfo,-1.0f,1.0f),
             filter_env,fast,slow,direction,aftertouch_,last_velocity_,audio_envelope_
@@ -559,6 +645,7 @@ void MonkeysEarEngine::process_block(
         float eq_freq=lfo_val*p.mod_lfo_eq_frequency*.75f;
         float eq_gain=lfo_val*p.mod_lfo_eq_gain*9.0f;
         float equalized=eq_.process(recombined,eq_freq,eq_gain);
+        equalized = onion_eq_.process_sample(equalized, weight_layer + ext_sample * 0.5f);
 
         // 8. Stereo Ping-Pong Delay
         float delayed_l = 0.0f;
@@ -586,8 +673,25 @@ void MonkeysEarEngine::process_block(
         out_l=dc_block(out_l,0);out_r=dc_block(out_r,1);
         safety_limiter_.process(out_l, out_r);
 
+        block_energy_sq += 0.5f * (out_l * out_l + out_r * out_r);
         output_l[i] = out_l;
         output_r[i] = out_r;
+    }
+
+    if (p.eco_mode == 1 || p.eco_mode == 3) {
+        EcosystemStreamFrame pub{};
+        pub.frame_id = ++eco_frame_counter_;
+        pub.role = 1;
+        pub.active = true;
+        pub.midi_note = current_midi_note_;
+        const size_t active_voices = voice_manager_.active_voice_count();
+        pub.note_gate = (active_voices > 0) ? 1.0f : 0.0f;
+        pub.pitch_cents = (current_midi_note_ >= 0) ? (static_cast<float>(current_midi_note_ - 69) * 100.0f) : 0.0f;
+        pub.pitch_confidence = (active_voices > 0) ? 1.0f : (audio_envelope_ > 0.02f ? external_sub_.confidence() : 0.0f);
+        pub.velocity = last_velocity_;
+        pub.loudness = clamp(std::sqrt(block_energy_sq / static_cast<float>(std::max<size_t>(1, num_samples))), 0.0f, 1.0f);
+        pub.spectral_occupancy = onion_eq_.self_occupancy();
+        eco_bus_.publish_synth(p.eco_slot, pub);
     }
 
     latency_meter_.end_block();

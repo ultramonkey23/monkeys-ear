@@ -13,6 +13,9 @@ endif()
 
 add_library(monkeys_ear_core STATIC
     src/voice.cpp
+    src/wavetable.cpp
+    src/onion_skin_eq.cpp
+    src/ecosystem_bus.cpp
     src/filter.cpp
     src/drive_tube.cpp
     src/tube_rack.cpp
@@ -92,6 +95,9 @@ target_link_libraries(monkeys_ear_vocal_tracker_probe PRIVATE monkeys_ear_core)
 add_executable(monkeys_ear_vocal_target_chain_probe test/test_vocal_target_chain_probe.cpp)
 target_link_libraries(monkeys_ear_vocal_target_chain_probe PRIVATE monkeys_ear_core)
 
+add_executable(monkeys_ear_upgrade_probe test/test_upgrade_probe.cpp)
+target_link_libraries(monkeys_ear_upgrade_probe PRIVATE monkeys_ear_core)
+
 # Legacy combined VST3 remains during migration. Standalone wrappers sit beside
 # it and link the same core; no DSP fork is permitted.
 add_library(monkeys_ear SHARED vst3/vst3_entry.cpp vst3/native_editor.cpp)
@@ -108,6 +114,9 @@ set_target_properties(monkeys_ear PROPERTIES OUTPUT_NAME "monkeys_ear" SUFFIX ".
 add_library(monkeys_ear_vocal SHARED vst3/vocal_vst3_entry.cpp)
 target_include_directories(monkeys_ear_vocal PRIVATE ${CMAKE_CURRENT_SOURCE_DIR}/vst3)
 target_link_libraries(monkeys_ear_vocal PRIVATE monkeys_ear_core)
+if(WIN32)
+    target_link_libraries(monkeys_ear_vocal PRIVATE user32 gdi32)
+endif()
 set_target_properties(monkeys_ear_vocal PROPERTIES OUTPUT_NAME "monkeys_ear_vocal" SUFFIX ".vst3" PREFIX "")
 # vocal_vst3_entry.cpp uses the Windows DLL entrypoint types. Force the platform
 # declarations for MSVC without coupling the cross-platform DSP core to Win32.

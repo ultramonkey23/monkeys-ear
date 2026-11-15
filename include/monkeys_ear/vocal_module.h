@@ -4,16 +4,19 @@
 #include "monkeys_ear/ecosystem_state.h"
 #include "monkeys_ear/audio_input.h"
 #include "monkeys_ear/tonal.h"
+#include "monkeys_ear/ecosystem_bus.h"
+#include "monkeys_ear/onion_skin_eq.h"
 #include <cstdint>
 
 namespace monkeys_ear {
 
-// Vocal remains one Monkey's Ear ecosystem module. AudioInputProcessor is the
-// canonical vocal DSP; this boundary adds module lifecycle and evidence policy.
+// Vocal pitch/intonation/timbre plugin module layered over AudioInputProcessor
+// without altering the synth/FX core or creating a separate DSP implementation.
 class VocalModule final : public StandaloneModule {
 public:
-    VocalModule() noexcept;
+    static constexpr const char* kModuleId = "monkeys-ear.vocal";
 
+    VocalModule() noexcept;
     const ModuleIdentity& identity() const noexcept override;
     ModuleIOContract io_contract() const noexcept override;
     void prepare(float sample_rate, uint32_t max_block_size) noexcept override;
@@ -24,6 +27,13 @@ public:
 
     void set_controls(const VocalExpressionControls& controls) noexcept;
     const VocalExpressionControls& controls() const noexcept { return controls_; }
+    void set_eco_slot(int slot) noexcept { eco_slot_ = clamp(slot, 0, 7); }
+    int eco_slot() const noexcept { return eco_slot_; }
+    void set_eco_link_enabled(bool enabled) noexcept { eco_link_enabled_ = enabled; }
+    bool eco_link_enabled() const noexcept { return eco_link_enabled_; }
+    bool is_eco_peer_linked() const noexcept { return eco_peer_linked_; }
+    float active_tracked_hz() const noexcept { return last_tracked_hz_; }
+    float active_confidence() const noexcept { return last_tracked_conf_; }
 
     // Local evidence keeps the plugin useful alone. A connected ecosystem may
     // supply fresher/more-confident compatible evidence without replacing the
@@ -53,6 +63,16 @@ private:
     ExternalSubharmonic local_pitch_tracker_{};
     bool shared_pitch_valid_ = false;
     bool bypass_ = false;
+
+    EcosystemBusClient eco_bus_{};
+    OnionSkinEQ eco_analyzer_{};
+    int eco_slot_ = 0;
+    bool eco_link_enabled_ = true;
+    bool eco_peer_linked_ = false;
+    uint64_t last_eco_synth_frame_id_ = 0;
+    uint64_t vocal_pub_frame_id_ = 0;
+    float last_tracked_hz_ = 0.0f;
+    float last_tracked_conf_ = 0.0f;
 };
 
 } // namespace monkeys_ear

@@ -121,21 +121,73 @@ void PolyBLEPOscillator::set_pulse_width(float pw) {
 
 void PolyBLEPOscillator::set_waveform(Waveform wf) {
     waveform_ = wf;
+    switch (wf) {
+        case Waveform::Saw: family_a_ = WaveFamily::Saw; break;
+        case Waveform::Pulse: family_a_ = WaveFamily::Pulse; break;
+        case Waveform::Triangle: family_a_ = WaveFamily::Triangle; break;
+        case Waveform::Sine: family_a_ = WaveFamily::Sine; break;
+    }
+}
+
+void PolyBLEPOscillator::set_wave_families(WaveFamily a, WaveFamily b) {
+    family_a_ = a;
+    family_b_ = b;
+}
+
+void PolyBLEPOscillator::set_morph(float morph01) {
+    morph_ = clamp(morph01, 0.0f, 1.0f);
+}
+
+void PolyBLEPOscillator::set_phase_warp(float warp01) {
+    phase_warp_ = clamp(warp01, 0.05f, 0.95f);
+    pulse_width_ = phase_warp_;
+}
+
+void PolyBLEPOscillator::set_wave_fold(float fold01) {
+    wave_fold_ = clamp(fold01, 0.0f, 1.0f);
+}
+
+void PolyBLEPOscillator::set_unison(int voices, float detune_cents) {
+    unison_voices_ = std::max(1, std::min(static_cast<int>(kMaxUnison), voices));
+    unison_detune_cents_ = clamp(detune_cents, 0.0f, 50.0f);
+}
+
+void PolyBLEPOscillator::set_waveform_bank(const WaveformBank* bank) {
+    bank_ = bank;
 }
 
 void PolyBLEPOscillator::reset_phase() {
     phase_ = 0.0f;
+    unison_phases_ = {{0.0f, 0.21f, 0.47f, 0.68f, 0.84f}};
     wrapped_ = false;
+    wrap_fraction_ = 0.0f;
+    last_sample_ = 0.0f;
+    sync_blep_pending_ = 0.0f;
 }
 
 void PolyBLEPOscillator::set_phase(float phase_cycles) {
     phase_ = phase_cycles - std::floor(phase_cycles);
     if (phase_ < 0.0f) phase_ += 1.0f;
     wrapped_ = false;
+    wrap_fraction_ = 0.0f;
 }
 
 void PolyBLEPOscillator::sync_reset() {
-    phase_ = 0.0f;
+    sync_reset_subsample(0.0f);
+}
+
+void PolyBLEPOscillator::sync_reset_subsample(float master_wrap_frac) {
+    const float frac = clamp(master_wrap_frac, 0.0f, 1.0f);
+    const float old_val = eval_single_phase(phase_, phase_increment_, morph_);
+    const float new_phase = frac * phase_increment_;
+    const float new_val = eval_single_phase(new_phase, phase_increment_, morph_);
+    // PolyBLEP discontinuity step compensation across hard-sync transition
+    sync_blep_pending_ = (old_val - new_val) * 0.5f;
+    phase_ = new_phase - std::floor(new_phase);
+    for (size_t u = 1; u < kMaxUnison; ++u) {
+        unison_phases_[u] = std::fmod(phase_ + 0.19f * static_cast<float>(u), 1.0f);
+    }
+    wrapped_ = false;
 }
 
 void PolyBLEPOscillator::update_increment() {
@@ -153,49 +205,89 @@ float PolyBLEPOscillator::poly_blep(float t, float dt) const {
     return 0.0f;
 }
 
-float PolyBLEPOscillator::process() {
-    return process_with_pm(0.0f);
-}
-
-float PolyBLEPOscillator::process_with_pm(float phase_mod) {
-    float dt = phase_increment_;
-    float eff_phase = phase_ + phase_mod;
-    eff_phase = std::fmod(eff_phase, 1.0f);
+float PolyBLEPOscillator::eval_single_phase(float p, float dt, float eff_morph) const {
+    float eff_phase = p - std::floor(p);
     if (eff_phase < 0.0f) eff_phase += 1.0f;
 
-    float out = 0.0f;
-    switch (waveform_) {
-        case Waveform::Sine:
-            out = std::sin(eff_phase * TWO_PI);
-            break;
+    const bool use_legacy_core =
+        (static_cast<int>(family_a_) <= 3) &&
+        (eff_morph <= 1e-4f) &&
+        (wave_fold_ <= 1e-4f) &&
+        (std::abs(phase_warp_ - 0.5f) <= 1e-4f || family_a_ == WaveFamily::Pulse);
 
-        case Waveform::Saw: {
-            out = (2.0f * eff_phase) - 1.0f;
-            out -= poly_blep(eff_phase, dt);
-            break;
-        }
-
-        case Waveform::Pulse: {
-            out = (eff_phase < pulse_width_) ? 1.0f : -1.0f;
-            out += poly_blep(eff_phase, dt);
-            float p2 = eff_phase - pulse_width_;
-            if (p2 < 0.0f) p2 += 1.0f;
-            out -= poly_blep(p2, dt);
-            break;
-        }
-
-        case Waveform::Triangle: {
-            float saw = (2.0f * eff_phase) - 1.0f - poly_blep(eff_phase, dt);
-            out = 2.0f * std::abs(saw) - 1.0f;
-            break;
+    if (use_legacy_core) {
+        switch (family_a_) {
+            case WaveFamily::Sine:
+                return std::sin(eff_phase * TWO_PI);
+            case WaveFamily::Saw: {
+                float s = (2.0f * eff_phase) - 1.0f;
+                s -= poly_blep(eff_phase, dt);
+                return s;
+            }
+            case WaveFamily::Pulse: {
+                float s = (eff_phase < pulse_width_) ? 1.0f : -1.0f;
+                s += poly_blep(eff_phase, dt);
+                float p2 = eff_phase - pulse_width_;
+                if (p2 < 0.0f) p2 += 1.0f;
+                s -= poly_blep(p2, dt);
+                return s;
+            }
+            case WaveFamily::Triangle: {
+                float saw = (2.0f * eff_phase) - 1.0f - poly_blep(eff_phase, dt);
+                return 2.0f * std::abs(saw) - 1.0f;
+            }
+            default:
+                break;
         }
     }
 
+    const WaveformBank& active_bank = bank_ ? *bank_ : shared_waveform_bank();
+    return active_bank.sample_morph(family_a_, family_b_, eff_morph, eff_phase, dt, phase_warp_, wave_fold_);
+}
+
+float PolyBLEPOscillator::process() {
+    return process_with_pm(0.0f, 0.0f);
+}
+
+float PolyBLEPOscillator::process_with_pm(float phase_mod) {
+    return process_with_pm(phase_mod, 0.0f);
+}
+
+float PolyBLEPOscillator::process_with_pm(float phase_mod, float morph_mod) {
+    const float dt = phase_increment_;
+    const float eff_morph = clamp(morph_ + morph_mod, 0.0f, 1.0f);
+    float out = 0.0f;
+
+    if (unison_voices_ <= 1) {
+        out = eval_single_phase(phase_ + phase_mod, dt, eff_morph);
+        if (std::abs(sync_blep_pending_) > 1e-5f) {
+            out += sync_blep_pending_ * poly_blep(phase_, std::max(1e-5f, dt));
+            sync_blep_pending_ = 0.0f;
+        }
+    } else {
+        const float half = 0.5f * static_cast<float>(unison_voices_ - 1);
+        float sum = eval_single_phase(phase_ + phase_mod, dt, eff_morph);
+        for (int u = 1; u < unison_voices_; ++u) {
+            const float offset_index = static_cast<float>(u) - half;
+            const float detune_ratio = std::pow(2.0f, (offset_index * unison_detune_cents_) / (1200.0f * std::max(1.0f, half)));
+            const float u_dt = dt * detune_ratio;
+            sum += eval_single_phase(unison_phases_[static_cast<size_t>(u)] + phase_mod, u_dt, eff_morph);
+            unison_phases_[static_cast<size_t>(u)] += u_dt;
+            if (unison_phases_[static_cast<size_t>(u)] >= 1.0f) {
+                unison_phases_[static_cast<size_t>(u)] -= std::floor(unison_phases_[static_cast<size_t>(u)]);
+            }
+        }
+        out = sum / std::sqrt(static_cast<float>(unison_voices_));
+    }
+
+    last_sample_ = out;
     phase_ += phase_increment_;
     if (phase_ >= 1.0f) {
-        phase_ -= 1.0f;
+        wrap_fraction_ = clamp((phase_ - 1.0f) / std::max(1e-6f, phase_increment_), 0.0f, 1.0f);
+        phase_ -= std::floor(phase_);
         wrapped_ = true;
     } else {
+        wrap_fraction_ = 0.0f;
         wrapped_ = false;
     }
 
@@ -333,6 +425,38 @@ void SynthVoice::set_hard_sync(bool sync) {
     hard_sync_ = sync;
 }
 
+void SynthVoice::set_wave_morph_controls(int family_a, int family_b, float morph,
+                                         float phase_warp, float wave_fold,
+                                         int unison_voices, float unison_detune_cents,
+                                         float sub_harmonics, float env_to_morph) {
+    const WaveFamily fa = static_cast<WaveFamily>(clamp(family_a, 0, kWaveFamilyCount - 1));
+    const WaveFamily fb = static_cast<WaveFamily>(clamp(family_b, 0, kWaveFamilyCount - 1));
+    osc1_.set_wave_families(fa, fb);
+    osc2_.set_wave_families(fa, fb);
+    osc1_.set_morph(morph);
+    osc2_.set_morph(morph);
+    osc1_.set_phase_warp(phase_warp);
+    osc2_.set_phase_warp(phase_warp);
+    osc1_.set_wave_fold(wave_fold);
+    osc2_.set_wave_fold(wave_fold);
+    osc1_.set_unison(unison_voices, unison_detune_cents);
+
+    sub_harmonics_ = clamp(sub_harmonics, 0.0f, 1.0f);
+    sub_osc_.set_wave_families(WaveFamily::Sine, WaveFamily::BrassFold);
+    sub_osc_.set_morph(sub_harmonics_);
+    env_to_morph_ = clamp(env_to_morph, -1.0f, 1.0f);
+}
+
+void SynthVoice::set_lfo_morph_mod(float amount) {
+    lfo_morph_mod_ = clamp(amount, -1.0f, 1.0f);
+}
+
+void SynthVoice::set_waveform_bank(const WaveformBank* bank) {
+    osc1_.set_waveform_bank(bank);
+    osc2_.set_waveform_bank(bank);
+    sub_osc_.set_waveform_bank(bank);
+}
+
 void SynthVoice::set_env_parameters(float a, float d, float s, float r) {
     amp_env_.set_parameters(a, d, s, r);
 }
@@ -388,17 +512,18 @@ float SynthVoice::process_split(float& filter_env_out, float& weight_out) {
     sub_osc_.set_frequency(f1 / static_cast<float>(sub_ratio_denominator_));
     fundamental_osc_.set_frequency(f1);
 
-    // Modulator Oscillator (Osc 2)
-    float s2 = osc2_.process();
+    // Modulator Oscillator (Osc 2) also tracks dynamic morph modulation
+    float env_morph = env_to_morph_ * filter_env_.get_value();
+    float s2 = osc2_.process_with_pm(0.0f, env_morph + lfo_morph_mod_);
 
-    // Hard sync: if enabled and master oscillator wrapped this sample, reset slave
+    // Hard sync: sub-sample phase reset with PolyBLEP discontinuity compensation
     if (hard_sync_ && osc2_.has_wrapped()) {
-        osc1_.sync_reset();
+        osc1_.sync_reset_subsample(osc2_.wrap_fraction());
     }
 
-    // Carrier Oscillator (Osc 1) with Cross-FM Phase Modulation
+    // Carrier Oscillator (Osc 1) with Cross-FM Phase Modulation + Dynamic Morph Modulation
     float pm_input = (fm_amount_ > 0.001f) ? (s2 * fm_amount_ * 3.5f) : 0.0f;
-    float s1 = osc1_.process_with_pm(pm_input);
+    float s1 = osc1_.process_with_pm(pm_input, env_morph + lfo_morph_mod_);
 
     float s_sub = sub_osc_.process();
     float s_fundamental = fundamental_osc_.process();
@@ -631,6 +756,27 @@ void VoiceManager::set_hard_sync(bool sync) {
     for (auto& v : voices_) {
         v.set_hard_sync(hard_sync_);
     }
+}
+
+void VoiceManager::set_wave_morph_controls(int family_a, int family_b, float morph,
+                                           float phase_warp, float wave_fold,
+                                           int unison_voices, float unison_detune_cents,
+                                           float sub_harmonics, float env_to_morph) {
+    for (auto& v : voices_) {
+        v.set_waveform_bank(&bank_);
+        v.set_wave_morph_controls(family_a, family_b, morph, phase_warp, wave_fold,
+                                  unison_voices, unison_detune_cents, sub_harmonics, env_to_morph);
+    }
+}
+
+void VoiceManager::set_lfo_morph_mod(float amount) {
+    for (auto& v : voices_) {
+        v.set_lfo_morph_mod(amount);
+    }
+}
+
+void VoiceManager::set_generator_params(const WaveformGeneratorParams& params) {
+    bank_.regenerate_generator(params);
 }
 
 void VoiceManager::set_amp_envelope(float a, float d, float s, float r) {

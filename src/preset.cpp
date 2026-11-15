@@ -136,7 +136,31 @@ std::string PresetData::serialize() const {
        <<"\nLFO_FOLLOW_HOST="<<(lfo_follow_host_tempo?1:0)
        <<"\nLFO_GROOVE="<<lfo_groove
        <<"\nPERFORMANCE_DRIFT="<<performance_drift
-       <<"\nPERFORMANCE_FRACTURE="<<performance_fracture<<"\n";
+       <<"\nPERFORMANCE_FRACTURE="<<performance_fracture
+       <<"\nWAVE_A_FAMILY="<<wave_a_family
+       <<"\nWAVE_B="<<wave_b
+       <<"\nWAVE_MORPH="<<wave_morph
+       <<"\nPHASE_WARP="<<phase_warp
+       <<"\nWAVE_FOLD="<<wave_fold
+       <<"\nOSC_UNISON="<<osc_unison
+       <<"\nUNISON_DETUNE="<<unison_detune_cents
+       <<"\nSUB_HARMONICS="<<sub_harmonics
+       <<"\nENV_TO_MORPH="<<env_to_morph
+       <<"\nLFO_TO_MORPH="<<lfo_to_morph
+       <<"\nGEN_SHAPE="<<gen_shape
+       <<"\nGEN_ODD_EVEN="<<gen_odd_even
+       <<"\nGEN_TILT="<<gen_tilt
+       <<"\nGEN_FORMANT="<<gen_formant
+       <<"\nONION_ENABLED="<<(onion_enabled?1:0)
+       <<"\nONION_INTENT="<<onion_intent
+       <<"\nONION_AMOUNT="<<onion_amount
+       <<"\nONION_SENSITIVITY="<<onion_sensitivity
+       <<"\nONION_LOW_PROTECT="<<onion_low_protect
+       <<"\nONION_TRANSIENT_PROTECT="<<onion_transient_protect
+       <<"\nECO_MODE="<<eco_mode
+       <<"\nECO_SLOT="<<eco_slot
+       <<"\nECO_PEER_WEIGHT="<<eco_peer_weight
+       <<"\nECO_PITCH_FOLLOW="<<eco_pitch_follow<<"\n";
     return oss.str();
 }
 
@@ -195,6 +219,30 @@ bool PresetData::deserialize(const std::string& data) {
         else if (key == "LFO_GROOVE") lfo_groove=clamp(std::stof(val_str),0.0f,1.0f);
         else if (key == "PERFORMANCE_DRIFT") performance_drift=clamp(std::stof(val_str),0.0f,1.0f);
         else if (key == "PERFORMANCE_FRACTURE") performance_fracture=clamp(std::stof(val_str),0.0f,1.0f);
+        else if (key == "WAVE_A_FAMILY") wave_a_family=clamp(std::stoi(val_str),0,5);
+        else if (key == "WAVE_B") wave_b=clamp(std::stoi(val_str),0,8);
+        else if (key == "WAVE_MORPH") wave_morph=clamp(std::stof(val_str),0.0f,1.0f);
+        else if (key == "PHASE_WARP") phase_warp=clamp(std::stof(val_str),0.0f,1.0f);
+        else if (key == "WAVE_FOLD") wave_fold=clamp(std::stof(val_str),0.0f,1.0f);
+        else if (key == "OSC_UNISON") osc_unison=clamp(std::stoi(val_str),1,5);
+        else if (key == "UNISON_DETUNE") unison_detune_cents=clamp(std::stof(val_str),0.0f,50.0f);
+        else if (key == "SUB_HARMONICS") sub_harmonics=clamp(std::stof(val_str),0.0f,1.0f);
+        else if (key == "ENV_TO_MORPH") env_to_morph=clamp(std::stof(val_str),-1.0f,1.0f);
+        else if (key == "LFO_TO_MORPH") lfo_to_morph=clamp(std::stof(val_str),0.0f,1.0f);
+        else if (key == "GEN_SHAPE") gen_shape=clamp(std::stof(val_str),0.0f,1.0f);
+        else if (key == "GEN_ODD_EVEN") gen_odd_even=clamp(std::stof(val_str),0.0f,1.0f);
+        else if (key == "GEN_TILT") gen_tilt=clamp(std::stof(val_str),0.0f,1.0f);
+        else if (key == "GEN_FORMANT") gen_formant=clamp(std::stof(val_str),0.0f,1.0f);
+        else if (key == "ONION_ENABLED") onion_enabled=(std::stoi(val_str)!=0);
+        else if (key == "ONION_INTENT") onion_intent=clamp(std::stoi(val_str),0,2);
+        else if (key == "ONION_AMOUNT") onion_amount=clamp(std::stof(val_str),0.0f,1.0f);
+        else if (key == "ONION_SENSITIVITY") onion_sensitivity=clamp(std::stof(val_str),0.0f,1.0f);
+        else if (key == "ONION_LOW_PROTECT") onion_low_protect=clamp(std::stof(val_str),0.0f,1.0f);
+        else if (key == "ONION_TRANSIENT_PROTECT") onion_transient_protect=clamp(std::stof(val_str),0.0f,1.0f);
+        else if (key == "ECO_MODE") eco_mode=clamp(std::stoi(val_str),0,3);
+        else if (key == "ECO_SLOT") eco_slot=clamp(std::stoi(val_str),0,7);
+        else if (key == "ECO_PEER_WEIGHT") eco_peer_weight=clamp(std::stof(val_str),0.0f,1.0f);
+        else if (key == "ECO_PITCH_FOLLOW") eco_pitch_follow=clamp(std::stof(val_str),0.0f,1.0f);
         else if (key == "FILTER_MODE_A") filter_mode_a=std::stoi(val_str);
         else if (key == "FILTER_MODE_B") filter_mode_b=std::stoi(val_str);
         else if (key == "FILTER_CUTOFF_B") filter_cutoff_b_hz=std::stof(val_str);
@@ -521,7 +569,7 @@ PresetData PresetManager::create_tube_foundry() {
     p.lfo_follow_host_tempo=true;p.lfo_groove=.10f;
     p.performance_drift=.30f;p.performance_fracture=.42f;
     p.amp_attack=0.010f;p.amp_sustain=0.67f;p.amp_release=0.38f;
-    p.master_gain_db=-9.0f;
+    p.master_gain_db=-4.5f;
     return p;
 }
 
@@ -552,14 +600,15 @@ PresetData PresetManager::create_glass_chamber() {
     p.tube_rack.slots[1].flavor=4;  // 5751
     p.tube_rack.slots[2].flavor=6;  // 6SN7
     p.tube_rack.slots[3].flavor=13; // KT88
-    p.tube_rack.shared_supply=0.22f;
-    for(auto& t:p.tube_rack.slots){t.drive=.16f;t.mix=.42f;}
+    p.tube_rack.shared_supply=0.28f;
+    for(auto& t:p.tube_rack.slots){t.drive=.28f;t.mix=.60f;}
+    p.tube_rack.output=0.72f;
     p.lfo_tempo_sync=true;p.tempo_bpm=76.0f;p.lfo_subdivision=2;
     p.lfo_follow_host_tempo=true;p.lfo_groove=.24f;
     p.performance_drift=.66f;p.performance_fracture=.16f;
-    p.amp_attack=.22f;p.amp_sustain=.58f;p.amp_release=2.6f;
-    p.filter_attack=.38f;p.filter_release=1.8f;
-    p.master_gain_db=-11.0f;
+    p.amp_attack=.085f;p.amp_sustain=.64f;p.amp_release=2.6f;
+    p.filter_attack=.22f;p.filter_release=1.8f;
+    p.master_gain_db=-1.5f;
     return p;
 }
 

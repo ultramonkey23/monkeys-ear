@@ -2,6 +2,7 @@
 
 #include "monkeys_ear/types.h"
 #include "monkeys_ear/mono_key_stack.h"
+#include "monkeys_ear/wavetable.h"
 #include <array>
 
 namespace monkeys_ear {
@@ -57,24 +58,47 @@ public:
     void set_frequency(float freq);
     void set_pulse_width(float pw);
     void set_waveform(Waveform wf);
+    void set_wave_families(WaveFamily a, WaveFamily b);
+    void set_morph(float morph01);
+    void set_phase_warp(float warp01);
+    void set_wave_fold(float fold01);
+    void set_unison(int voices, float detune_cents);
+    void set_waveform_bank(const WaveformBank* bank);
     void reset_phase();
     void set_phase(float phase_cycles);
     void sync_reset();
+    void sync_reset_subsample(float master_wrap_frac);
     bool has_wrapped() const { return wrapped_; }
+    float wrap_fraction() const { return wrap_fraction_; }
 
     float process();
     float process_with_pm(float phase_mod);
+    float process_with_pm(float phase_mod, float morph_mod);
 
 private:
+    static constexpr size_t kMaxUnison = 5;
     float sample_rate_;
     float frequency_;
     float phase_;
     float phase_increment_;
     float pulse_width_;
     Waveform waveform_;
+    WaveFamily family_a_ = WaveFamily::Saw;
+    WaveFamily family_b_ = WaveFamily::Formant;
+    float morph_ = 0.0f;
+    float phase_warp_ = 0.5f;
+    float wave_fold_ = 0.0f;
+    int unison_voices_ = 1;
+    float unison_detune_cents_ = 12.0f;
+    const WaveformBank* bank_ = nullptr;
+    std::array<float, kMaxUnison> unison_phases_{{0.0f, 0.21f, 0.47f, 0.68f, 0.84f}};
     bool wrapped_;
+    float wrap_fraction_ = 0.0f;
+    float last_sample_ = 0.0f;
+    float sync_blep_pending_ = 0.0f;
 
     float poly_blep(float t, float dt) const;
+    float eval_single_phase(float p, float dt, float morph01) const;
     void update_increment();
 };
 
@@ -100,6 +124,12 @@ public:
     void set_fm_amount(float fm);
     void set_osc2_semi(int semi);
     void set_hard_sync(bool sync);
+    void set_wave_morph_controls(int family_a, int family_b, float morph,
+                                 float phase_warp, float wave_fold,
+                                 int unison_voices, float unison_detune_cents,
+                                 float sub_harmonics, float env_to_morph);
+    void set_lfo_morph_mod(float amount);
+    void set_waveform_bank(const WaveformBank* bank);
     void set_env_parameters(float a, float d, float s, float r);
     void set_filter_env_parameters(float a, float d, float s, float r);
     void set_portamento(float seconds);
@@ -144,6 +174,9 @@ private:
     float target_frequency_;
     float portamento_seconds_;
     float vibrato_semitones_;
+    float sub_harmonics_ = 0.0f;
+    float env_to_morph_ = 0.0f;
+    float lfo_morph_mod_ = 0.0f;
     float next_noise();
     void update_frequencies();
 };
@@ -179,6 +212,13 @@ public:
     void set_fm_amount(float fm);
     void set_osc2_semi(int semi);
     void set_hard_sync(bool sync);
+    void set_wave_morph_controls(int family_a, int family_b, float morph,
+                                 float phase_warp, float wave_fold,
+                                 int unison_voices, float unison_detune_cents,
+                                 float sub_harmonics, float env_to_morph);
+    void set_lfo_morph_mod(float amount);
+    void set_generator_params(const WaveformGeneratorParams& params);
+    const WaveformBank& waveform_bank() const { return bank_; }
     void set_amp_envelope(float a, float d, float s, float r);
     void set_filter_envelope(float a, float d, float s, float r);
     void set_voice_mode(bool mono, bool legato);
@@ -207,6 +247,7 @@ private:
     uint32_t next_key_generation_=1;
 
     MonoKeyStack mono_keys_{}; // fixed-capacity last-held-key priority
+    WaveformBank bank_{};
 
     int find_free_voice();
 };

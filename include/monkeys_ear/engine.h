@@ -16,6 +16,8 @@
 #include "monkeys_ear/lfo.h"
 #include "monkeys_ear/performance_field.h"
 #include "monkeys_ear/tonal.h"
+#include "monkeys_ear/onion_skin_eq.h"
+#include "monkeys_ear/ecosystem_bus.h"
 
 namespace monkeys_ear {
 
@@ -81,6 +83,11 @@ public:
     size_t get_active_voices() const { return voice_manager_.active_voice_count(); }
     const ChronoStateVariables& get_chrono_state() const { return chrono_body_.get_state(); }
     const SoundSpaceMetrics& get_sound_space_metrics() const { return sound_space_.metrics(); }
+    const OnionSkinMetrics& get_onion_metrics() const { return onion_eq_.metrics(); }
+    bool is_eco_peer_active() const { return eco_peer_active_; }
+    float get_eco_peer_pitch_cents() const { return eco_peer_pitch_cents_; }
+    float get_eco_peer_confidence() const { return eco_peer_confidence_; }
+    void sync_oscillator_morph_and_generator();
 
 private:
     float sample_rate_;
@@ -113,6 +120,12 @@ private:
     float last_velocity_;
     float performance_drift_smoothed_=0.0f;
     float performance_fracture_smoothed_=0.0f;
+    OnionSkinEQ onion_eq_;
+    EcosystemBusClient eco_bus_;
+    uint64_t eco_frame_counter_ = 0;
+    bool eco_peer_active_ = false;
+    float eco_peer_pitch_cents_ = 0.0f;
+    float eco_peer_confidence_ = 0.0f;
     // Causal stereo DC blocking after the nonlinear chain and before limiting.
     float output_dc_coefficient_=0.f;
     float output_dc_x_[2]={},output_dc_y_[2]={};

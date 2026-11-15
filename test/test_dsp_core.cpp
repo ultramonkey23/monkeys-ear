@@ -788,7 +788,7 @@ void test_arturia_class_midi_keyboard_notes() {
 
 void test_factory_projection_for_native_editor() {
     std::cout<<"[TEST] Shared Factory Snapshot / PLAY and EXPLORE State Consistency... ";
-    constexpr int N=178;
+    constexpr int N=202;
     std::array<float,N> params{};
     std::array<bool,N> covered{};
     for(int patch=0;patch<8;++patch) {
@@ -810,6 +810,7 @@ void test_factory_projection_for_native_editor() {
         assert(covered[161]&&covered[163]&&covered[167]&&covered[169]);
         assert(covered[170]&&covered[171]&&covered[174]&&covered[175]);
         assert(covered[176]&&covered[177]);
+        assert(covered[178]&&covered[180]&&covered[188]&&covered[192]&&covered[198]&&covered[201]);
         assert(!covered[79]&&!covered[80]&&!covered[81]&&!covered[172]&&!covered[173]);
         assert(std::abs(params[0]-p.macros[0])<1e-6f);
         assert(std::abs(params[163]-p.amp_sustain)<1e-6f);

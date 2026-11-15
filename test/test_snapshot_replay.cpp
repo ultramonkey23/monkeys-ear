@@ -4,7 +4,7 @@
 #include <iostream>
 
 int main() {
-    constexpr std::size_t n=178;
+    constexpr std::size_t n=202;
     std::array<float,n> saved{};
     for(std::size_t i=0;i<n;++i) saved[i]=float((i*17)%101)/100.f;
     saved[79]=0.6f; saved[173]=0.69f;

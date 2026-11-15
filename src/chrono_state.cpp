@@ -130,14 +130,41 @@ float ChronoStateBody::process_sample(float exciter_in) {
     float sgn = (disp > 0.0f) ? 1.0f : (disp < 0.0f ? -1.0f : 0.0f);
     float f_repel = -repulsion_ * sgn * repel_kernel * omega0_ * omega0_ * 1.8f;
 
-    // ── 6. Symplectic State Integration (Euler-Cromer / Real-Time Bounded) ─
-    float total_accel = f_attract + f_resist + f_repel + f_couple + f_drive;
+    // ── 6. Symplectic State Integration (Sub-stepped & Exponentially Damped) ─
+    const float max_omega = 1.25f * std::max(1.0f, sample_rate_);
+    const float omega_safe = std::min(omega0_, max_omega);
 
-    state_.velocity += total_accel * dt_;
-    state_.velocity = clamp(state_.velocity, -2500.0f, 2500.0f);
+    if (omega0_ * dt_ <= 0.28f) {
+        float total_accel = f_attract + f_resist + f_repel + f_couple + f_drive;
+        state_.velocity += total_accel * dt_;
+        state_.velocity = clamp(state_.velocity, -2500.0f, 2500.0f);
 
-    state_.displacement += state_.velocity * dt_;
-    state_.displacement = clamp(state_.displacement, -boundary_limit_ * 1.25f, boundary_limit_ * 1.25f);
+        state_.displacement += state_.velocity * dt_;
+        state_.displacement = clamp(state_.displacement, -boundary_limit_ * 1.25f, boundary_limit_ * 1.25f);
+    } else {
+        int substeps = static_cast<int>(std::ceil((omega_safe * dt_) / 0.22f));
+        substeps = std::max(2, std::min(8, substeps));
+        const float h = dt_ / static_cast<float>(substeps);
+        const float k_spring = omega_safe * omega_safe;
+        const float damp_rate = std::min(90.0f, effective_resistance * (1.1f + 0.0003f * omega_safe));
+        const float damp_mul = std::exp(-damp_rate * h);
+        const float ext_accel = f_couple + f_drive;
+
+        for (int step = 0; step < substeps; ++step) {
+            float a_spring = -k_spring * state_.displacement;
+            float dist_to_bound = boundary_limit_ - std::abs(state_.displacement);
+            float a_repel = 0.0f;
+            if (dist_to_bound < boundary_limit_ * 0.4f && repulsion_ > 0.001f) {
+                float k_rep = negative_gravity_kernel(std::max(0.0f, dist_to_bound), boundary_limit_ * 0.3f, 2.0f);
+                float sign = (state_.displacement >= 0.0f) ? -1.0f : 1.0f;
+                a_repel = sign * repulsion_ * k_rep * k_spring * boundary_limit_ * 0.65f;
+            }
+            state_.velocity = (state_.velocity + (a_spring + a_repel + ext_accel) * h) * damp_mul;
+            state_.velocity = clamp(state_.velocity, -2500.0f, 2500.0f);
+            state_.displacement += state_.velocity * h;
+            state_.displacement = clamp(state_.displacement, -boundary_limit_ * 1.25f, boundary_limit_ * 1.25f);
+        }
+    }
 
     // ── 7. Multiscale Energy Decomposition (DISSIPATE) ─────────────────────
     float inst_energy = (state_.velocity * state_.velocity) / (omega0_ * omega0_ + 1e-4f) + (disp * disp);

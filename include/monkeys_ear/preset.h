@@ -140,6 +140,36 @@ struct PresetData {
     float performance_drift = 0.0f;
     float performance_fracture = 0.0f;
 
+    // Deep Oscillator Morph & Custom Waveform Generator (178..191)
+    int wave_a_family = 0;       // 0=Core(synth_waveform), 1=Formant, 2=BrassFold, 3=Organ, 4=GlassBell, 5=Generator
+    int wave_b = 4;              // 0..8 (WaveFamily::Formant)
+    float wave_morph = 0.0f;     // 0..1 continuous A -> B morph
+    float phase_warp = 0.5f;     // 0..1 asymmetric phase distortion / PWM
+    float wave_fold = 0.0f;      // 0..1 sine/Chebyshev wavefold
+    int osc_unison = 1;          // 1..5 oscillator unison strands
+    float unison_detune_cents = 12.0f; // 0..50 cents
+    float sub_harmonics = 0.0f;  // 0..1 pure sine -> harmonic sub octave
+    float env_to_morph = 0.0f;   // -1..1 filter envelope -> wave morph
+    float lfo_to_morph = 0.0f;   // 0..1 LFO -> wave morph
+    float gen_shape = 0.25f;     // 0..1 waveform generator archetype shape
+    float gen_odd_even = 0.50f;  // 0..1 generator odd vs even harmonics
+    float gen_tilt = 0.55f;      // 0..1 generator spectral tilt / brightness
+    float gen_formant = 0.35f;   // 0..1 generator formant peak focus
+
+    // Onion Skin EQ (192..197)
+    bool onion_enabled = false;
+    int onion_intent = 1;        // 0=Equal, 1=Yield, 2=Preserve
+    float onion_amount = 0.65f;
+    float onion_sensitivity = 0.55f;
+    float onion_low_protect = 0.70f;
+    float onion_transient_protect = 0.60f;
+
+    // Ecosystem Lock-Free Link (198..201)
+    int eco_mode = 1;            // 0=Off, 1=Publish, 2=Follow, 3=Link(Pub+Sub)
+    int eco_slot = 0;            // 0..7 -> Ch 1..8
+    float eco_peer_weight = 0.75f;
+    float eco_pitch_follow = 0.0f;
+
     PresetData();
     std::string serialize() const;
     bool deserialize(const std::string& data);

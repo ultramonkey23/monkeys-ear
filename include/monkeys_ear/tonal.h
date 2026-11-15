@@ -75,6 +75,10 @@ public:
     float confidence() const { return confidence_; }
 
 private:
+    static constexpr size_t kRingSize = 2048;
+    static constexpr size_t kAnalysisWin = 1024;
+    static constexpr int kPersistFrames = 5;
+
     float sample_rate_ = 48000.0f;
     float previous_input_ = 0.0f;
     int samples_since_crossing_ = 0;
@@ -86,8 +90,21 @@ private:
     float polarity_ = 1.0f;
     float saturation_ = 0.0f;
     float tracked_frequency_hz_ = 0.0f;
+    float zc_frequency_hz_ = 0.0f;
+    float adopted_frequency_hz_ = 0.0f;
+    float pending_candidate_hz_ = 0.0f;
+    int pending_persist_count_ = 0;
+    int unvoiced_hops_ = 0;
+    int hop_counter_ = 0;
+    size_t ring_write_pos_ = 0;
+    size_t ring_filled_ = 0;
     float confidence_ = 0.0f;
     float envelope_ = 0.0f;
+    std::array<float, kRingSize> ring_buffer_{};
+
+    float normalized_autocorr(float candidate_hz) const noexcept;
+    float hann_goertzel_mag(float candidate_hz) const noexcept;
+    void evaluate_harmonic_evidence() noexcept;
 };
 
 class MotionSmoother {

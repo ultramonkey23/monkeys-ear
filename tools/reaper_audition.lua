@@ -20,6 +20,26 @@ r.SetOnlyTrackSelected(track)
 r.TrackList_AdjustWindows(false)
 r.TrackFX_Show(track, fx, 3)
 
+local vocal_track, vocal_fx = nil, -1
+local function ensure_vocal_track()
+  if vocal_track and r.ValidatePtr2(0, vocal_track, "MediaTrack*") and vocal_fx >= 0 then
+    r.TrackFX_Show(vocal_track, vocal_fx, 3)
+    return
+  end
+  local idx = r.CountTracks(0)
+  r.InsertTrackAtIndex(idx, true)
+  vocal_track = r.GetTrack(0, idx)
+  r.GetSetMediaTrackInfo_String(vocal_track, 'P_NAME', "Monkey's Ear - Vocal Companion", true)
+  vocal_fx = r.TrackFX_AddByName(vocal_track, "VST3: Monkey's Ear Vocal (Ultramonkeydog Studios)", false, -1)
+  if vocal_fx >= 0 then
+    r.TrackFX_Show(vocal_track, vocal_fx, 3)
+  else
+    r.DeleteTrack(vocal_track)
+    vocal_track = nil
+    r.ShowMessageBox("Monkey's Ear Vocal VST3 was not found in REAPER's scan paths.", "Ecosystem Companion", 0)
+  end
+end
+
 local base, velocity = 48, 100
 local active, end_time, looping, next_step, step = nil, 0, false, 0, 1
 local mouse_down = false
@@ -48,10 +68,11 @@ local function draw()
   gfx.setfont(2,'Arial',14)
   gfx.set(.69,.76,.75,1); gfx.x=18;gfx.y=44;gfx.drawstr('Click a note or use A W S E D F T G Y H U J K while this panel is focused.')
   gfx.x=18;gfx.y=64;gfx.drawstr('Shape the patch in the instrument window; the phrase keeps playing.')
-  button(18,92,162,38,looping and 'STOP PHRASE' or 'PLAY PHRASE',looping)
-  button(190,92,122,38,'OCTAVE  -',false)
-  button(320,92,122,38,'OCTAVE  +',false)
-  button(450,92,170,38,'OPEN INSTRUMENT',false)
+  button(18,92,144,38,looping and 'STOP PHRASE' or 'PLAY PHRASE',looping)
+  button(170,92,110,38,'OCTAVE  -',false)
+  button(288,92,110,38,'OCTAVE  +',false)
+  button(406,92,158,38,'OPEN INSTRUMENT',false)
+  button(572,92,150,38,'OPEN VOCAL BUS',vocal_track ~= nil)
   gfx.set(.72,.8,.77,1); gfx.x=18;gfx.y=145;gfx.drawstr('Octave: C'..tostring(math.floor(base/12)-1)..'   |   Velocity: 100')
   local margin=18; local width=(gfx.w-36)/13
   for i=0,12 do
@@ -83,11 +104,12 @@ local function run()
   end
   local down=(gfx.mouse_cap & 1)==1
   if down and not mouse_down then
-    if hit(18,92,162,38) then
+    if hit(18,92,144,38) then
       if looping then stop_loop() else looping=true;step=1;next_step=now end
-    elseif hit(190,92,122,38) then stop_loop();base=math.max(24,base-12)
-    elseif hit(320,92,122,38) then stop_loop();base=math.min(96,base+12)
-    elseif hit(450,92,170,38) then r.TrackFX_Show(track,fx,3)
+    elseif hit(170,92,110,38) then stop_loop();base=math.max(24,base-12)
+    elseif hit(288,92,110,38) then stop_loop();base=math.min(96,base+12)
+    elseif hit(406,92,158,38) then r.TrackFX_Show(track,fx,3)
+    elseif hit(572,92,150,38) then ensure_vocal_track()
     elseif hit(18,175,gfx.w-36,105) then
       stop_loop();play(base+math.min(12,math.floor((gfx.mouse_x-18)/((gfx.w-36)/13))),.35)
     end

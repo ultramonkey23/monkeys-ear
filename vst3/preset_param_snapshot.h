@@ -129,6 +129,33 @@ void emit_preset_params(const PresetData& p,Emit&& emit){
     put(175,p.lfo_groove);
     put(176,p.performance_drift);
     put(177,p.performance_fracture);
+
+    put(178,choice(p.wave_a_family,6));
+    put(179,choice(p.wave_b,9));
+    put(180,clamp(p.wave_morph,0.0f,1.0f));
+    put(181,clamp(p.phase_warp,0.0f,1.0f));
+    put(182,clamp(p.wave_fold,0.0f,1.0f));
+    put(183,choice(std::max(0,p.osc_unison-1),5));
+    put(184,clamp(p.unison_detune_cents/50.0f,0.0f,1.0f));
+    put(185,clamp(p.sub_harmonics,0.0f,1.0f));
+    put(186,clamp((p.env_to_morph+1.0f)*0.5f,0.0f,1.0f));
+    put(187,clamp(p.lfo_to_morph,0.0f,1.0f));
+    put(188,clamp(p.gen_shape,0.0f,1.0f));
+    put(189,clamp(p.gen_odd_even,0.0f,1.0f));
+    put(190,clamp(p.gen_tilt,0.0f,1.0f));
+    put(191,clamp(p.gen_formant,0.0f,1.0f));
+
+    put(192,p.onion_enabled?1.0f:0.0f);
+    put(193,choice(p.onion_intent,3));
+    put(194,clamp(p.onion_amount,0.0f,1.0f));
+    put(195,clamp(p.onion_sensitivity,0.0f,1.0f));
+    put(196,clamp(p.onion_low_protect,0.0f,1.0f));
+    put(197,clamp(p.onion_transient_protect,0.0f,1.0f));
+
+    put(198,choice(p.eco_mode,4));
+    put(199,choice(p.eco_slot,8));
+    put(200,clamp(p.eco_peer_weight,0.0f,1.0f));
+    put(201,clamp(p.eco_pitch_follow,0.0f,1.0f));
 }
 
 // Selector 79 remains its original four-entry mapping. Selector 173 adds new
