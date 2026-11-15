@@ -11,6 +11,8 @@
 #include <vector>
 #include <cassert>
 #include <cmath>
+#include <bit>
+#include <cstdint>
 #include <iomanip>
 #include <numeric>
 #include <fstream>
@@ -876,22 +878,23 @@ void test_factory_palette_signal_integrity() {
         &PresetManager::create_tube_foundry,&PresetManager::create_clockwork_sub,
         &PresetManager::create_glass_chamber,&PresetManager::create_sound_space}};
     std::cout << "[TEST] Factory palette silent reset and MIDI signal integrity...\n";
+    const auto finite_bits=[](float value){return (std::bit_cast<std::uint32_t>(value)&0x7f800000u)!=0x7f800000u;};
     for (float rate : {44100.f,48000.f,96000.f}) for (auto make : factories) {
         MonkeysEarEngine engine; engine.init(rate,128); auto patch=make(); engine.load_preset(patch); engine.reset();
         std::array<float,128> left{},right{};
         float silent_peak=0.f, musical_peak=0.f;
         for(int block=0;block<4;++block) {
             engine.process_block(nullptr,nullptr,left.data(),right.data(),left.size());
-            for(float v:left){assert(std::isfinite(v));silent_peak=std::max(silent_peak,std::abs(v));}
-            for(float v:right){assert(std::isfinite(v));silent_peak=std::max(silent_peak,std::abs(v));}
+            for(float v:left){assert(finite_bits(v));silent_peak=std::max(silent_peak,std::abs(v));}
+            for(float v:right){assert(finite_bits(v));silent_peak=std::max(silent_peak,std::abs(v));}
         }
         assert(silent_peak<1.e-6f);
         for(int note : {36,60,84}) {
             engine.handle_midi_note_on(note,.8f);
             for(int block=0;block<24;++block) {
                 engine.process_block(nullptr,nullptr,left.data(),right.data(),left.size());
-                for(float v:left){assert(std::isfinite(v));musical_peak=std::max(musical_peak,std::abs(v));}
-                for(float v:right){assert(std::isfinite(v));musical_peak=std::max(musical_peak,std::abs(v));}
+                for(float v:left){assert(finite_bits(v));musical_peak=std::max(musical_peak,std::abs(v));}
+                for(float v:right){assert(finite_bits(v));musical_peak=std::max(musical_peak,std::abs(v));}
             }
             engine.handle_midi_note_off(note);
         }
