@@ -58,12 +58,35 @@ A module is not release-ready until actual REAPER proof covers standalone and co
 
 See `docs/STANDALONE_MODULE_STANDARD.md` (historical filename; content is the connected-module standard) and `include/monkeys_ear/module_contract.h`.
 
+### Research fidelity and musician feedback
+
+Cody reports that his research and ideas have been underimplemented. Treat the
+full intended capability as the objective: retrieve the relevant authored
+design, original mechanisms and negative results; trace existing producers,
+DSP, host controls, state, module boundaries and real consumers; then carry
+authorized work through those owners. Do not substitute an isolated demo,
+generic effect, interface polish, detector or passing mock for the connected
+musician-facing effect. Preserve experimental status and evidence limits while
+building toward the complete intent; unknowns do not justify silently shrinking it.
+
+Use `research/RESEARCH_SPINE.md`, `research/STATUS.json` and the relevant
+subsystem architecture/history as retrieval starting points, then recheck live
+source and execution. The dated gaps in `research/STATUS.json` are leads, not
+permanent claims. Test audio with the real host and independent ABI evidence
+where applicable; distinguish measurable behavior from Cody's listening verdict.
+Keep rapid audition available and return useful outcomes and failures through
+the Lab's existing shared evidence and learning owners; a saved note alone does
+not prove that later decisions adapted.
+
+For visual work, use the Lab's free local tools when available; do not spend
+hosted image-generation allowance when a suitable local route is available.
+
 ---
 
 ## 4. MASTER CONVERGENCE & LAB BOUNDARIES
 
 - Outside agents are authorized to work directly on this repository, with the same project contracts, validation, and convergence obligations as Lab-routed work. Code Prime remains available for Lab-routed product work; it is not a prerequisite for an outside agent to make authorized changes.
-- **Prototyping, experimentation and research-backed trials are parts of full production**, not a separate non-production program. Build and evolve them in the canonical product on `master` under the existing Lab mutation owner, with truthful implementation/proof/release states; an experiment is not automatically ready to ship, but its status is not a reason for a throwaway repo, feature branch, or disconnected implementation. Reuse real capabilities and preserve the production spine; differentiate experiment evidence from accepted user-facing functionality.
+- **Prototyping, experimentation and research-backed trials are parts of full production**, not a separate non-production program. Build and evolve them in the canonical product on `master`, with truthful implementation/proof/release states; an experiment is not automatically ready to ship, but its status is not a reason for a throwaway repo, feature branch, or disconnected implementation. Reuse real capabilities and preserve the production spine; differentiate experiment evidence from accepted user-facing functionality.
 - **`master` is the sole canonical development and integration branch.** Never select `main` as a development target, create agent-chosen feature/transport branches or pull requests, or use another branch as a fallback when direct `master` mutation is blocked.
 - Existing Code Prime-owned bounded ephemeral validation worktrees are implementation details, not persistent alternate branch authorities; accepted work must converge directly onto `master`, with normal push and remote readback. Do not overwrite concurrent or uncommitted work.
 - Any surviving `main` ref is a temporary compatibility alias, never a separate source of truth. It must only fast-forward from validated `master` and remain synchronized until the GitHub default branch is changed to `master` and the alias is safely retired. Until then, explicitly target `master` in all GitHub API/agent operations rather than relying on the repository default.

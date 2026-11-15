@@ -3,13 +3,23 @@
   "repository_role": "native_product_and_research",
   "local_product_imported": null,
   "warning": "Earlier research-shell description has been superseded: native product source is present in this repo. `local_product_imported=null` means whether the entire older local implementation was imported is UNKNOWN, not false. Keep research progress distinct from tested product readiness and verify canonical master/main branch alignment separately.",
+  "creator_research_fidelity_20261114": {
+    "direction": "Cody reports that his research and ideas are underimplemented. Recover original mechanisms and intended musician-facing capabilities, trace producers through DSP, controls, state and actual consumers, and build the connected effect; do not substitute a generic effect, demonstration, UI-only patch or mock success.",
+    "source_head_at_observation": "c5772801e04928afddfbd3921abc3c626021587a",
+    "revalidate_before_action": true,
+    "onion_skin_eq": "Research architecture and synthetic experiments exist; the source inspection found conventional parametric EQ but no integrated Onion Skin EQ module. Recover the architectural split, directional intent, candidate/projection work and relevant negative results before choosing the next complete production crossing.",
+    "pitch_correction": "A standalone Vocal module and target/resynthesis chain exist; synthetic octave-candidate research is not the production zero-crossing tracker. The tracker probe observed octave ambiguity on strong second-harmonic input; do not advertise the research result as integrated or assume a synthetic MPM result transfers unchanged.",
+    "connected_ecosystem": "Shared publishers, handoff and Vocal evidence consumption exist in source, but inspection found no actual VST3-to-VST3 producer/transport/consumer connection. The handoff and stale-evidence repairs do not establish connected plug-in behavior.",
+    "musician_workflow_and_proof": "A REAPER audition panel and generated-MIDI host probe are present; tested MIDI produces instrument audio, but physical playing, subjective listening, broader preset buzz and full connected workflows remain open. Preserve local-first visual generation and do not spend hosted image-generation allowance for this work.",
+    "lab_learning": "Feedback and receipts were ingested. Lab Code Prime carries audio host/ABI evidence into executor briefs; later attributable use and learning remain unobserved. Use existing Lab owners rather than duplicating them."
+  },
   "active_subsystems": {
     "onion-skin-eq": {
       "status": "ACTIVE_RESEARCH",
       "architecture": "research/onion-skin-eq/ARCHITECTURE.md",
       "history": "research/onion-skin-eq/RESEARCH_HISTORY.md",
       "evidence_level": "SYNTHETIC_MEASURED",
-      "product_integration": "PENDING_LOCAL_AUDIT"
+      "product_integration": "CONVENTIONAL_EQ_PRESENT_ONION_MODULE_NOT_FOUND_20261114"
     },
     "pitch-correction": {
       "status": "ACTIVE_RESEARCH",
