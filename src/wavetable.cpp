@@ -69,7 +69,21 @@ inline void build_generator_spectrum(const WaveformGeneratorParams& p,
         const float formant_boost = 1.0f + (1.45f * std::exp(-0.5f * dist * dist));
 
         amps[i] = base * parity * archetype * formant_boost;
+        if (i < p.harmonic_bars.size()) {
+            const float partial_gain = clamp(p.harmonic_bars[i] * 2.0f, 0.0f, 2.5f);
+            amps[i] *= partial_gain;
+        }
         phases[i] = shape * 0.45f * std::sin(h * 0.85f);
+    }
+}
+
+inline float apply_morph_curve(float morph01, int curve) noexcept {
+    const float m = clamp(morph01, 0.0f, 1.0f);
+    switch (std::clamp(curve, 0, 3)) {
+        case 1: return m * m * (3.0f - 2.0f * m);                          // Smooth S-curve
+        case 2: return std::sin(m * 1.57079632679f);                        // Punchy cosine/quarter-sine
+        case 3: return std::floor(m * 7.999f) / 7.0f;                       // 8-stepped wavetable scan
+        default: return m;
     }
 }
 
@@ -258,14 +272,21 @@ float WaveformBank::sample_morph(WaveFamily family_a,
                                  float phase01,
                                  float dt,
                                  float phase_warp01,
-                                 float wave_fold01) const noexcept {
+                                 float wave_fold01,
+                                 int morph_curve) const noexcept {
     const float warped = warp_phase(phase01, phase_warp01);
-    const float m = clamp(morph01, 0.0f, 1.0f);
+    const float m = apply_morph_curve(morph01, morph_curve);
     const float a = sample_family(family_a, warped, dt);
     float raw = a;
     if (m > 1e-4f) {
         const float b = sample_family(family_b, warped, dt);
-        raw = lerp(a, b, m);
+        if (morph_curve == 2) {
+            const float ga = std::cos(clamp(morph01, 0.0f, 1.0f) * 1.57079632679f);
+            const float gb = std::sin(clamp(morph01, 0.0f, 1.0f) * 1.57079632679f);
+            raw = a * ga + b * gb;
+        } else {
+            raw = lerp(a, b, m);
+        }
     }
     return apply_fold_inline(raw, wave_fold01);
 }
@@ -280,7 +301,22 @@ void WaveformBank::render_preview(WaveFamily family_a,
     constexpr float kPreviewDt = 1.0f / 128.0f;
     for (size_t i = 0; i < out_samples.size(); ++i) {
         const float ph = static_cast<float>(i) / static_cast<float>(out_samples.size());
-        out_samples[i] = ui_bank.sample_morph(family_a, family_b, morph01, ph, kPreviewDt, gen.phase_warp, gen.wave_fold);
+        out_samples[i] = ui_bank.sample_morph(family_a, family_b, morph01, ph, kPreviewDt,
+                                              gen.phase_warp, gen.wave_fold, gen.morph_curve);
+    }
+}
+
+void WaveformBank::evaluate_generator_harmonics(const WaveformGeneratorParams& gen,
+                                                std::array<float, 16>& out_bars) noexcept {
+    std::array<float, kNumHarmonics> amps{}, phases{};
+    build_generator_spectrum(gen, amps, phases);
+    float max_a = 1e-4f;
+    for (size_t i = 0; i < out_bars.size(); ++i) {
+        max_a = std::max(max_a, amps[i]);
+    }
+    const float norm = 1.0f / max_a;
+    for (size_t i = 0; i < out_bars.size(); ++i) {
+        out_bars[i] = clamp(amps[i] * norm, 0.0f, 1.0f);
     }
 }
 

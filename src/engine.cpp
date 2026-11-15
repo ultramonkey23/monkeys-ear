@@ -304,21 +304,29 @@ void MonkeysEarEngine::sync_oscillator_morph_and_generator() {
     const int eff_b = std::max(0, std::min(kWaveFamilyCount - 1, p.wave_b));
     WaveformGeneratorParams gen{
         p.gen_shape, p.gen_odd_even, p.gen_tilt, p.gen_formant,
-        p.phase_warp, p.wave_fold
+        p.phase_warp, p.wave_fold, p.morph_curve, p.gen_harmonics
     };
     voice_manager_.set_generator_params(gen);
     voice_manager_.set_wave_morph_controls(
         eff_a, eff_b, p.wave_morph, p.phase_warp, p.wave_fold,
         clamp(p.osc_unison, 1, 5), p.unison_detune_cents,
         p.sub_harmonics, p.env_to_morph);
-    onion_eq_.set_controls({
-        p.onion_enabled,
-        static_cast<OnionSkinIntent>(clamp(p.onion_intent, 0, 2)),
-        p.onion_amount,
-        p.onion_sensitivity,
-        p.onion_low_protect,
-        p.onion_transient_protect
-    });
+    voice_manager_.set_deep_osc_controls(
+        p.osc2_wave, p.osc2_fine_cents, p.ring_mod_mix,
+        p.unison_width, p.analog_drift, p.auto_morph_rate,
+        p.morph_curve, p.osc_balance);
+    OnionSkinControls osc_ctrl{};
+    osc_ctrl.enabled = p.onion_enabled;
+    osc_ctrl.intent = static_cast<OnionSkinIntent>(clamp(p.onion_intent, 0, 2));
+    osc_ctrl.amount = p.onion_amount;
+    osc_ctrl.sensitivity = p.onion_sensitivity;
+    osc_ctrl.low_protect = p.onion_low_protect;
+    osc_ctrl.transient_protect = p.onion_transient_protect;
+    osc_ctrl.tilt_db = p.onion_tilt_db;
+    osc_ctrl.q_focus = p.onion_q_focus;
+    osc_ctrl.air_db = p.onion_air_db;
+    osc_ctrl.manual_db = p.onion_band_db;
+    onion_eq_.set_controls(osc_ctrl);
 }
 
 void MonkeysEarEngine::set_parameter_normalized(int id, float v) {
@@ -386,7 +394,7 @@ void MonkeysEarEngine::set_parameter_normalized(int id, float v) {
         // The audio callback smooths both axes; no heavyweight DSP reset.
         return;
     }
-    if(id>=178&&id<=201){
+    if(id>=178&&id<=244){
         switch(id){
             case 178: p.wave_a_family=std::min(5,static_cast<int>(v*6.0f)); break;
             case 179: p.wave_b=std::min(8,static_cast<int>(v*9.0f)); break;
@@ -412,7 +420,25 @@ void MonkeysEarEngine::set_parameter_normalized(int id, float v) {
             case 199: p.eco_slot=std::min(7,static_cast<int>(v*8.0f)); break;
             case 200: p.eco_peer_weight=v; break;
             case 201: p.eco_pitch_follow=v; break;
-            default: break;
+            case 202: p.osc2_wave=std::min(9,static_cast<int>(v*10.0f)); break;
+            case 203: p.osc2_fine_cents=(v-0.5f)*100.0f; break;
+            case 204: p.ring_mod_mix=v; break;
+            case 205: p.unison_width=v; break;
+            case 206: p.analog_drift=v; break;
+            case 207: case 208: case 209: case 210:
+            case 211: case 212: case 213: case 214:
+                p.gen_harmonics[static_cast<size_t>(id-207)]=v; break;
+            case 215: p.auto_morph_rate=v*8.0f; break;
+            case 216: p.morph_curve=std::min(3,static_cast<int>(v*4.0f)); break;
+            case 217: p.osc_balance=v; break;
+            case 218: p.onion_tilt_db=(v-0.5f)*12.0f; break;
+            case 219: p.onion_q_focus=0.85f+v*(4.5f-0.85f); break;
+            case 220: p.onion_air_db=(v-0.5f)*12.0f; break;
+            default:
+                if (id >= 221 && id <= 244) {
+                    p.onion_band_db[static_cast<size_t>(id - 221)] = (v - 0.5f) * 24.0f;
+                }
+                break;
         }
         sync_oscillator_morph_and_generator();
         return;
@@ -564,7 +590,9 @@ void MonkeysEarEngine::process_block(
                                           gesture.fm_offset,0.0f,1.0f));
         voice_manager_.set_vibrato(std::sin(static_cast<float>(modulation_counter_)*TWO_PI*5.3f/sample_rate_) * p.vibrato_depth_semitones + aftertouch_*p.vibrato_depth_semitones*.35f);
         float synth_weight=0.0f;
-        float synth_sample = voice_manager_.process_split(filter_env, synth_weight);
+        float synth_l=0.0f, synth_r=0.0f;
+        voice_manager_.process_stereo_split(filter_env, synth_weight, synth_l, synth_r);
+        float synth_sample = 0.5f * (synth_l + synth_r);
 
         // 2. Live External Audio Ingest & Preamp/Conditioning
         float ext_sample = 0.0f;
@@ -647,10 +675,13 @@ void MonkeysEarEngine::process_block(
         float equalized=eq_.process(recombined,eq_freq,eq_gain);
         equalized = onion_eq_.process_sample(equalized, weight_layer + ext_sample * 0.5f);
 
-        // 8. Stereo Ping-Pong Delay
+        // 8. Stereo Ping-Pong Delay + True Stereo Unison Side Panorama
+        const float stereo_side = (p.input_route_mode == 0 && p.macros[MACRO_MIC_BLEND] <= 0.001f)
+            ? (0.5f * (synth_l - synth_r) * p.character_level)
+            : 0.0f;
         float delayed_l = 0.0f;
         float delayed_r = 0.0f;
-        delay_.process(equalized, equalized, delayed_l, delayed_r);
+        delay_.process(equalized + stereo_side, equalized - stereo_side, delayed_l, delayed_r);
 
         // 9. FDN Algorithmic Reverb
         float reverbed_l = 0.0f;

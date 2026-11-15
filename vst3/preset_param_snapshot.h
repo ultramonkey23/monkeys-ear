@@ -156,6 +156,24 @@ void emit_preset_params(const PresetData& p,Emit&& emit){
     put(199,choice(p.eco_slot,8));
     put(200,clamp(p.eco_peer_weight,0.0f,1.0f));
     put(201,clamp(p.eco_pitch_follow,0.0f,1.0f));
+
+    put(202,choice(p.osc2_wave,10));
+    put(203,clamp((p.osc2_fine_cents/100.0f)+0.5f,0.0f,1.0f));
+    put(204,clamp(p.ring_mod_mix,0.0f,1.0f));
+    put(205,clamp(p.unison_width,0.0f,1.0f));
+    put(206,clamp(p.analog_drift,0.0f,1.0f));
+    for(int h=0;h<8;++h){
+        put(207+h,clamp(p.gen_harmonics[static_cast<size_t>(h)],0.0f,1.0f));
+    }
+    put(215,clamp(p.auto_morph_rate/8.0f,0.0f,1.0f));
+    put(216,choice(p.morph_curve,4));
+    put(217,clamp(p.osc_balance,0.0f,1.0f));
+    put(218,clamp((p.onion_tilt_db/12.0f)+0.5f,0.0f,1.0f));
+    put(219,clamp((p.onion_q_focus-0.85f)/(4.5f-0.85f),0.0f,1.0f));
+    put(220,clamp((p.onion_air_db/12.0f)+0.5f,0.0f,1.0f));
+    for(int b=0;b<24;++b){
+        put(221+b,clamp((p.onion_band_db[static_cast<size_t>(b)]/24.0f)+0.5f,0.0f,1.0f));
+    }
 }
 
 // Selector 79 remains its original four-entry mapping. Selector 173 adds new

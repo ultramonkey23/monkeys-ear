@@ -1,0 +1,12 @@
+{
+  "schema": "lab_anim_ui_provenance_v1",
+  "pipeline": "anim_ui_local_comfyui_v1",
+  "project": "monkeys-ear",
+  "stem": "monkeys_ear_crest",
+  "candidate": "monkeys_ear_crest_c2.png",
+  "family": "GHENGIS_UI_ORNAMENT",
+  "res_path": "monkeys_ear/ui/monkeys_ear_crest.png",
+  "promoted_at": "2026-11-15T04:03:09.875352+00:00",
+  "source_spec": "C:\\Users\\harin\\monkeys-ear\\art\\source\\ui\\monkeys_ear_ui.json",
+  "prompt_file": "C:\\Users\\harin\\monkeys-ear\\art\\source\\generated\\ui\\monkeys_ear_crest\\prompt.txt"
+}

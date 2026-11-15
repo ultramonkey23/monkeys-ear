@@ -63,6 +63,7 @@ public:
     void set_phase_warp(float warp01);
     void set_wave_fold(float fold01);
     void set_unison(int voices, float detune_cents);
+    void set_morph_curve(int curve);
     void set_waveform_bank(const WaveformBank* bank);
     void reset_phase();
     void set_phase(float phase_cycles);
@@ -74,6 +75,7 @@ public:
     float process();
     float process_with_pm(float phase_mod);
     float process_with_pm(float phase_mod, float morph_mod);
+    void process_with_pm_stereo(float phase_mod, float morph_mod, float width01, float& out_l, float& out_r);
 
 private:
     static constexpr size_t kMaxUnison = 5;
@@ -90,6 +92,7 @@ private:
     float wave_fold_ = 0.0f;
     int unison_voices_ = 1;
     float unison_detune_cents_ = 12.0f;
+    int morph_curve_ = 0;
     const WaveformBank* bank_ = nullptr;
     std::array<float, kMaxUnison> unison_phases_{{0.0f, 0.21f, 0.47f, 0.68f, 0.84f}};
     bool wrapped_;
@@ -128,6 +131,9 @@ public:
                                  float phase_warp, float wave_fold,
                                  int unison_voices, float unison_detune_cents,
                                  float sub_harmonics, float env_to_morph);
+    void set_deep_osc_controls(int osc2_wave, float osc2_fine_cents, float ring_mod_mix,
+                               float unison_width, float analog_drift,
+                               float morph_rate_hz, int morph_curve, float osc_balance);
     void set_lfo_morph_mod(float amount);
     void set_waveform_bank(const WaveformBank* bank);
     void set_env_parameters(float a, float d, float s, float r);
@@ -138,6 +144,7 @@ public:
 
     float process(float& filter_env_out);
     float process_split(float& filter_env_out, float& weight_out);
+    void process_stereo_split(float& filter_env_out, float& weight_out, float& out_l, float& out_r);
     bool is_active() const;
     int get_note() const { return note_; }
     float get_age() const { return age_; }
@@ -177,6 +184,16 @@ private:
     float sub_harmonics_ = 0.0f;
     float env_to_morph_ = 0.0f;
     float lfo_morph_mod_ = 0.0f;
+    int osc2_wave_ = 0;
+    float osc2_fine_cents_ = 7.0f;
+    float ring_mod_mix_ = 0.0f;
+    float unison_width_ = 0.65f;
+    float analog_drift_ = 0.0f;
+    float morph_rate_hz_ = 0.0f;
+    int morph_curve_ = 0;
+    float osc_balance_ = 0.5f;
+    float drift_phase_ = 0.0f;
+    float auto_morph_phase_ = 0.0f;
     float next_noise();
     void update_frequencies();
 };
@@ -216,6 +233,9 @@ public:
                                  float phase_warp, float wave_fold,
                                  int unison_voices, float unison_detune_cents,
                                  float sub_harmonics, float env_to_morph);
+    void set_deep_osc_controls(int osc2_wave, float osc2_fine_cents, float ring_mod_mix,
+                               float unison_width, float analog_drift,
+                               float morph_rate_hz, int morph_curve, float osc_balance);
     void set_lfo_morph_mod(float amount);
     void set_generator_params(const WaveformGeneratorParams& params);
     const WaveformBank& waveform_bank() const { return bank_; }
@@ -227,6 +247,7 @@ public:
 
     float process(float& out_filter_env);
     float process_split(float& out_filter_env, float& out_weight);
+    void process_stereo_split(float& out_filter_env, float& out_weight, float& out_l, float& out_r);
     size_t active_voice_count() const;
 
 private:

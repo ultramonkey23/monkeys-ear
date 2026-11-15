@@ -160,7 +160,25 @@ std::string PresetData::serialize() const {
        <<"\nECO_MODE="<<eco_mode
        <<"\nECO_SLOT="<<eco_slot
        <<"\nECO_PEER_WEIGHT="<<eco_peer_weight
-       <<"\nECO_PITCH_FOLLOW="<<eco_pitch_follow<<"\n";
+       <<"\nECO_PITCH_FOLLOW="<<eco_pitch_follow
+       <<"\nOSC2_WAVE="<<osc2_wave
+       <<"\nOSC2_FINE_CENTS="<<osc2_fine_cents
+       <<"\nRING_MOD_MIX="<<ring_mod_mix
+       <<"\nUNISON_WIDTH="<<unison_width
+       <<"\nANALOG_DRIFT="<<analog_drift
+       <<"\nAUTO_MORPH_RATE="<<auto_morph_rate
+       <<"\nMORPH_CURVE="<<morph_curve
+       <<"\nOSC_BALANCE="<<osc_balance
+       <<"\nONION_TILT_DB="<<onion_tilt_db
+       <<"\nONION_Q_FOCUS="<<onion_q_focus
+       <<"\nONION_AIR_DB="<<onion_air_db;
+    for (size_t i = 0; i < 8; ++i) {
+        oss << "\nGEN_H" << (i + 1) << "=" << gen_harmonics[i];
+    }
+    for (size_t i = 0; i < 24; ++i) {
+        oss << "\nONION_BAND_" << i << "=" << onion_band_db[i];
+    }
+    oss << "\n";
     return oss.str();
 }
 
@@ -243,6 +261,25 @@ bool PresetData::deserialize(const std::string& data) {
         else if (key == "ECO_SLOT") eco_slot=clamp(std::stoi(val_str),0,7);
         else if (key == "ECO_PEER_WEIGHT") eco_peer_weight=clamp(std::stof(val_str),0.0f,1.0f);
         else if (key == "ECO_PITCH_FOLLOW") eco_pitch_follow=clamp(std::stof(val_str),0.0f,1.0f);
+        else if (key == "OSC2_WAVE") osc2_wave=clamp(std::stoi(val_str),0,9);
+        else if (key == "OSC2_FINE_CENTS") osc2_fine_cents=clamp(std::stof(val_str),-50.0f,50.0f);
+        else if (key == "RING_MOD_MIX") ring_mod_mix=clamp(std::stof(val_str),0.0f,1.0f);
+        else if (key == "UNISON_WIDTH") unison_width=clamp(std::stof(val_str),0.0f,1.0f);
+        else if (key == "ANALOG_DRIFT") analog_drift=clamp(std::stof(val_str),0.0f,1.0f);
+        else if (key == "AUTO_MORPH_RATE") auto_morph_rate=clamp(std::stof(val_str),0.0f,8.0f);
+        else if (key == "MORPH_CURVE") morph_curve=clamp(std::stoi(val_str),0,3);
+        else if (key == "OSC_BALANCE") osc_balance=clamp(std::stof(val_str),0.0f,1.0f);
+        else if (key == "ONION_TILT_DB") onion_tilt_db=clamp(std::stof(val_str),-6.0f,6.0f);
+        else if (key == "ONION_Q_FOCUS") onion_q_focus=clamp(std::stof(val_str),0.85f,4.5f);
+        else if (key == "ONION_AIR_DB") onion_air_db=clamp(std::stof(val_str),-6.0f,6.0f);
+        else if (key.rfind("GEN_H",0)==0 && key.size()==6) {
+            int h = key[5] - '1';
+            if (h >= 0 && h < 8) gen_harmonics[static_cast<size_t>(h)] = clamp(std::stof(val_str), 0.0f, 1.0f);
+        }
+        else if (key.rfind("ONION_BAND_",0)==0) {
+            int b = std::stoi(key.substr(11));
+            if (b >= 0 && b < 24) onion_band_db[static_cast<size_t>(b)] = clamp(std::stof(val_str), -12.0f, 12.0f);
+        }
         else if (key == "FILTER_MODE_A") filter_mode_a=std::stoi(val_str);
         else if (key == "FILTER_MODE_B") filter_mode_b=std::stoi(val_str);
         else if (key == "FILTER_CUTOFF_B") filter_cutoff_b_hz=std::stof(val_str);

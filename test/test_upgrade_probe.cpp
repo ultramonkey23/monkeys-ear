@@ -157,7 +157,8 @@ void test_wavetable_morph_generator_and_osc() {
 }
 
 void test_onion_skin_eq_projection_gate() {
-    std::cout << "[UPGRADE TEST] OnionSkinEQ dynamic carve, protection & Projection Gate... ";
+    std::cout << "[UPGRADE TEST] OnionSkinEQ 24-band ERB dynamic carve, surgical sculpt & Projection Gate... ";
+    static_assert(OnionSkinEQ::kNumBands == 24, "Expected 24 cochlear ERB bands");
     OnionSkinEQ eq;
     eq.set_sample_rate(48000.0f);
     OnionSkinControls c{};
@@ -167,19 +168,23 @@ void test_onion_skin_eq_projection_gate() {
     c.sensitivity = 0.85f;
     c.low_protect = 0.90f;
     c.transient_protect = 0.80f;
+    c.q_focus = 2.4f;
+    c.manual_db[20] = 4.0f; // +4 dB at ~4275 Hz
     eq.set_controls(c);
 
-    // Peer occupies 1.6 kHz and 3.6 kHz presence bands strongly
-    const std::array<float, 6> peer_occ{0.05f, 0.1f, 0.25f, 0.85f, 0.80f, 0.10f};
+    // Peer occupies 1.51 kHz (band 14) and 2.55 kHz (band 17) strongly
+    std::array<float, OnionSkinEQ::kNumBands> peer_occ{};
+    peer_occ[14] = 0.88f;
+    peer_occ[17] = 0.82f;
     eq.set_peer_occupancy(peer_occ, 1.0f);
 
     double energy_in = 0.0, energy_out = 0.0;
     for (int i = 0; i < 6000; ++i) {
         const float t = static_cast<float>(i) / 48000.0f;
-        const float x = 0.35f * std::sin(2.0f * PI * 140.0f * t) +
-                        0.45f * std::sin(2.0f * PI * 1600.0f * t) +
-                        0.25f * std::sin(2.0f * PI * 3600.0f * t);
-        const float y = eq.process_sample(x, 0.4f * std::sin(2.0f * PI * 1600.0f * t));
+        const float x = 0.35f * std::sin(2.0f * PI * 72.0f * t) +
+                        0.45f * std::sin(2.0f * PI * 1510.0f * t) +
+                        0.25f * std::sin(2.0f * PI * 2550.0f * t);
+        const float y = eq.process_sample(x, 0.4f * std::sin(2.0f * PI * 1510.0f * t));
         assert(std::isfinite(y));
         if (i >= 3000) {
             energy_in += x * x;
@@ -187,10 +192,43 @@ void test_onion_skin_eq_projection_gate() {
         }
     }
     const auto& m = eq.metrics();
-    assert(energy_out < energy_in);                // Yield mode carved colliding bands
-    assert(m.band_carve_db[3] < -0.5f);            // 1.6 kHz presence carved
-    assert(std::abs(m.band_carve_db[0]) < 1.2f);   // Low fundamental band protected
-    assert(m.identity_cosine >= 0.86f - 0.02f);    // Projection Gate preserves identity
+    assert(energy_out < energy_in);                 // Yield mode carved colliding bands
+    assert(m.band_carve_db[14] < -0.5f);            // 1.51 kHz presence carved
+    assert(std::abs(m.band_carve_db[0]) < 1.0f);    // 40 Hz sub fundamental band protected
+    assert(m.total_eq_db[20] > 1.5f);               // Manual 24-band surgical boost reflected in total EQ curve
+    assert(m.identity_cosine >= 0.86f - 0.02f);     // Projection Gate preserves identity
+    std::cout << "PASS\n";
+}
+
+void test_deep_osc_harmonics_and_stereo_unison() {
+    std::cout << "[UPGRADE TEST] H1..H8 custom partials, Osc2+RingMod, MorphCurve & stereo unison... ";
+    WaveformBank bank;
+    WaveformGeneratorParams gp1{};
+    WaveformGeneratorParams gp2{};
+    gp2.harmonic_bars[0] = 0.08f;
+    gp2.harmonic_bars[3] = 0.98f;
+    std::array<float, 128> prev1{}, prev2{};
+    WaveformBank::render_preview(WaveFamily::CustomGen, WaveFamily::Saw, 0.0f, gp1, prev1);
+    WaveformBank::render_preview(WaveFamily::CustomGen, WaveFamily::Saw, 0.0f, gp2, prev2);
+    double diff_gen = 0.0;
+    for (size_t i = 0; i < 128; ++i) diff_gen += std::abs(prev1[i] - prev2[i]);
+    assert(diff_gen > 2.0); // H1..H8 drawbars causally reshape CustomGen waveform
+
+    VoiceManager vm;
+    vm.set_sample_rate(48000.0f);
+    vm.set_wave_morph_controls(0, 5, 0.5f, 0.35f, 0.4f, 5, 22.0f, 0.3f, 0.0f);
+    vm.set_deep_osc_controls(6, 11.0f, 0.45f, 1.0f, 0.25f, 2.0f, 2, 0.55f);
+    vm.note_on(48, 0.9f);
+    double lr_diff = 0.0, l_energy = 0.0;
+    for (int i = 0; i < 2048; ++i) {
+        float fe = 0.0f, w = 0.0f, ol = 0.0f, or_ = 0.0f;
+        vm.process_stereo_split(fe, w, ol, or_);
+        assert(std::isfinite(ol) && std::isfinite(or_));
+        lr_diff += std::abs(ol - or_);
+        l_energy += ol * ol;
+    }
+    assert(l_energy > 1.0);
+    assert(lr_diff > 1.0); // Stereo unison + independent Osc2/RingMod produces true stereo field
     std::cout << "PASS\n";
 }
 
@@ -274,6 +312,7 @@ int main() {
     test_sound_space_sr_and_idle_silence();
     test_wavetable_morph_generator_and_osc();
     test_onion_skin_eq_projection_gate();
+    test_deep_osc_harmonics_and_stereo_unison();
     test_ecosystem_cross_module_bus();
     test_factory_preset_gain_balance();
     std::cout << "ALL UPGRADE PROBE CHECKS PASSED.\n";

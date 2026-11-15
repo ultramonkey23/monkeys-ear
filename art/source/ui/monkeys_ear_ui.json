@@ -1,0 +1,39 @@
+{
+  "project": "monkeys-ear",
+  "paths": {
+    "raw": "art/source/generated/ui",
+    "runtime": "art/ui",
+    "res_prefix": "monkeys_ear/ui"
+  },
+  "assets": [
+    {
+      "stem": "studio_chassis_plate",
+      "family": "plate",
+      "subject": "ui matte dark obsidian synthesizer faceplate chassis background",
+      "keywords": [
+        "brushed dark graphite metal",
+        "quiet empty dark interior surface",
+        "subtle cyan and copper hairline border frame",
+        "precision studio hardware"
+      ],
+      "width": 1024,
+      "height": 640,
+      "steps": 12,
+      "candidates": 2
+    },
+    {
+      "stem": "monkeys_ear_crest",
+      "family": "ornament",
+      "subject": "ui icon cyber acoustic monkey ear harmonic spiral crest medallion",
+      "keywords": [
+        "cyan and warm amber rim light",
+        "obsidian metallic medallion",
+        "isolated centered icon"
+      ],
+      "width": 256,
+      "height": 256,
+      "steps": 12,
+      "candidates": 2
+    }
+  ]
+}

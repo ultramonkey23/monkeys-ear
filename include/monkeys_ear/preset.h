@@ -170,6 +170,23 @@ struct PresetData {
     float eco_peer_weight = 0.75f;
     float eco_pitch_follow = 0.0f;
 
+    // Deep Oscillator, H1..H8 Generator & Morph Curve (params 202..217)
+    int osc2_wave = 0;             // 0 = Match Osc1, 1..9 = WaveFamily 0..8
+    float osc2_fine_cents = 7.0f;  // [-50..+50] cents (7.0 neutral)
+    float ring_mod_mix = 0.0f;     // [0..1]
+    float unison_width = 0.65f;    // [0..1]
+    float analog_drift = 0.0f;     // [0..1]
+    std::array<float, 8> gen_harmonics{{0.5f, 0.5f, 0.5f, 0.5f, 0.5f, 0.5f, 0.5f, 0.5f}};
+    float auto_morph_rate = 0.0f;  // [0..8] Hz
+    int morph_curve = 0;           // 0 = Linear, 1 = S-Curve, 2 = EqualPwr, 3 = Step-8
+    float osc_balance = 0.50f;     // [0..1] 0=Osc1 heavy, 1=Osc2 heavy
+
+    // 24-Band Psychoacoustic ERB Onion-Skin & Surgical Sculpt EQ (params 218..244)
+    float onion_tilt_db = 0.0f;    // [-6..+6] dB
+    float onion_q_focus = 1.85f;   // [0.85..4.5]
+    float onion_air_db = 0.0f;     // [-6..+6] dB
+    std::array<float, 24> onion_band_db{};
+
     PresetData();
     std::string serialize() const;
     bool deserialize(const std::string& data);

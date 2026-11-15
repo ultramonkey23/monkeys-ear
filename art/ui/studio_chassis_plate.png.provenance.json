@@ -1,0 +1,12 @@
+{
+  "schema": "lab_anim_ui_provenance_v1",
+  "pipeline": "anim_ui_local_comfyui_v1",
+  "project": "monkeys-ear",
+  "stem": "studio_chassis_plate",
+  "candidate": "studio_chassis_plate_c1.png",
+  "family": "GHENGIS_UI_PLATE",
+  "res_path": "monkeys_ear/ui/studio_chassis_plate.png",
+  "promoted_at": "2026-11-15T04:03:08.518714+00:00",
+  "source_spec": "C:\\Users\\harin\\monkeys-ear\\art\\source\\ui\\monkeys_ear_ui.json",
+  "prompt_file": "C:\\Users\\harin\\monkeys-ear\\art\\source\\generated\\ui\\studio_chassis_plate\\prompt.txt"
+}

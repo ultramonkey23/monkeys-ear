@@ -105,7 +105,7 @@ target_include_directories(monkeys_ear PRIVATE ${CMAKE_CURRENT_SOURCE_DIR}/vst3)
 target_link_libraries(monkeys_ear PRIVATE monkeys_ear_core)
 if(WIN32)
     target_compile_definitions(monkeys_ear PRIVATE NOMINMAX WIN32_LEAN_AND_MEAN)
-    target_link_libraries(monkeys_ear PRIVATE user32 gdi32)
+    target_link_libraries(monkeys_ear PRIVATE user32 gdi32 gdiplus ole32)
 endif()
 set_target_properties(monkeys_ear PROPERTIES OUTPUT_NAME "monkeys_ear" SUFFIX ".vst3" PREFIX "")
 

@@ -35,23 +35,23 @@ static const TUID kMonkeysEarControllerCID = INLINE_UID(
     0x4D6F6E6B, 0x65797345, 0x61724374, 0x726C7202
 );
 
-static constexpr int kNumParams = 202;
+static constexpr int kNumParams = 245;
 // Root + existing coherent, independently navigable instrument subsystems.
 static constexpr int kUnitCount = 15;
 static constexpr const char* kUnitNames[kUnitCount]={
     "Monkey's Ear","PLAY / Macros","Oscillators / Voice","Filters / Envelopes",
-    "Four-band EQ","Rhythm / Modulation","ChronoState","Sound Space",
+    "Onion 24-Band EQ","Rhythm / Modulation","ChronoState","Sound Space",
     "Vocal Expression","Tube Rack","Tube 1","Tube 2","Tube 3","Tube 4",
     "Master / Routing"
 };
 static int32 unit_for_parameter(int32 id){
     if(id<=7||id==79||id==172||id==173||id==176||id==177)return 1;
-    if(id==8||id==18||id==80||id==81||id>=198)return 14;
-    if((id>=9&&id<=12)||(id>=19&&id<=27)||(id>=70&&id<=78)||(id>=161&&id<=164)||(id>=178&&id<=191))return 2;
+    if(id==8||id==18||id==80||id==81||(id>=198&&id<=201))return 14;
+    if((id>=9&&id<=12)||(id>=19&&id<=27)||(id>=70&&id<=78)||(id>=161&&id<=164)||(id>=178&&id<=191)||(id>=202&&id<=217))return 2;
     if((id>=28&&id<=36)||(id>=165&&id<=168))return 3;
     if(id>=13&&id<=17)return 6;
-    if((id>=37&&id<=54)||(id>=192&&id<=197))return 4;
-    if((id>=55&&id<=69)||(id>=169&&id<=171)||id>=174)return 5;
+    if((id>=37&&id<=54)||(id>=192&&id<=197)||(id>=218&&id<=244))return 4;
+    if((id>=55&&id<=69)||(id>=169&&id<=171)||(id>=174&&id<=175))return 5;
     if(id>=82&&id<=112)return 7;
     if(id>=113&&id<=123)return 8;
     if(id>=124&&id<=128)return 9;
@@ -59,7 +59,7 @@ static int32 unit_for_parameter(int32 id){
     return 0;
 }
 static constexpr uint32 kStateMagic = 0x4D453032u; // ME02
-static constexpr uint32 kStateVersion = 8u;
+static constexpr uint32 kStateVersion = 9u;
 
 // Avoid C++ fast-math assumptions when host automation includes NaN/Inf.
 static bool valid_normalized(ParamValue value) {
@@ -169,6 +169,19 @@ struct SharedPluginState {
         params[199].store(0.0f); // Eco Channel (Ch 1)
         params[200].store(0.75f);// Eco Peer Gain
         params[201].store(0.0f); // Eco Pitch Follow
+        params[202].store(0.0f); // Osc 2 Wave Target (Match Osc1)
+        params[203].store(0.57f);// Osc 2 Fine Detune (+7c)
+        params[204].store(0.0f); // Ring Mod Mix
+        params[205].store(0.65f);// Unison Stereo Width
+        params[206].store(0.0f); // Analog Drift
+        for (int i = 207; i <= 214; ++i) params[i].store(0.50f); // GEN H1..H8 neutral 1.0x
+        params[215].store(0.0f); // Auto-Morph Rate
+        params[216].store(0.0f); // Morph Curve (Linear)
+        params[217].store(0.50f);// Osc Balance 1<->2
+        params[218].store(0.50f);// Onion Tilt 0 dB
+        params[219].store(0.274f);// Onion Carve Q Focus (1.85)
+        params[220].store(0.50f);// Onion Air Lift 0 dB
+        for (int i = 221; i <= 244; ++i) params[i].store(0.50f); // 24 ERB bands 0 dB
         for (int i = 0; i < kNumParams; ++i) dirty[i].store(false);
     }
 };
@@ -810,6 +823,8 @@ public:
             : paramIndex==193?2
             : paramIndex==198?3
             : paramIndex==199?7
+            : paramIndex==202?9
+            : paramIndex==216?3
             : ((paramIndex>=101&&paramIndex<=112&&((paramIndex-101)%3)<2)?7:0);
         info.unitId = unit_for_parameter(paramIndex);
         // Pitch bend and pressure are hidden from ordinary editing, but must
@@ -893,12 +908,31 @@ public:
                 "ECO: Link Mode", "ECO: Channel", "ECO: Peer Gain", "ECO: Pitch Follow"
             };
             std::snprintf(title,sizeof(title),"%s",extTitles[paramIndex-178]);
+        } else if(paramIndex>=202&&paramIndex<=220){
+            static constexpr const char* extTitles2[19] = {
+                "OSC 2: Wave Target", "OSC 2: Fine Detune", "OSC: Ring Mod Mix",
+                "OSC: Unison Width", "OSC: Analog Drift",
+                "GEN: Partial H1", "GEN: Partial H2", "GEN: Partial H3", "GEN: Partial H4",
+                "GEN: Partial H5", "GEN: Partial H6", "GEN: Partial H7", "GEN: Partial H8",
+                "WAVE: Auto-Morph Rate", "WAVE: Morph Curve", "OSC: Balance 1<->2",
+                "ONION: Spectral Tilt", "ONION: Carve Q Focus", "ONION: Air Lift"
+            };
+            std::snprintf(title,sizeof(title),"%s",extTitles2[paramIndex-202]);
+        } else if(paramIndex>=221&&paramIndex<=244){
+            const int band = paramIndex - 221;
+            const int hz = static_cast<int>(monkeys_ear::OnionSkinEQ::kBandCentersHz[static_cast<size_t>(band)] + 0.5f);
+            std::snprintf(title,sizeof(title),"ONION ERB %02d (%d Hz)", band + 1, hz);
         } else {
             std::snprintf(title,sizeof(title),"%s",titles[paramIndex]);
         }
         copy_to_char16(info.title,title,128);
         copy_to_char16(info.shortTitle,title,128);
-        copy_to_char16(info.units,(paramIndex==170?"BPM":(paramIndex>=161&&paramIndex<=168&&paramIndex!=163&&paramIndex!=167)?"s":paramIndex>=124?"":"%"),128);
+        const char* u = (paramIndex==170?"BPM"
+            : (paramIndex>=161&&paramIndex<=168&&paramIndex!=163&&paramIndex!=167)?"s"
+            : (paramIndex==215?"Hz"
+            : (paramIndex==218||paramIndex==220||(paramIndex>=221&&paramIndex<=244))?"dB"
+            : (paramIndex==203?"c":(paramIndex>=124?"":"%"))));
+        copy_to_char16(info.units,u,128);
 
         return kResultOk;
     }
@@ -1000,6 +1034,20 @@ public:
             snprintf(buf,sizeof(buf),"%s",modes[std::clamp(static_cast<int>(valueNormalized*4.0),0,3)]);
         }
         else if(id==199){ snprintf(buf,sizeof(buf),"Ch %d",1+std::clamp(static_cast<int>(valueNormalized*8.0),0,7)); }
+        else if(id==202){
+            static constexpr const char* o2w[]={"Match Osc1","Saw","Pulse","Triangle","Sine","Formant","BrassFold","Organ","GlassBell","Generator"};
+            snprintf(buf,sizeof(buf),"%s",o2w[std::clamp(static_cast<int>(valueNormalized*10.0),0,9)]);
+        }
+        else if(id==203){ snprintf(buf,sizeof(buf),"%+.1f c",(valueNormalized-0.5)*100.0); }
+        else if(id>=207&&id<=214){ snprintf(buf,sizeof(buf),"%.0f %%",valueNormalized*200.0); }
+        else if(id==215){ snprintf(buf,sizeof(buf),"%.2f Hz",valueNormalized*8.0); }
+        else if(id==216){
+            static constexpr const char* curves[]={"Linear","S-Curve","EqualPwr","Step-8"};
+            snprintf(buf,sizeof(buf),"%s",curves[std::clamp(static_cast<int>(valueNormalized*4.0),0,3)]);
+        }
+        else if(id==218||id==220){ snprintf(buf,sizeof(buf),"%+.1f dB",(valueNormalized-0.5)*12.0); }
+        else if(id==219){ snprintf(buf,sizeof(buf),"Q %.2f",0.85+valueNormalized*(4.5-0.85)); }
+        else if(id>=221&&id<=244){ snprintf(buf,sizeof(buf),"%+.1f dB",(valueNormalized-0.5)*24.0); }
         else if(id>=101&&id<=112&&((id-101)%3)<2){
             int n=static_cast<int>(valueNormalized*7.99);const char* src[]={"LFO","Envelope","Fast Energy","Slow Energy","Direction","Aftertouch","Velocity","Audio Energy"};const char* dst[]={"Pitch Bound","Harmonic Bound","Modal Bound","Movement Rate","Attraction","Spectral Depth","Phase","Harmonic Mix"};
             snprintf(buf,sizeof(buf),"%s",((id-101)%3)==0?src[std::clamp(n,0,7)]:dst[std::clamp(n,0,7)]);

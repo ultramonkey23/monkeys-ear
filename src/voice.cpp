@@ -152,6 +152,10 @@ void PolyBLEPOscillator::set_unison(int voices, float detune_cents) {
     unison_detune_cents_ = clamp(detune_cents, 0.0f, 50.0f);
 }
 
+void PolyBLEPOscillator::set_morph_curve(int curve) {
+    morph_curve_ = clamp(curve, 0, 3);
+}
+
 void PolyBLEPOscillator::set_waveform_bank(const WaveformBank* bank) {
     bank_ = bank;
 }
@@ -242,7 +246,14 @@ float PolyBLEPOscillator::eval_single_phase(float p, float dt, float eff_morph) 
     }
 
     const WaveformBank& active_bank = bank_ ? *bank_ : shared_waveform_bank();
-    return active_bank.sample_morph(family_a_, family_b_, eff_morph, eff_phase, dt, phase_warp_, wave_fold_);
+    // 2x Oversampled Wavefolder/Warp anti-aliasing when fold/warp nonlinearity is active
+    if (wave_fold_ > 0.02f || std::abs(phase_warp_ - 0.5f) > 0.05f) {
+        const float half_dt = dt * 0.5f;
+        const float s0 = active_bank.sample_morph(family_a_, family_b_, eff_morph, eff_phase, half_dt, phase_warp_, wave_fold_, morph_curve_);
+        const float s1 = active_bank.sample_morph(family_a_, family_b_, eff_morph, eff_phase + half_dt, half_dt, phase_warp_, wave_fold_, morph_curve_);
+        return 0.5f * (s0 + s1);
+    }
+    return active_bank.sample_morph(family_a_, family_b_, eff_morph, eff_phase, dt, phase_warp_, wave_fold_, morph_curve_);
 }
 
 float PolyBLEPOscillator::process() {
@@ -254,33 +265,52 @@ float PolyBLEPOscillator::process_with_pm(float phase_mod) {
 }
 
 float PolyBLEPOscillator::process_with_pm(float phase_mod, float morph_mod) {
+    float l = 0.0f, r = 0.0f;
+    process_with_pm_stereo(phase_mod, morph_mod, 0.0f, l, r);
+    return sanitize(0.5f * (l + r));
+}
+
+void PolyBLEPOscillator::process_with_pm_stereo(float phase_mod, float morph_mod, float width01, float& out_l, float& out_r) {
     const float dt = phase_increment_;
     const float eff_morph = clamp(morph_ + morph_mod, 0.0f, 1.0f);
-    float out = 0.0f;
+    const float w = clamp(width01, 0.0f, 1.0f);
 
     if (unison_voices_ <= 1) {
-        out = eval_single_phase(phase_ + phase_mod, dt, eff_morph);
+        float out = eval_single_phase(phase_ + phase_mod, dt, eff_morph);
         if (std::abs(sync_blep_pending_) > 1e-5f) {
             out += sync_blep_pending_ * poly_blep(phase_, std::max(1e-5f, dt));
             sync_blep_pending_ = 0.0f;
         }
+        last_sample_ = out;
+        out_l = sanitize(out);
+        out_r = out_l;
     } else {
         const float half = 0.5f * static_cast<float>(unison_voices_ - 1);
-        float sum = eval_single_phase(phase_ + phase_mod, dt, eff_morph);
+        float sum_l = 0.0f, sum_r = 0.0f;
+        const float center_s = eval_single_phase(phase_ + phase_mod, dt, eff_morph);
+        sum_l += center_s;
+        sum_r += center_s;
         for (int u = 1; u < unison_voices_; ++u) {
             const float offset_index = static_cast<float>(u) - half;
+            const float pan = (half > 0.01f) ? clamp((offset_index / half) * w, -1.0f, 1.0f) : 0.0f;
             const float detune_ratio = std::pow(2.0f, (offset_index * unison_detune_cents_) / (1200.0f * std::max(1.0f, half)));
             const float u_dt = dt * detune_ratio;
-            sum += eval_single_phase(unison_phases_[static_cast<size_t>(u)] + phase_mod, u_dt, eff_morph);
+            const float u_s = eval_single_phase(unison_phases_[static_cast<size_t>(u)] + phase_mod, u_dt, eff_morph);
+            const float gl = std::sqrt(clamp(0.5f * (1.0f - pan), 0.0f, 1.0f));
+            const float gr = std::sqrt(clamp(0.5f * (1.0f + pan), 0.0f, 1.0f));
+            sum_l += u_s * gl * 1.41421356f;
+            sum_r += u_s * gr * 1.41421356f;
             unison_phases_[static_cast<size_t>(u)] += u_dt;
             if (unison_phases_[static_cast<size_t>(u)] >= 1.0f) {
                 unison_phases_[static_cast<size_t>(u)] -= std::floor(unison_phases_[static_cast<size_t>(u)]);
             }
         }
-        out = sum / std::sqrt(static_cast<float>(unison_voices_));
+        const float norm = 1.0f / std::sqrt(static_cast<float>(unison_voices_));
+        out_l = sanitize(sum_l * norm);
+        out_r = sanitize(sum_r * norm);
+        last_sample_ = 0.5f * (out_l + out_r);
     }
 
-    last_sample_ = out;
     phase_ += phase_increment_;
     if (phase_ >= 1.0f) {
         wrap_fraction_ = clamp((phase_ - 1.0f) / std::max(1e-6f, phase_increment_), 0.0f, 1.0f);
@@ -290,8 +320,6 @@ float PolyBLEPOscillator::process_with_pm(float phase_mod, float morph_mod) {
         wrap_fraction_ = 0.0f;
         wrapped_ = false;
     }
-
-    return sanitize(out);
 }
 
 // ── SynthVoice Implementation ──────────────────────────────────────────
@@ -432,7 +460,12 @@ void SynthVoice::set_wave_morph_controls(int family_a, int family_b, float morph
     const WaveFamily fa = static_cast<WaveFamily>(clamp(family_a, 0, kWaveFamilyCount - 1));
     const WaveFamily fb = static_cast<WaveFamily>(clamp(family_b, 0, kWaveFamilyCount - 1));
     osc1_.set_wave_families(fa, fb);
-    osc2_.set_wave_families(fa, fb);
+    if (osc2_wave_ > 0) {
+        const WaveFamily f2 = static_cast<WaveFamily>(clamp(osc2_wave_ - 1, 0, kWaveFamilyCount - 1));
+        osc2_.set_wave_families(f2, fb);
+    } else {
+        osc2_.set_wave_families(fa, fb);
+    }
     osc1_.set_morph(morph);
     osc2_.set_morph(morph);
     osc1_.set_phase_warp(phase_warp);
@@ -445,6 +478,27 @@ void SynthVoice::set_wave_morph_controls(int family_a, int family_b, float morph
     sub_osc_.set_wave_families(WaveFamily::Sine, WaveFamily::BrassFold);
     sub_osc_.set_morph(sub_harmonics_);
     env_to_morph_ = clamp(env_to_morph, -1.0f, 1.0f);
+}
+
+void SynthVoice::set_deep_osc_controls(int osc2_wave, float osc2_fine_cents, float ring_mod_mix,
+                                       float unison_width, float analog_drift,
+                                       float morph_rate_hz, int morph_curve, float osc_balance) {
+    osc2_wave_ = clamp(osc2_wave, 0, kWaveFamilyCount);
+    osc2_fine_cents_ = clamp(osc2_fine_cents, -50.0f, 50.0f);
+    ring_mod_mix_ = clamp(ring_mod_mix, 0.0f, 1.0f);
+    unison_width_ = clamp(unison_width, 0.0f, 1.0f);
+    analog_drift_ = clamp(analog_drift, 0.0f, 1.0f);
+    morph_rate_hz_ = clamp(morph_rate_hz, 0.0f, 8.0f);
+    morph_curve_ = clamp(morph_curve, 0, 3);
+    osc_balance_ = clamp(osc_balance, 0.0f, 1.0f);
+
+    osc1_.set_morph_curve(morph_curve_);
+    osc2_.set_morph_curve(morph_curve_);
+    if (osc2_wave_ > 0) {
+        const WaveFamily f2 = static_cast<WaveFamily>(clamp(osc2_wave_ - 1, 0, kWaveFamilyCount - 1));
+        osc2_.set_wave_families(f2, f2);
+    }
+    update_frequencies();
 }
 
 void SynthVoice::set_lfo_morph_mod(float amount) {
@@ -470,7 +524,8 @@ void SynthVoice::update_frequencies() {
     target_frequency_ = base_frequency_ * bend_factor;
     if (portamento_seconds_ <= 0.0001f) current_frequency_ = target_frequency_;
     float f1 = current_frequency_ * std::pow(2.0f, vibrato_semitones_ / 12.0f);
-    float f2_ratio = std::pow(2.0f, (static_cast<float>(osc2_semi_) + detune_cents_ / 100.0f) / 12.0f);
+    float fine_total = detune_cents_ + (osc2_fine_cents_ - 7.0f);
+    float f2_ratio = std::pow(2.0f, (static_cast<float>(osc2_semi_) + fine_total / 100.0f) / 12.0f);
     float f2 = f1 * f2_ratio;
     float f_sub = f1 / static_cast<float>(sub_ratio_denominator_);
 
@@ -495,45 +550,89 @@ float SynthVoice::process(float& filter_env_out) {
 }
 
 float SynthVoice::process_split(float& filter_env_out, float& weight_out) {
+    float l = 0.0f, r = 0.0f;
+    process_stereo_split(filter_env_out, weight_out, l, r);
+    return sanitize(0.5f * (l + r));
+}
+
+void SynthVoice::process_stereo_split(float& filter_env_out, float& weight_out, float& out_l, float& out_r) {
     if (!is_active()) {
         filter_env_out = 0.0f;
         weight_out = 0.0f;
-        return 0.0f;
+        out_l = 0.0f;
+        out_r = 0.0f;
+        return;
     }
 
-    age_ += 1.0f / sample_rate_;
+    const float inv_sr = 1.0f / std::max(1.0f, sample_rate_);
+    age_ += inv_sr;
     if (portamento_seconds_ > 0.0001f) {
         float glide = 1.0f - std::exp(-1.0f / (portamento_seconds_ * sample_rate_));
         current_frequency_ += (target_frequency_ - current_frequency_) * glide;
     } else current_frequency_ = target_frequency_;
-    float f1 = current_frequency_ * std::pow(2.0f, vibrato_semitones_ / 12.0f);
+
+    // Subtle analog VCO thermal pitch wander + voice-seeded phase offset
+    float drift_cents_1 = 0.0f;
+    float drift_cents_2 = 0.0f;
+    if (analog_drift_ > 0.001f) {
+        const float seed_off = static_cast<float>((note_ * 37 + 11) % 97) * 0.064f;
+        drift_phase_ += TWO_PI * 0.42f * inv_sr;
+        if (drift_phase_ >= TWO_PI) drift_phase_ -= TWO_PI;
+        drift_cents_1 = std::sin(drift_phase_ + seed_off) * (analog_drift_ * 14.0f);
+        drift_cents_2 = std::cos(drift_phase_ * 1.37f + seed_off * 1.9f) * (analog_drift_ * 18.0f);
+    }
+
+    // Per-voice auto-morph oscillator (0..8 Hz triangle sweep modulation)
+    float auto_morph = 0.0f;
+    if (morph_rate_hz_ > 0.005f) {
+        auto_morph_phase_ += morph_rate_hz_ * inv_sr;
+        if (auto_morph_phase_ >= 1.0f) auto_morph_phase_ -= std::floor(auto_morph_phase_);
+        const float tri = 1.0f - std::abs(2.0f * auto_morph_phase_ - 1.0f); // [0..1]
+        auto_morph = (tri - 0.5f) * 0.85f;
+    }
+
+    float f1 = current_frequency_ * std::pow(2.0f, (vibrato_semitones_ + drift_cents_1 / 100.0f) / 12.0f);
+    float fine_total = detune_cents_ + (osc2_fine_cents_ - 7.0f) + drift_cents_2;
     osc1_.set_frequency(f1);
-    osc2_.set_frequency(f1 * std::pow(2.0f, (static_cast<float>(osc2_semi_) + detune_cents_/100.0f)/12.0f));
+    osc2_.set_frequency(f1 * std::pow(2.0f, (static_cast<float>(osc2_semi_) + fine_total / 100.0f) / 12.0f));
     sub_osc_.set_frequency(f1 / static_cast<float>(sub_ratio_denominator_));
     fundamental_osc_.set_frequency(f1);
 
     // Modulator Oscillator (Osc 2) also tracks dynamic morph modulation
     float env_morph = env_to_morph_ * filter_env_.get_value();
-    float s2 = osc2_.process_with_pm(0.0f, env_morph + lfo_morph_mod_);
+    float dyn_morph = env_morph + lfo_morph_mod_ + auto_morph;
+    float s2 = osc2_.process_with_pm(0.0f, dyn_morph);
 
     // Hard sync: sub-sample phase reset with PolyBLEP discontinuity compensation
     if (hard_sync_ && osc2_.has_wrapped()) {
         osc1_.sync_reset_subsample(osc2_.wrap_fraction());
     }
 
-    // Carrier Oscillator (Osc 1) with Cross-FM Phase Modulation + Dynamic Morph Modulation
+    // Carrier Oscillator (Osc 1) with Cross-FM Phase Modulation + True Stereo Unison Panning
     float pm_input = (fm_amount_ > 0.001f) ? (s2 * fm_amount_ * 3.5f) : 0.0f;
-    float s1 = osc1_.process_with_pm(pm_input, env_morph + lfo_morph_mod_);
+    float s1_l = 0.0f, s1_r = 0.0f;
+    osc1_.process_with_pm_stereo(pm_input, dyn_morph, unison_width_, s1_l, s1_r);
 
     float s_sub = sub_osc_.process();
     float s_fundamental = fundamental_osc_.process();
     float noise = next_noise();
 
-    // Sum interacting sources
-    float carrier_level = 0.55f;
-    float mod_level = 0.45f * (1.0f - fm_amount_ * 0.35f)
+    // Balance 1<->2 + Ring Modulation / AM harmonic sidebands
+    const float bal = clamp(osc_balance_, 0.0f, 1.0f);
+    const float osc1_gain = 1.10f * (1.0f - bal * 0.82f);
+    const float osc2_gain = 0.90f * (0.18f + bal * 0.82f) * (1.0f - fm_amount_ * 0.35f)
         * (1.0f + 0.45f * poly_pressure_); // per-key expressive harmonic emphasis
-    float character = carrier_level * s1 + mod_level * s2 + noise_mix_ * noise;
+
+    float char_l = osc1_gain * s1_l + osc2_gain * s2;
+    float char_r = osc1_gain * s1_r + osc2_gain * s2;
+    if (ring_mod_mix_ > 0.001f) {
+        const float rm_l = s1_l * s2;
+        const float rm_r = s1_r * s2;
+        char_l = lerp(char_l, rm_l, ring_mod_mix_);
+        char_r = lerp(char_r, rm_r, ring_mod_mix_);
+    }
+    char_l += noise_mix_ * noise;
+    char_r += noise_mix_ * noise;
 
     float amp = amp_env_.process();
     filter_env_out = filter_env_.process();
@@ -541,7 +640,8 @@ float SynthVoice::process_split(float& filter_env_out, float& weight_out) {
     float sub = s_sub * sub_polarity_;
     if (sub_saturation_ > 0.0f) sub = lerp(sub, fast_tanh(sub * (1.0f + 4.0f*sub_saturation_)), sub_saturation_);
     weight_out = sanitize((fundamental_mix_ * s_fundamental + sub_mix_ * sub) * sub_env);
-    return sanitize(character * amp);
+    out_l = sanitize(char_l * amp);
+    out_r = sanitize(char_r * amp);
 }
 
 // ── VoiceManager Implementation ────────────────────────────────────────
@@ -769,6 +869,15 @@ void VoiceManager::set_wave_morph_controls(int family_a, int family_b, float mor
     }
 }
 
+void VoiceManager::set_deep_osc_controls(int osc2_wave, float osc2_fine_cents, float ring_mod_mix,
+                                         float unison_width, float analog_drift,
+                                         float morph_rate_hz, int morph_curve, float osc_balance) {
+    for (auto& v : voices_) {
+        v.set_deep_osc_controls(osc2_wave, osc2_fine_cents, ring_mod_mix,
+                                unison_width, analog_drift, morph_rate_hz, morph_curve, osc_balance);
+    }
+}
+
 void VoiceManager::set_lfo_morph_mod(float amount) {
     for (auto& v : voices_) {
         v.set_lfo_morph_mod(amount);
@@ -797,7 +906,14 @@ float VoiceManager::process(float& out_filter_env) {
 }
 
 float VoiceManager::process_split(float& out_filter_env, float& out_weight) {
-    float sum = 0.0f;
+    float l = 0.0f, r = 0.0f;
+    process_stereo_split(out_filter_env, out_weight, l, r);
+    return sanitize(0.5f * (l + r));
+}
+
+void VoiceManager::process_stereo_split(float& out_filter_env, float& out_weight, float& out_l, float& out_r) {
+    float sum_l = 0.0f;
+    float sum_r = 0.0f;
     float weight_sum = 0.0f;
     float env_sum = 0.0f;
     size_t active_count = 0;
@@ -806,7 +922,10 @@ float VoiceManager::process_split(float& out_filter_env, float& out_weight) {
         if (v.is_active()) {
             float f_env = 0.0f;
             float weight = 0.0f;
-            sum += v.process_split(f_env, weight);
+            float vl = 0.0f, vr = 0.0f;
+            v.process_stereo_split(f_env, weight, vl, vr);
+            sum_l += vl;
+            sum_r += vr;
             weight_sum += weight;
             env_sum += f_env;
             active_count++;
@@ -818,12 +937,15 @@ float VoiceManager::process_split(float& out_filter_env, float& out_weight) {
         // Polyphonic scaling to prevent harsh digital clipping
         float headroom_scale = 1.0f / std::sqrt(static_cast<float>(active_count));
         out_weight = sanitize(weight_sum * headroom_scale);
-        return sanitize(sum * headroom_scale);
+        out_l = sanitize(sum_l * headroom_scale);
+        out_r = sanitize(sum_r * headroom_scale);
+        return;
     }
 
     out_filter_env = 0.0f;
     out_weight = 0.0f;
-    return 0.0f;
+    out_l = 0.0f;
+    out_r = 0.0f;
 }
 
 size_t VoiceManager::active_voice_count() const {

@@ -22,7 +22,7 @@ inline void compute_bandpass(float sr, float freq_hz, float q,
 
 inline void compute_peaking(float sr, float freq_hz, float q, float gain_db,
                             float& b0, float& b1, float& b2, float& a1, float& a2) noexcept {
-    const float safe_db = clamp(gain_db, -14.0f, 6.0f);
+    const float safe_db = clamp(gain_db, -15.0f, 12.0f);
     if (std::abs(safe_db) < 0.03f) {
         b0 = 1.0f; b1 = 0.0f; b2 = 0.0f; a1 = 0.0f; a2 = 0.0f;
         return;
@@ -85,7 +85,8 @@ void OnionSkinEQ::set_peer_occupancy(const std::array<float, kNumBands>& peer_oc
 
 void OnionSkinEQ::setup_analyzers() noexcept {
     for (size_t i = 0; i < kNumBands; ++i) {
-        compute_bandpass(sample_rate_, kBandCentersHz[i], 1.65f,
+        // 24 ERB bands need higher analyzer Q (~3.1) for clean adjacent critical-band separation
+        compute_bandpass(sample_rate_, kBandCentersHz[i], 3.1f,
                          self_bp_[i].b0, self_bp_[i].b1, self_bp_[i].b2, self_bp_[i].a1, self_bp_[i].a2);
         ref_bp_[i].b0 = self_bp_[i].b0;
         ref_bp_[i].b1 = self_bp_[i].b1;
@@ -97,7 +98,8 @@ void OnionSkinEQ::setup_analyzers() noexcept {
 }
 
 void OnionSkinEQ::update_peaking_coeffs(size_t band, float gain_db) noexcept {
-    compute_peaking(sample_rate_, kBandCentersHz[band], 1.45f, gain_db,
+    const float q = clamp(controls_.q_focus, 0.85f, 4.5f);
+    compute_peaking(sample_rate_, kBandCentersHz[band], q, gain_db,
                     carve_eq_[band].b0, carve_eq_[band].b1, carve_eq_[band].b2,
                     carve_eq_[band].a1, carve_eq_[band].a2);
 }
@@ -107,32 +109,31 @@ void OnionSkinEQ::evaluate_projection_gate() noexcept {
     const float sens = clamp(controls_.sensitivity, 0.0f, 1.0f);
     const float low_prot = clamp(controls_.low_protect, 0.0f, 1.0f);
     const float trans_prot = clamp(controls_.transient_protect, 0.0f, 1.0f);
+    const float tilt_db = clamp(controls_.tilt_db, -6.0f, 6.0f);
+    const float air_db = clamp(controls_.air_db, -6.0f, 6.0f);
 
     // Compute transient hold factor [0..1]: high when fast envelope jumps cleanly above slow envelope
     const float trans_ratio = (fast_env_ - slow_env_) / (slow_env_ + 0.015f);
     const float transient_hold = clamp(trans_ratio * 1.4f, 0.0f, 1.0f) * trans_prot;
     metrics_.transient_hold = transient_hold;
 
-    // Low-harmonic band protections (bands 0 = 140 Hz, 1 = 320 Hz, 2 = 720 Hz)
-    const std::array<float, kNumBands> band_protect{{
-        low_prot * 0.92f,
-        low_prot * 0.72f,
-        low_prot * 0.28f,
-        0.0f,
-        0.0f,
-        0.0f
-    }};
-
     std::array<float, kNumBands> proposed_db{};
     float conflict_before = 0.0f;
 
     for (size_t i = 0; i < kNumBands; ++i) {
-        const float self_o = clamp(self_env_[i] * 2.8f, 0.0f, 1.0f);
-        const float local_ref_o = clamp(ref_env_[i] * 2.8f, 0.0f, 1.0f);
+        const float self_o = clamp(self_env_[i] * 3.4f, 0.0f, 1.0f);
+        const float local_ref_o = clamp(ref_env_[i] * 3.4f, 0.0f, 1.0f);
         const float ref_o = clamp(std::max(local_ref_o, peer_occ_[i] * peer_weight_), 0.0f, 1.0f);
 
         metrics_.self_occupancy[i] = self_o;
         metrics_.ref_occupancy[i] = ref_o;
+
+        // Smooth low-fundamental protection gradient spanning sub/warmth critical bands (40..500 Hz)
+        float low_weight = 0.0f;
+        if (i <= 7) {
+            low_weight = 1.0f - (static_cast<float>(i) / 8.0f);
+        }
+        const float band_protect = low_prot * low_weight * 0.94f;
 
         const float overlap = std::sqrt(std::max(0.0f, self_o * ref_o));
         conflict_before += overlap;
@@ -146,24 +147,21 @@ void OnionSkinEQ::evaluate_projection_gate() noexcept {
 
         float intent_scale = 0.55f;
         if (controls_.intent == OnionSkinIntent::Yield) {
-            // Yield strongly where reference has clear competing presence
             const float dominance = clamp((ref_o + 0.05f) / (self_o + ref_o + 0.08f), 0.35f, 1.25f);
             intent_scale = 1.05f * dominance;
         } else if (controls_.intent == OnionSkinIntent::Preserve) {
-            // Preserve own presence; only lightly notch upper-mid harshness
-            intent_scale = (i >= 3) ? 0.45f : 0.14f;
+            intent_scale = (i >= 12) ? 0.45f : 0.14f;
         }
 
-        const float protect = clamp((1.0f - band_protect[i]) * (1.0f - transient_hold * 0.8f), 0.05f, 1.0f);
+        const float protect = clamp((1.0f - band_protect) * (1.0f - transient_hold * 0.8f), 0.05f, 1.0f);
         float cut_db = -11.5f * amount * intent_scale * protect * clamp(excess * 3.0f, 0.0f, 1.0f);
-        if (controls_.intent == OnionSkinIntent::Preserve && i <= 1 && self_o > 0.05f) {
-            // Optional micro-anchor lift when preserving core body against dense peer
+        if (controls_.intent == OnionSkinIntent::Preserve && i <= 5 && self_o > 0.05f) {
             cut_db = std::max(cut_db, 1.2f * amount * overlap);
         }
         proposed_db[i] = clamp(cut_db, -12.0f, 2.0f);
     }
 
-    // Projection Gate: check identity cosine similarity before vs after proposed gains.
+    // Projection Gate: check identity cosine similarity before vs after dynamic carving.
     // Enforce cosine >= 0.86 so Onion Skin EQ never hollows out core timbre identity.
     float scale = 1.0f;
     float final_cos = 1.0f;
@@ -194,8 +192,20 @@ void OnionSkinEQ::evaluate_projection_gate() noexcept {
         ? clamp((conflict_before - final_conflict_after) / conflict_before, 0.0f, 1.0f)
         : 0.0f;
 
+    // Combine dynamic carve + 24-band manual surgical sculpt + Tilt + Air shelf
     for (size_t i = 0; i < kNumBands; ++i) {
-        target_db_[i] = controls_.enabled ? (proposed_db[i] * scale) : 0.0f;
+        const float pos_norm = (static_cast<float>(i) / static_cast<float>(kNumBands - 1)) * 2.0f - 1.0f; // [-1..+1]
+        const float tilt_part = pos_norm * tilt_db * 0.55f;
+        float air_part = 0.0f;
+        if (i >= 18) {
+            const float w = static_cast<float>(i - 17) / static_cast<float>(kNumBands - 18);
+            air_part = air_db * w * 0.65f;
+        }
+        const float user_db = clamp(controls_.manual_db[i] + tilt_part + air_part, -12.0f, 12.0f);
+        const float dyn_db = controls_.enabled ? (proposed_db[i] * scale) : 0.0f;
+        metrics_.user_db[i] = user_db;
+        metrics_.band_carve_db[i] = dyn_db;
+        target_db_[i] = clamp(dyn_db + user_db, -15.0f, 12.0f);
     }
 }
 
@@ -206,7 +216,7 @@ float OnionSkinEQ::process_sample(float input, float local_reference) noexcept {
     fast_env_ += (abs_in - fast_env_) * clamp(f_coeff, 0.0f, 0.5f);
     slow_env_ += (abs_in - slow_env_) * clamp(s_coeff, 0.0f, 0.5f);
 
-    // Measure ERB bands unconditionally so telemetry & Ecosystem SpectralOccupancy always stay live
+    // Measure all 24 ERB critical bands unconditionally for live telemetry & Ecosystem bus
     for (size_t i = 0; i < kNumBands; ++i) {
         const float sb = std::abs(self_bp_[i].process(input));
         const float rb = std::abs(ref_bp_[i].process(local_reference));
@@ -221,19 +231,17 @@ float OnionSkinEQ::process_sample(float input, float local_reference) noexcept {
         evaluate_projection_gate();
         for (size_t i = 0; i < kNumBands; ++i) {
             current_db_[i] += (target_db_[i] - current_db_[i]) * 0.28f;
-            metrics_.band_carve_db[i] = current_db_[i];
+            metrics_.total_eq_db[i] = current_db_[i];
             update_peaking_coeffs(i, current_db_[i]);
         }
-    }
-
-    if (!controls_.enabled) {
-        return input;
     }
 
     float y = input;
     for (size_t i = 0; i < kNumBands; ++i) {
         if (std::abs(current_db_[i]) > 0.04f) {
             y = carve_eq_[i].process(y);
+        } else {
+            carve_eq_[i].reset();
         }
     }
     return sanitize(y);

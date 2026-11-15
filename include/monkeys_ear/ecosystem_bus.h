@@ -21,7 +21,7 @@ struct EcosystemStreamFrame {
     float velocity = 0.0f;
     float loudness = 0.0f;
     int32_t midi_note = -1;
-    std::array<float, 6> spectral_occupancy{};
+    std::array<float, 24> spectral_occupancy{};
 };
 
 struct alignas(64) EcosystemChannel {
@@ -33,11 +33,11 @@ struct alignas(64) EcosystemChannel {
 };
 
 struct alignas(64) EcosystemSharedMemory {
-    static constexpr uint32_t kMagic = 0x4D454332u; // "MEC2"
+    static constexpr uint32_t kMagic = 0x4D454333u; // "MEC3" (24 ERB bands)
     static constexpr size_t kSlotCount = 8;
 
     uint32_t magic = 0;
-    uint32_t version = 1;
+    uint32_t version = 2;
     std::array<EcosystemChannel, kSlotCount> slots{};
 };
 

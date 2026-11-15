@@ -18,26 +18,36 @@ struct OnionSkinControls {
     float sensitivity = 0.55f;       // Conflict detection sensitivity [0, 1]
     float low_protect = 0.70f;       // Protects fundamental & sub bands [0, 1]
     float transient_protect = 0.60f; // Holds carve back during transients [0, 1]
+    float tilt_db = 0.0f;            // Spectral tilt [-6, +6] dB across ERB spectrum
+    float q_focus = 1.85f;           // Peaking surgical Q [0.85, 4.50]
+    float air_db = 0.0f;             // Upper-air shimmer shelf >= 4.2 kHz [-6, +6] dB
+    std::array<float, 24> manual_db{}; // User direct per-band surgical EQ [-12, +12] dB
 };
 
 struct OnionSkinMetrics {
-    std::array<float, 6> self_occupancy{};
-    std::array<float, 6> ref_occupancy{};
-    std::array<float, 6> band_carve_db{};
+    std::array<float, 24> self_occupancy{};
+    std::array<float, 24> ref_occupancy{};
+    std::array<float, 24> band_carve_db{};
+    std::array<float, 24> user_db{};
+    std::array<float, 24> total_eq_db{};
     float identity_cosine = 1.0f;
     float conflict_reduction = 0.0f;
     float transient_hold = 0.0f;
 };
 
-// Zero-latency, zero-allocation, lock-free 6-band ERB Onion Skin Dynamic EQ.
-// Analyzes self and reference/peer spectral occupancy across 6 ERB auditory bands,
-// enforces low-harmonic and transient protection plus a cosine identity Projection Gate,
-// and applies smooth dynamic peaking EQ carving per sample.
+// Zero-latency, zero-allocation, lock-free 24-band ERB Onion Skin Dynamic + Surgical EQ.
+// Analyzes self and reference/peer spectral occupancy across 24 Glasberg-Moore ERB auditory critical bands
+// spanning 40 Hz - 9.6 kHz, enforces low-harmonic and transient protection plus a cosine >= 0.86
+// Projection Gate on dynamic carving, sums user 24-band surgical sculpt + Tilt + Air shelf,
+// and applies smooth biquad EQ filtering per sample.
 class OnionSkinEQ {
 public:
-    static constexpr size_t kNumBands = 6;
+    static constexpr size_t kNumBands = 24;
     static constexpr std::array<float, kNumBands> kBandCentersHz{{
-        140.0f, 320.0f, 720.0f, 1600.0f, 3600.0f, 7800.0f
+        40.0f, 72.0f, 108.0f, 150.0f, 198.0f, 255.0f,
+        322.0f, 400.0f, 492.0f, 600.0f, 728.0f, 878.0f,
+        1055.0f, 1265.0f, 1510.0f, 1800.0f, 2145.0f, 2550.0f,
+        3030.0f, 3600.0f, 4275.0f, 5150.0f, 6600.0f, 9600.0f
     }};
 
     OnionSkinEQ() noexcept;

@@ -35,12 +35,22 @@ struct WaveformGeneratorParams {
     float formant = 0.35f;     // Formant resonance peak center
     float phase_warp = 0.50f;  // Phase distortion symmetry
     float wave_fold = 0.0f;    // Chebyshev / sine wavefold intensity
+    int morph_curve = 0;       // 0=Linear, 1=Smooth S-Curve, 2=Equal-Power, 3=8-Step
+    std::array<float, 8> harmonic_bars{{0.5f, 0.5f, 0.5f, 0.5f, 0.5f, 0.5f, 0.5f, 0.5f}};
 
     bool matches(const WaveformGeneratorParams& o) const noexcept {
-        return std::abs(shape - o.shape) < 1e-4f &&
-               std::abs(odd_even - o.odd_even) < 1e-4f &&
-               std::abs(tilt - o.tilt) < 1e-4f &&
-               std::abs(formant - o.formant) < 1e-4f;
+        if (std::abs(shape - o.shape) >= 1e-4f ||
+            std::abs(odd_even - o.odd_even) >= 1e-4f ||
+            std::abs(tilt - o.tilt) >= 1e-4f ||
+            std::abs(formant - o.formant) >= 1e-4f) {
+            return false;
+        }
+        for (size_t i = 0; i < harmonic_bars.size(); ++i) {
+            if (std::abs(harmonic_bars[i] - o.harmonic_bars[i]) >= 1e-4f) {
+                return false;
+            }
+        }
+        return true;
     }
 };
 
@@ -59,14 +69,15 @@ public:
     // Sample a specific wave family at phase [0, 1) and phase increment dt (cycles/sample).
     float sample_family(WaveFamily family, float phase01, float dt) const noexcept;
 
-    // Morph smoothly between family_a and family_b (t in [0, 1]) with optional phase warp & fold.
+    // Morph smoothly between family_a and family_b (t in [0, 1]) with optional phase warp, fold & curve.
     float sample_morph(WaveFamily family_a,
                        WaveFamily family_b,
                        float morph01,
                        float phase01,
                        float dt,
                        float phase_warp01 = 0.5f,
-                       float wave_fold01 = 0.0f) const noexcept;
+                       float wave_fold01 = 0.0f,
+                       int morph_curve = 0) const noexcept;
 
     // Render 128 preview samples of the morphed + warped + folded waveform for UI visualization.
     static void render_preview(WaveFamily family_a,
@@ -74,6 +85,10 @@ public:
                                float morph01,
                                const WaveformGeneratorParams& gen,
                                std::array<float, 128>& out_samples) noexcept;
+
+    // Compute normalized 16 harmonic amplitudes [0..1] for the Custom Generator spectrum.
+    static void evaluate_generator_harmonics(const WaveformGeneratorParams& gen,
+                                             std::array<float, 16>& out_bars) noexcept;
 
 private:
     struct MipTable {
