@@ -7,8 +7,8 @@ CLOSES_MISSION: CPM-monkeys-ear-c5562598b59c
 MISSION: Deepen oscillators with band-limited waveform generator & real-time morphing, fix Chrono/SoundSpace/TubeRack DSP defects and preset balance, integrate 6-band ERB Onion Skin EQ + octave persistence gate + cross-plugin EcosystemBusClient, upgrade native editor UI/UX, add native UI for monkeys_ear_vocal, verify all tests, install VST3s, and launch REAPER audition.
 FILES_CHANGED: CMakeLists.txt, run_tests.bat, tools/reaper_audition.lua, include/monkeys_ear/wavetable.h, src/wavetable.cpp, include/monkeys_ear/onion_skin_eq.h, src/onion_skin_eq.cpp, include/monkeys_ear/ecosystem_bus.h, src/ecosystem_bus.cpp, include/monkeys_ear/chrono_state.h, src/chrono_state.cpp, src/sound_space.cpp, src/tube_rack.cpp, include/monkeys_ear/tonal.h, src/tonal.cpp, include/monkeys_ear/voice.h, src/voice.cpp, include/monkeys_ear/preset.h, src/preset.cpp, include/monkeys_ear/engine.h, src/engine.cpp, include/monkeys_ear/vocal_module.h, src/vocal_module.cpp, vst3/preset_param_snapshot.h, vst3/vst3_entry.cpp, vst3/native_editor.cpp, vst3/vocal_vst3_entry.cpp, test/test_dsp_core.cpp, test/test_snapshot_replay.cpp, test/test_vst3_host_probe.cpp, test/test_vocal_tracker_probe.cpp, test/test_upgrade_probe.cpp
 START_HEAD: 686dba2
-END_HEAD: pending-commit
-COMMIT: pending-commit
+END_HEAD: b4dcd1035e756ae891c755d57405583fe0e3d68b
+COMMIT: b4dcd1035e756ae891c755d57405583fe0e3d68b
 VALIDATION_RESULT: PASS
 RECOMMENDED_NEXT_ACTION: Live subjective listening, playtesting, and tweaking in REAPER across the new WAVE/GEN, ONION/ECO, and Vocal Companion views.
 
