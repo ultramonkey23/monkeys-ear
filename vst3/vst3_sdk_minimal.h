@@ -216,9 +216,16 @@ struct Event {
         NoteOnEvent noteOn;
         NoteOffEvent noteOff;
         PolyPressureEvent polyPressure;
-        uint8_t raw[32];
+        // Other VST3 event variants carry pointers/doubles. Their alignment is
+        // part of the host ABI even when this wrapper only consumes notes.
+        void* alignment;
+        uint8_t raw[24];
     };
 };
+#if defined(_WIN64) || defined(_M_X64) || defined(__x86_64__)
+static_assert(offsetof(Event,noteOn)==24, "VST3 event payload must match the 64-bit host ABI");
+static_assert(sizeof(Event)==48, "VST3 event size must match the 64-bit host ABI");
+#endif
 
 class IEventList : public FUnknown {
 public:

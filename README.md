@@ -257,6 +257,29 @@ The limiter is a bounded signal-protection stage. It is not a hearing-safety gua
 
 ## Build & Run
 
+### Audition while shaping a sound in REAPER
+
+On Windows, run `audition.bat` after building and installing the VST3. It opens
+an audition track and a small keyboard panel in REAPER. Click notes or use the
+displayed computer keys while the panel has focus; **Play Phrase** repeats a
+short line while you adjust the instrument. Use **Open Instrument** to bring
+the editor back. Octave buttons change the range. Closing the panel releases
+its active note. The panel sends through REAPER's virtual MIDI keyboard, so
+other armed tracks using that input may receive the notes too.
+
+An actual REAPER monitor check delivered a generated virtual MIDI note to the
+instrument and measured audio after repairing the 64-bit VST3 event layout.
+This does not establish your audio-device settings, physical-keyboard behavior,
+or listening acceptance. Existing REAPER processes may retain an older plug-in
+binary; reopen REAPER after installing a new build.
+
+ChronoState's boundary repulsion is now continuous at rest: its force is zero
+at equilibrium and retains full strength at the boundary. A single-impulse
+test previously produced a self-sustaining residual at some settings; it now
+settles to below 0.000001 RMS in the measured late window at 44.1/48/96 kHz.
+This verifies the tested feedback defect, not every possible noise source or
+the musical character of the revised response.
+
 ### Quick Build (CMake + Ninja + GCC 14.2)
 ```powershell
 .\build.bat

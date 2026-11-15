@@ -15,6 +15,9 @@ public:
     using Snapshot = EcosystemSnapshot<Capacity>;
 
     void publish(const Snapshot& snapshot) noexcept {
+        // Mark the write in progress before touching any fields. Publishing
+        // only a final sequence increment lets a reader accept mixed epochs.
+        sequence_.fetch_add(1u, std::memory_order_acq_rel);
         const uint16_t n = snapshot.count > Capacity ? static_cast<uint16_t>(Capacity) : snapshot.count;
         for (uint16_t i = 0; i < n; ++i) store_item(i, snapshot.evidence[i]);
         count_.store(n, std::memory_order_relaxed);
@@ -24,11 +27,13 @@ public:
 
     bool try_read(Snapshot& destination) const noexcept {
         const uint32_t before = sequence_.load(std::memory_order_acquire);
+        if(before & 1u) return false;
         const uint16_t n = count_.load(std::memory_order_relaxed);
         Snapshot candidate{}; candidate.count = n; candidate.generation = generation_.load(std::memory_order_relaxed);
         for (uint16_t i = 0; i < n; ++i) candidate.evidence[i] = load_item(i);
+        std::atomic_thread_fence(std::memory_order_acquire);
         const uint32_t after = sequence_.load(std::memory_order_acquire);
-        if (before != after) return false;
+        if (before != after || (after & 1u)) return false;
         destination = candidate; return true;
     }
 

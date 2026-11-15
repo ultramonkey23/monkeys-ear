@@ -49,6 +49,7 @@ private:
     float local_pitch_confidence_ = 0.0f;
     float shared_pitch_hz_ = 0.0f;
     float shared_pitch_confidence_ = 0.0f;
+    uint32_t shared_pitch_samples_remaining_ = 0;
     ExternalSubharmonic local_pitch_tracker_{};
     bool shared_pitch_valid_ = false;
     bool bypass_ = false;

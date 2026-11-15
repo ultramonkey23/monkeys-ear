@@ -66,6 +66,8 @@ void ChronoStateBody::set_mix(float mix) {
 }
 
 void ChronoStateBody::set_enabled(bool enabled) {
+    // A bypassed body must not resurrect old motion when re-enabled later.
+    if(enabled_ && !enabled) reset();
     enabled_ = enabled;
 }
 
@@ -118,7 +120,13 @@ float ChronoStateBody::process_sample(float exciter_in) {
 
     // ── 5. REPEL Operator (Negative-Gravity Soft-Core Boundary Repulsion) ──
     float clearance = boundary_limit_ - std::abs(disp);
-    float repel_kernel = negative_gravity_kernel(clearance, boundary_limit_ * 0.35f, 2.0f);
+    const float rest_kernel = negative_gravity_kernel(boundary_limit_, boundary_limit_ * 0.35f, 2.0f);
+    const float boundary_kernel = negative_gravity_kernel(clearance, boundary_limit_ * 0.35f, 2.0f);
+    // The raw kernel is nonzero at equilibrium. Multiplying it by sign(x)
+    // creates a discontinuous force that kicks the integrator each time it
+    // crosses zero, producing a self-sustaining buzz. Rebase continuously at
+    // rest and normalize so the full near-boundary force remains available.
+    float repel_kernel = clamp((boundary_kernel-rest_kernel)/(1.0f-rest_kernel),0.0f,1.0f);
     float sgn = (disp > 0.0f) ? 1.0f : (disp < 0.0f ? -1.0f : 0.0f);
     float f_repel = -repulsion_ * sgn * repel_kernel * omega0_ * omega0_ * 1.8f;
 

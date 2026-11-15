@@ -6,6 +6,8 @@
 #include "monkeys_ear/lfo.h"
 #include "monkeys_ear/chrono_state.h"
 #include "monkeys_ear/vocal_module.h"
+#include "monkeys_ear/ecosystem_publishers.h"
+#include "monkeys_ear/ecosystem_handoff.h"
 #include "wav_writer.h"
 #include <iostream>
 #include <vector>
@@ -13,6 +15,8 @@
 #include <cmath>
 #include <bit>
 #include <cstdint>
+#include <thread>
+#include <atomic>
 #include <iomanip>
 #include <numeric>
 #include <fstream>
@@ -50,6 +54,59 @@ void test_standalone_vocal_module() {
     vocal.set_bypass(true); vocal.process_block(in.data(),in.data(),out_l.data(),out_r.data(),N);
     for(size_t i=0;i<N;++i){assert(out_l[i]==in[i]&&out_r[i]==in[i]);}
     std::cout << "PASS (local confidence=" << vocal.analysis().pitch_confidence << ")\n";
+}
+
+void test_vocal_shared_evidence_expiry() {
+    std::cout << "[TEST] Vocal shared evidence validation, expiry and local fallback... ";
+    EcosystemSnapshot<32> s{}; EcosystemEvidence e{};
+    e.kind=EvidenceKind::PitchCents;e.value=0.f;e.confidence=1.f;e.age_seconds=.095f;
+    auto bad=e;bad.value=std::numeric_limits<float>::quiet_NaN();assert(!s.push(bad));
+    bad=e;bad.age_seconds=std::numeric_limits<float>::infinity();assert(!s.push(bad));
+    bad=e;bad.context_high_hz=std::numeric_limits<float>::quiet_NaN();assert(!s.push(bad));
+    publish_tonal_evidence(s,1,std::numeric_limits<float>::quiet_NaN(),1.f);assert(s.count==0);
+    assert(s.push(e));
+    VocalModule v;v.prepare(48000.f,64);v.set_local_pitch_evidence(330.f,.8f);v.consume_ecosystem(s);
+    std::array<float,64> in{},l{},r{};
+    for(int b=0;b<3;++b)v.process_block(in.data(),in.data(),l.data(),r.data(),64);
+    assert(std::abs(v.metrics().tracked_hz-440.f)<.01f);
+    v.process_block(in.data(),in.data(),l.data(),r.data(),64);
+    assert(std::abs(v.metrics().tracked_hz-330.f)<.01f);
+    v.consume_ecosystem(s);v.set_bypass(true);
+    for(int b=0;b<5;++b)v.process_block(in.data(),in.data(),l.data(),r.data(),64);
+    v.set_bypass(false);v.process_block(in.data(),in.data(),l.data(),r.data(),64);
+    assert(std::abs(v.metrics().tracked_hz-330.f)<.01f);
+    v.consume_ecosystem(s);
+    std::array<float,320> big_in{},big_l{},big_r{};
+    v.process_block(big_in.data(),big_in.data(),big_l.data(),big_r.data(),320);
+    v.process_block(in.data(),in.data(),l.data(),r.data(),64);
+    assert(std::abs(v.metrics().tracked_hz-330.f)<.01f);
+    v.reset();v.process_block(in.data(),in.data(),l.data(),r.data(),64);
+    assert(v.metrics().confidence==0.f);
+    std::cout << "PASS\n";
+}
+
+void test_ecosystem_handoff_consistency() {
+    std::cout << "[TEST] Shared evidence snapshots never mix producer generations... ";
+    EcosystemHandoff<32> handoff;std::atomic<bool> done{false};
+    std::thread writer([&] {
+        for(uint32_t generation=1;generation<=50000;++generation){
+            EcosystemSnapshot<32> s{};s.count=32;s.generation=generation;
+            for(auto& e:s.evidence){e.value=static_cast<float>(generation);e.provenance.generation=generation;}
+            handoff.publish(s);
+        }
+        done.store(true,std::memory_order_release);
+    });
+    size_t accepted=0;
+    do {
+        EcosystemSnapshot<32> s{};
+        if(handoff.try_read(s) && s.count){
+            ++accepted;
+            for(size_t i=0;i<s.count;++i){assert(s.evidence[i].provenance.generation==s.generation);assert(s.evidence[i].value==static_cast<float>(s.generation));}
+        }
+    } while(!done.load(std::memory_order_acquire));
+    writer.join();EcosystemSnapshot<32> final{};assert(handoff.try_read(final));
+    assert(final.generation==50000 && final.count==32);
+    std::cout<<"PASS ("<<accepted<<" concurrent snapshots)\n";
 }
 
 // ── Test 1: PolyBLEP Oscillator & Cross-FM / Sync ────────────────────────
@@ -157,6 +214,28 @@ void test_chrono_state_mathematics() {
     assert(body.get_state().energy_slow == 0.0f);
 
     std::cout << "PASS\n";
+}
+
+void test_chrono_state_feedback_settles() {
+    std::cout << "[TEST] ChronoState feedback settles after excitation...\n";
+    for(float rate:{44100.f,48000.f,96000.f}) for(float repulsion:{.5f,1.f}) {
+        ChronoStateBody body;body.set_sample_rate(rate);body.set_frequency(220.f);
+        body.set_resistance(.5f);body.set_repulsion(repulsion);body.set_mix(1.f);
+        for(int i=0;i<2048;++i)assert(body.process_sample(0.f)==0.f);
+        double energy=0.;float early=0.f,late=0.f;
+        for(int i=0;i<static_cast<int>(rate*3.f);++i){
+            const float out=body.process_sample(i==0?1.f:0.f);
+            if(i<static_cast<int>(rate*.2f))early=std::max(early,std::abs(out));
+            if(i>=static_cast<int>(rate*2.f)){energy+=static_cast<double>(out)*out;late=std::max(late,std::abs(out));}
+        }
+        const double rms=std::sqrt(energy/static_cast<double>(rate));
+        assert(early>1.e-5f && late<1.e-5f && rms<1.e-5);
+        body.process_sample(1.f);body.set_enabled(false);
+        for(int i=0;i<256;++i)assert(body.process_sample(0.f)==0.f);
+        body.set_enabled(true);
+        for(int i=0;i<256;++i)assert(body.process_sample(0.f)==0.f);
+        std::cout<<"  "<<rate<<" Hz repulsion="<<repulsion<<" late RMS="<<rms<<"\n";
+    }
 }
 
 // ── Test 3: Audio Input Processor Causality & Live Audio Repair ──────────
@@ -1223,8 +1302,11 @@ int main(int argc, char** argv) {
         test_polyblep_oscillator();
         test_osc_cross_fm_and_sync();
         test_chrono_state_mathematics();
+        test_chrono_state_feedback_settles();
         test_external_audio_processor_causality();
         test_standalone_vocal_module();
+        test_vocal_shared_evidence_expiry();
+        test_ecosystem_handoff_consistency();
         test_dual_layer_vocal_expression();
         test_vocal_reset_clears_all_causal_histories();
         test_audio_input_extreme_finite_safety();

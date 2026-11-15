@@ -6,14 +6,14 @@
 namespace monkeys_ear {
 
 inline float hz_to_ecosystem_cents(float hz) noexcept {
-    if (!std::isfinite(hz) || hz <= 0.0f) return 0.0f;
+    if (!ecosystem_finite(hz) || hz <= 0.0f) return 0.0f;
     return 1200.0f * std::log2(hz / 440.0f);
 }
 
 // Adapter around existing analysis. It does not own or duplicate the detector.
 inline void publish_tonal_evidence(EcosystemSnapshot<32>& out, uint32_t module_instance,
                                    float tracked_hz, float confidence) noexcept {
-    if (!std::isfinite(tracked_hz) || tracked_hz < 20.0f || tracked_hz > 5000.0f) return;
+    if (!ecosystem_finite(tracked_hz) || tracked_hz < 20.0f || tracked_hz > 5000.0f) return;
     confidence = clamp(sanitize(confidence), 0.0f, 1.0f);
     if (confidence <= 0.0f) return;
     EcosystemEvidence pitch{}; pitch.kind=EvidenceKind::PitchCents; pitch.horizon=EvidenceHorizon::Micro;

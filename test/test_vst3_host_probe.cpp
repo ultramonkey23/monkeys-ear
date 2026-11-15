@@ -25,6 +25,26 @@ public:
     tresult SMTG_STDCALL addEvent(Event& e)override{event=e;return kResultOk;}
 };
 
+// Build the host's 64-bit wire image independently of our Event definition;
+// otherwise the host and plug-in mocks can agree on the same broken layout.
+class AbiNoteList final : public IEventList {
+public:
+    tresult SMTG_STDCALL queryInterface(const TUID,void** obj)override{*obj=nullptr;return kResultFalse;}
+    uint32 SMTG_STDCALL addRef()override{return 1;} uint32 SMTG_STDCALL release()override{return 1;}
+    int32 SMTG_STDCALL getEventCount()override{return 1;}
+    tresult SMTG_STDCALL getEvent(int32 index,Event& e)override{
+        if(index!=0)return kInvalidArgument;
+        unsigned char wire[48]{};
+        const int32 offset=64,note_id=-1;const int16_t channel=0,pitch=55;
+        const uint16_t type=0;const float velocity=.9f;
+        std::memcpy(wire+4,&offset,4);std::memcpy(wire+18,&type,2);
+        std::memcpy(wire+24,&channel,2);std::memcpy(wire+26,&pitch,2);
+        std::memcpy(wire+32,&velocity,4);std::memcpy(wire+40,&note_id,4);
+        std::memcpy(&e,wire,sizeof wire);return kResultOk;
+    }
+    tresult SMTG_STDCALL addEvent(Event&)override{return kNotImplemented;}
+};
+
 class TwoPointQueue final : public IParamValueQueue {
 public:
     TwoPointQueue(ParamID id,int32 offset,ParamValue first,ParamValue second)
@@ -521,8 +541,8 @@ int main() {
     float instr_peak=0; for(float v:instr_l)instr_peak=std::max(instr_peak,std::abs(v)); CHECK_STAGE(instr_peak>.001f,"instrument produces audio");
     instr_comp->setActive(false); // clears held voices and effect tails
     CHECK_STAGE(instr_comp->setActive(true)==kResultOk,"reactivate reset instrument");
-    notes.event.sampleOffset=64;
-    notes.event.noteOn.pitch=55;
+    AbiNoteList abi_note;
+    instr_data.inputEvents=&abi_note;
     CHECK_STAGE(instr_proc->process(instr_data)==kResultOk,"schedule note at sample 64");
     float before_note=0.f,after_note=0.f;
     for(int i=0;i<64;++i)before_note=std::max(before_note,std::abs(instr_l[i]));

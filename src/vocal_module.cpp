@@ -30,10 +30,10 @@ void VocalModule::prepare(float sample_rate, uint32_t max_block_size) noexcept {
     max_block_size_=std::max<uint32_t>(1u,std::min<uint32_t>(max_block_size,65536u));
     processor_.set_sample_rate(sample_rate_); local_pitch_tracker_.set_sample_rate(sample_rate_); processor_.set_gain(0.0f); processor_.set_mix(1.0f);
     processor_.set_highpass_enabled(false); processor_.set_vocal_controls(controls_); processor_.reset();
-    clear_ecosystem_evidence(); health_={true,true,true};
+    local_pitch_hz_=local_pitch_confidence_=0.f; clear_ecosystem_evidence(); health_={true,true,true};
 }
 
-void VocalModule::reset() noexcept { processor_.reset(); local_pitch_tracker_.reset(); clear_ecosystem_evidence(); health_.finite_output=true; }
+void VocalModule::reset() noexcept { processor_.reset(); local_pitch_tracker_.reset(); local_pitch_hz_=local_pitch_confidence_=0.f; clear_ecosystem_evidence(); health_.finite_output=true; }
 void VocalModule::set_controls(const VocalExpressionControls& controls) noexcept {
     controls_=controls;
     auto processor_controls=controls_;
@@ -50,7 +50,7 @@ void VocalModule::set_local_pitch_evidence(float tracked_hz, float confidence) n
 }
 
 void VocalModule::clear_ecosystem_evidence() noexcept {
-    shared_pitch_hz_=0.0f; shared_pitch_confidence_=0.0f; shared_pitch_valid_=false;
+    shared_pitch_hz_=0.0f; shared_pitch_confidence_=0.0f; shared_pitch_samples_remaining_=0; shared_pitch_valid_=false;
 }
 
 void VocalModule::consume_ecosystem(const EcosystemSnapshot<32>& snapshot) noexcept {
@@ -58,8 +58,12 @@ void VocalModule::consume_ecosystem(const EcosystemSnapshot<32>& snapshot) noexc
     const auto* pitch=snapshot.freshest(EvidenceKind::PitchCents,0.10f);
     if(!pitch) return;
     const float hz=440.0f*std::pow(2.0f,clamp(pitch->value,-7200.0f,7200.0f)/1200.0f);
-    if(!std::isfinite(hz)||hz<20.0f||hz>5000.0f) return;
-    shared_pitch_hz_=hz; shared_pitch_confidence_=clamp(pitch->confidence,0.0f,1.0f); shared_pitch_valid_=true;
+    if(!ecosystem_finite(hz)||hz<20.0f||hz>5000.0f) return;
+    shared_pitch_hz_=hz; shared_pitch_confidence_=clamp(pitch->confidence,0.0f,1.0f);
+    // Age continues while processing, even when bypassed; a snapshot does not
+    // grant indefinite authority if the producer stops publishing.
+    shared_pitch_samples_remaining_=static_cast<uint32_t>(std::max(0.f,(.10f-pitch->age_seconds)*sample_rate_));
+    shared_pitch_valid_=shared_pitch_samples_remaining_>0;
 }
 
 void VocalModule::process_block(const float* input_l,const float* input_r,float* output_l,float* output_r,uint32_t num_samples) noexcept {
@@ -69,6 +73,8 @@ void VocalModule::process_block(const float* input_l,const float* input_r,float*
     const uint32_t n=std::min(num_samples,max_block_size_);
     for(uint32_t i=0;i<n;++i){
         const float l=input_l?sanitize(input_l[i]):0.0f,r=input_r?sanitize(input_r[i]):l;
+        if(shared_pitch_valid_ && shared_pitch_samples_remaining_==0)clear_ecosystem_evidence();
+        if(shared_pitch_samples_remaining_>0)--shared_pitch_samples_remaining_;
         if(bypass_){output_l[i]=l;output_r[i]=r;continue;}
         const float mid=.5f*(l+r),side=.5f*(l-r);
         // The existing causal external tracker is the module's local authority.
@@ -90,6 +96,12 @@ void VocalModule::process_block(const float* input_l,const float* input_r,float*
         if(!std::isfinite(out_l)||!std::isfinite(out_r)){out_l=l;out_r=r;health_.finite_output=false;}
         output_l[i]=out_l;output_r[i]=out_r;
     }
+    // Oversized blocks fall back to dry after max_block_size_, but time still
+    // advances and must not keep a shared pitch alive into the next block.
+    const uint32_t skipped=num_samples-n;
+    if(skipped>=shared_pitch_samples_remaining_)shared_pitch_samples_remaining_=0;
+    else shared_pitch_samples_remaining_-=skipped;
+    if(shared_pitch_valid_&&shared_pitch_samples_remaining_==0)clear_ecosystem_evidence();
     for(uint32_t i=n;i<num_samples;++i){output_l[i]=input_l?sanitize(input_l[i]):0.0f;output_r[i]=input_r?sanitize(input_r[i]):output_l[i];}
 }
 
