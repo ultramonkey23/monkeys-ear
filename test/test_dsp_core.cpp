@@ -841,6 +841,11 @@ void test_bounded_sound_space() {
     c.pitch_bound_cents=22;c.harmonic_bound_cents=46;c.modal_bound_cents=38;c.movement_hz=1.3f;
     c.attraction=.58f;c.resistance=.66f;c.repulsion=.72f;c.frequency_freedom=.86f;
     c.pitch_mix=.08f;c.harmonic_mix=.18f;c.modal_mix=.12f;c.spectral_depth_db=12;c.spectral_priority=.75f;c.phase_offset_cycles=.08f;c.phase_coupling=.5f;
+    processor.set_controls(c);
+    for(int i=0;i<4096;++i) assert(std::abs(processor.process(0.f,0.f,110.f,{}))<1e-7f);
+    for(int i=0;i<4800;++i) processor.process(.3f*std::sin(TWO_PI*110.f*i/SR),0.f,110.f,{});
+    processor.reset();
+    for(int i=0;i<512;++i) assert(std::abs(processor.process(0.f,0.f,110.f,{}))<1e-7f);
     c.routes[0]={0,1,.5f};processor.set_controls(c);SoundSpaceSources s{};float min_cut=0.0f,recovered=-99.0f,peak=0.0f;
     for(int i=0;i<96000;++i){float t=static_cast<float>(i)/SR;s.lfo=std::sin(TWO_PI*.7f*t);s.envelope=i<48000?1.0f:0.0f;s.fast_energy=s.envelope*.7f;s.slow_energy=s.envelope*.5f;
         float character=.18f*std::sin(TWO_PI*180.0f*t);float weight=i<48000?.55f*std::sin(TWO_PI*55.0f*t):0.0f;

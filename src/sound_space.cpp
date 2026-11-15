@@ -28,7 +28,7 @@ float BoundedMicrofield::process(float bound, float rate, float attraction,
 void SoundSpaceProcessor::set_sample_rate(float sr) { sample_rate_=std::max(1000.0f,sr); reset(); }
 
 void SoundSpaceProcessor::reset() {
-    pitch_phase_=low_state_=allpass_z_=weight_fast_=weight_slow_=spectral_gain_db_=0.0f;
+    pitch_phase_=low_state_=allpass_z_=weight_fast_=weight_slow_=spectral_gain_db_=excitation_envelope_=0.0f;
     pitch_field_.reset(0.13f);
     for(size_t i=0;i<HARMONICS;++i){harmonic_fields_[i].reset(0.17f+0.137f*static_cast<float>(i));harmonic_phase_[i]=0.0f;}
     for(size_t i=0;i<MODES;++i){modal_fields_[i].reset(0.31f+0.191f*static_cast<float>(i));resonators_[i]={};}
@@ -100,7 +100,12 @@ float SoundSpaceProcessor::process(float character,float weight,float center_hz,
 
     float a=clamp(std::sin(TWO_PI*phase)*0.82f,-0.82f,0.82f); float ap=-a*negotiated+allpass_z_; allpass_z_=negotiated+a*ap;
     float phase_character=lerp(negotiated,ap,controls_.phase_coupling);
-    float out=weight+phase_character+controls_.pitch_mix*pitch_layer+harm_mix*harmonic+controls_.modal_mix*modal;
+    // Generated partials follow incoming sound instead of becoming a free-running
+    // drone after the player releases a note or the host resets the instrument.
+    const float excitation=clamp((std::abs(character)+std::abs(weight))*4.0f,0.0f,1.0f);
+    const float response=excitation>excitation_envelope_?0.001f:0.050f;
+    excitation_envelope_+=(excitation-excitation_envelope_)*(1.0f-std::exp(-1.0f/(response*sample_rate_)));
+    float out=weight+phase_character+excitation_envelope_*(controls_.pitch_mix*pitch_layer+harm_mix*harmonic)+controls_.modal_mix*modal;
     metrics_={cents,max_h,max_m,spectral_gain_db_,weight_fast_,weight_slow_};
     return sanitize(out);
 }

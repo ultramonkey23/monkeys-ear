@@ -53,6 +53,7 @@ private:
     struct Resonator { float y1=0.0f,y2=0.0f; };
     float sample_rate_=48000.0f, pitch_phase_=0.0f, low_state_=0.0f, allpass_z_=0.0f;
     float weight_fast_=0.0f, weight_slow_=0.0f, spectral_gain_db_=0.0f;
+    float excitation_envelope_=0.0f;
     SoundSpaceControls controls_{};
     SoundSpaceMetrics metrics_{};
     BoundedMicrofield pitch_field_{};

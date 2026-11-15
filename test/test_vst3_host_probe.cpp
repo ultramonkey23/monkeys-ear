@@ -197,12 +197,13 @@ int main() {
                                WS_OVERLAPPEDWINDOW,0,0,1200,850,
                                nullptr,nullptr,GetModuleHandleW(nullptr),nullptr);
     CHECK_STAGE(parent!=nullptr,"create host-owned parent HWND");
+    ShowWindow(parent,SW_SHOWNOACTIVATE);
     CHECK_STAGE(view->attached(parent,"HWND")==kResultOk,
                 "editor attaches child to host-owned window");
     HWND child=FindWindowExW(parent,nullptr,L"MonkeysEarNativeEditor_01",nullptr);
     CHECK_STAGE(child!=nullptr,"real native child window exists");
     RedrawWindow(child,nullptr,nullptr,RDW_INVALIDATE|RDW_UPDATENOW);
-    // First WM_PAINT constructs click-hit geometry even with a hidden test parent.
+    // Painting a visible host constructs the same click-hit geometry used in a DAW.
     const int before_edits=edits.perform_count;
     SendMessageW(child,WM_LBUTTONDOWN,MK_LBUTTON,MAKELPARAM(125,365));
     SendMessageW(child,WM_LBUTTONUP,0,MAKELPARAM(125,365));
