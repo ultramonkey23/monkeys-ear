@@ -62,7 +62,7 @@ See `docs/STANDALONE_MODULE_STANDARD.md` (historical filename; content is the co
 
 ## 4. MASTER CONVERGENCE & LAB BOUNDARIES
 
-- Code Prime remains the sole intentional mutation boundary for Lab-routed product code work. An explicitly authorized direct GitHub maintenance operation must still comply with the Lab's operator-sovereignty and provenance law.
+- Outside agents are authorized to work directly on this repository, with the same project contracts, validation, and convergence obligations as Lab-routed work. Code Prime remains available for Lab-routed product work; it is not a prerequisite for an outside agent to make authorized changes.
 - **Prototyping, experimentation and research-backed trials are parts of full production**, not a separate non-production program. Build and evolve them in the canonical product on `master` under the existing Lab mutation owner, with truthful implementation/proof/release states; an experiment is not automatically ready to ship, but its status is not a reason for a throwaway repo, feature branch, or disconnected implementation. Reuse real capabilities and preserve the production spine; differentiate experiment evidence from accepted user-facing functionality.
 - **`master` is the sole canonical development and integration branch.** Never select `main` as a development target, create agent-chosen feature/transport branches or pull requests, or use another branch as a fallback when direct `master` mutation is blocked.
 - Existing Code Prime-owned bounded ephemeral validation worktrees are implementation details, not persistent alternate branch authorities; accepted work must converge directly onto `master`, with normal push and remote readback. Do not overwrite concurrent or uncommitted work.

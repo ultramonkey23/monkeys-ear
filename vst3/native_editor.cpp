@@ -157,7 +157,7 @@ public:
         wc.hInstance=module_;
         wc.lpfnWndProc=&NativeEditor::window_proc;
         wc.lpszClassName=kWindowClass;
-        wc.hCursor=LoadCursorW(nullptr,IDC_ARROW);
+        wc.hCursor=LoadCursorW(nullptr,MAKEINTRESOURCEW(32512));
         wc.style=CS_DBLCLKS|CS_HREDRAW|CS_VREDRAW;
         if(!RegisterClassExW(&wc)&&GetLastError()!=ERROR_CLASS_ALREADY_EXISTS)return kResultFalse;
         window_=CreateWindowExW(0,kWindowClass,L"Monkey's Ear",
@@ -264,7 +264,7 @@ private:
             PAINTSTRUCT ps{};
             HDC target=BeginPaint(hwnd,&ps);
             RECT actual{};GetClientRect(hwnd,&actual);
-            const int w=std::max(1,actual.right),h=std::max(1,actual.bottom);
+            const int w=std::max<LONG>(1,actual.right),h=std::max<LONG>(1,actual.bottom);
             HDC buffer=CreateCompatibleDC(target);
             HBITMAP bitmap=CreateCompatibleBitmap(target,w,h);
             HGDIOBJ old=SelectObject(buffer,bitmap);
@@ -374,8 +374,8 @@ private:
     }
     void drag_xy(int x,int y) {
         if(dragged_id_!=-2)return;
-        const float width=static_cast<float>(std::max(1,drag_rect_.right-drag_rect_.left));
-        const float height=static_cast<float>(std::max(1,drag_rect_.bottom-drag_rect_.top));
+        const float width=static_cast<float>(std::max<LONG>(1,drag_rect_.right-drag_rect_.left));
+        const float height=static_cast<float>(std::max<LONG>(1,drag_rect_.bottom-drag_rect_.top));
         // Upper-right is maximum motion + instability; lower-left neutral.
         const float drift=std::clamp((x-drag_rect_.left)/width,0.0f,1.0f);
         const float fracture=std::clamp((drag_rect_.bottom-y)/height,0.0f,1.0f);
@@ -384,7 +384,7 @@ private:
     }
     void drag(int x) {
         if(dragged_id_<0)return;
-        const int size=std::max(1,drag_rect_.right-drag_rect_.left);
+        const int size=std::max<LONG>(1,drag_rect_.right-drag_rect_.left);
         update_edit(dragged_id_,static_cast<double>(x-drag_rect_.left)/size);
     }
     void popup_choice(int id,int x,int y) {
