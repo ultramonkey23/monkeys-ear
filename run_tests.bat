@@ -38,6 +38,7 @@ for %%T in (
     monkeys_ear_stem_bundle_probe
     monkeys_ear_host_probe
     monkeys_ear_vocal_host_probe
+    monkeys_ear_onion_eq_host_probe
     monkeys_ear_vocal_target_chain_probe
     monkeys_ear_vocal_tracker_probe
     monkeys_ear_upgrade_probe

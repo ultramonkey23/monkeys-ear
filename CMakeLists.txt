@@ -15,6 +15,7 @@ add_library(monkeys_ear_core STATIC
     src/voice.cpp
     src/wavetable.cpp
     src/onion_skin_eq.cpp
+    src/onion_eq_module.cpp
     src/ecosystem_bus.cpp
     src/filter.cpp
     src/drive_tube.cpp
@@ -129,6 +130,17 @@ elseif(WIN32)
     target_compile_options(monkeys_ear_vocal PRIVATE -include windows.h)
 endif()
 
+# Standalone 24-band ERB Onion Skin Dynamic + Surgical EQ VST3 FX:
+# usable on any track with Main + optional Sidechain 3/4 + MEC3 Ecosystem link.
+add_library(monkeys_ear_onion_eq SHARED vst3/onion_eq_vst3_entry.cpp)
+target_include_directories(monkeys_ear_onion_eq PRIVATE ${CMAKE_CURRENT_SOURCE_DIR}/vst3)
+target_link_libraries(monkeys_ear_onion_eq PRIVATE monkeys_ear_core)
+if(WIN32)
+    target_compile_definitions(monkeys_ear_onion_eq PRIVATE NOMINMAX WIN32_LEAN_AND_MEAN)
+    target_link_libraries(monkeys_ear_onion_eq PRIVATE user32 gdi32 gdiplus ole32)
+endif()
+set_target_properties(monkeys_ear_onion_eq PROPERTIES OUTPUT_NAME "monkeys_ear_onion_eq" SUFFIX ".vst3" PREFIX "")
+
 if(WIN32)
     add_executable(monkeys_ear_host_probe test/test_vst3_host_probe.cpp)
     target_include_directories(monkeys_ear_host_probe PRIVATE ${CMAKE_CURRENT_SOURCE_DIR}/vst3)
@@ -137,4 +149,10 @@ if(WIN32)
         ${CMAKE_CURRENT_SOURCE_DIR}/vst3
         ${CMAKE_CURRENT_SOURCE_DIR}/include
     )
+    add_executable(monkeys_ear_onion_eq_host_probe test/test_onion_eq_vst3_probe.cpp)
+    target_include_directories(monkeys_ear_onion_eq_host_probe PRIVATE
+        ${CMAKE_CURRENT_SOURCE_DIR}/vst3
+        ${CMAKE_CURRENT_SOURCE_DIR}/include
+    )
+    target_link_libraries(monkeys_ear_onion_eq_host_probe PRIVATE monkeys_ear_core)
 endif()

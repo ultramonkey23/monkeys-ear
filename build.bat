@@ -46,4 +46,5 @@ echo   - Core Library:  build\libmonkeys_ear_core.a
 echo   - Test Runner:   build\monkeys_ear_test_runner.exe
 echo   - Full VST3:      build\monkeys_ear.vst3
 echo   - Vocal VST3:     build\monkeys_ear_vocal.vst3
+echo   - Onion EQ VST3:  build\monkeys_ear_onion_eq.vst3
 echo =======================================================

@@ -21,6 +21,7 @@ r.TrackList_AdjustWindows(false)
 r.TrackFX_Show(track, fx, 3)
 
 local vocal_track, vocal_fx = nil, -1
+local onion_fx = -1
 local function ensure_vocal_track()
   if vocal_track and r.ValidatePtr2(0, vocal_track, "MediaTrack*") and vocal_fx >= 0 then
     r.TrackFX_Show(vocal_track, vocal_fx, 3)
@@ -37,6 +38,19 @@ local function ensure_vocal_track()
     r.DeleteTrack(vocal_track)
     vocal_track = nil
     r.ShowMessageBox("Monkey's Ear Vocal VST3 was not found in REAPER's scan paths.", "Ecosystem Companion", 0)
+  end
+end
+
+local function ensure_onion_eq()
+  if onion_fx >= 0 and r.ValidatePtr2(0, track, "MediaTrack*") then
+    r.TrackFX_Show(track, onion_fx, 3)
+    return
+  end
+  onion_fx = r.TrackFX_AddByName(track, "VST3: Monkey's Ear Onion Skin EQ (Ultramonkeydog Studios)", false, -1)
+  if onion_fx >= 0 then
+    r.TrackFX_Show(track, onion_fx, 3)
+  else
+    r.ShowMessageBox("Monkey's Ear Onion Skin EQ VST3 was not found in REAPER's scan paths.", "Standalone Onion Skin EQ", 0)
   end
 end
 
@@ -73,6 +87,7 @@ local function draw()
   button(288,92,110,38,'OCTAVE  +',false)
   button(406,92,158,38,'OPEN INSTRUMENT',false)
   button(572,92,150,38,'OPEN VOCAL BUS',vocal_track ~= nil)
+  button(730,92,142,38,'OPEN ONION EQ',onion_fx >= 0)
   gfx.set(.72,.8,.77,1); gfx.x=18;gfx.y=145;gfx.drawstr('Octave: C'..tostring(math.floor(base/12)-1)..'   |   Velocity: 100')
   local margin=18; local width=(gfx.w-36)/13
   for i=0,12 do
@@ -110,6 +125,7 @@ local function run()
     elseif hit(288,92,110,38) then stop_loop();base=math.min(96,base+12)
     elseif hit(406,92,158,38) then r.TrackFX_Show(track,fx,3)
     elseif hit(572,92,150,38) then ensure_vocal_track()
+    elseif hit(730,92,142,38) then ensure_onion_eq()
     elseif hit(18,175,gfx.w-36,105) then
       stop_loop();play(base+math.min(12,math.floor((gfx.mouse_x-18)/((gfx.w-36)/13))),.35)
     end
@@ -119,5 +135,5 @@ local function run()
   r.defer(run)
 end
 r.atexit(note_off)
-gfx.init("Monkey's Ear - Audition", 740, 325, 0)
+gfx.init("Monkey's Ear - Audition", 890, 325, 0)
 run()
