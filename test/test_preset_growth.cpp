@@ -49,6 +49,13 @@ int main() {
     assert(recalled.deserialize(a.preset.serialize()));
     assert(recalled.wave_a_family == a.preset.wave_a_family);
     assert(std::abs(recalled.gen_shape - a.preset.gen_shape) < 0.0001f);
+    // Exercise the production API, not only the standalone preset compiler.
+    MonkeysEarEngine integrated;
+    integrated.init(48000.0f, 256);
+    integrated.load_preset(parent);
+    const auto integrated_lineage = integrated.grow_current_preset(23, 512, 0.65f);
+    assert(integrated_lineage.branches == a.lineage.branches);
+    assert(integrated.get_current_preset().serialize() == a.preset.serialize());
     const RenderResult e_a = render_energy(a.preset);
     const RenderResult e_b = render_energy(b.preset);
     assert(e_a.energy > 1e-7 && e_b.energy > 1e-7);
