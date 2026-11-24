@@ -90,6 +90,20 @@ int main() {
         topology_difference+=std::abs(double(x)-double(y));
     }
     CHECK(topology_difference>1e-6);
+    // A corrupt upstream sample must not poison the graph's persistent state,
+    // including when the graph is disabled for an ordinary legacy preset.
+    CHECK(growth_finite(body_a.process(std::numeric_limits<float>::quiet_NaN())));
+    CHECK(growth_finite(body_a.process(std::numeric_limits<float>::infinity())));
+    body_a.disable();
+    CHECK(body_a.process(0.25f) == 0.25f);
+    CHECK(body_a.process(std::numeric_limits<float>::quiet_NaN()) == 0.0f);
+    body_a.compile(graph_a);
+    body_a.set_expression(1.0f);
+    for (unsigned i=0; i<200; ++i) body_a.process(0.5f);
+    body_a.reset();
+    GrowthResonator clean_body;
+    clean_body.compile(graph_a);
+    CHECK(body_a.process(0.5f) == clean_body.process(0.5f));
     for (unsigned i = 8; i < a.lineage.node_count; ++i) {
         const auto& node = a.lineage.nodes[i];
         CHECK(node.parent < i);
