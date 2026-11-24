@@ -184,6 +184,9 @@ std::string PresetData::serialize() const {
 }
 
 bool PresetData::deserialize(const std::string& data) {
+    // Legacy patches do not carry a graph. Never inherit a previous patch's
+    // topology when deserializing into a reused PresetData instance.
+    growth_snapshot.clear();
     std::istringstream iss(data);
     std::string line;
     while (std::getline(iss, line)) {
