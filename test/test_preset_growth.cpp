@@ -3,6 +3,7 @@
 #include <cstdlib>
 #include <cmath>
 #include <algorithm>
+#include <array>
 #include <cstdio>
 #include <vector>
 
@@ -50,6 +51,13 @@ int main() {
     CHECK(a.lineage.branches > 0);
     CHECK(a.lineage.node_count == a.lineage.branches + 8);
     CHECK(a.lineage.node_count <= a.lineage.nodes.size());
+    bool has_fork = false;
+    std::array<unsigned,104> child_counts{};
+    for (unsigned i=8; i<a.lineage.node_count; ++i) {
+        const unsigned parent_index = a.lineage.nodes[i].parent;
+        if (++child_counts[parent_index] >= 2u) has_fork = true;
+    }
+    CHECK(has_fork);
     for (unsigned i = 8; i < a.lineage.node_count; ++i) {
         const auto& node = a.lineage.nodes[i];
         CHECK(node.parent < i);
