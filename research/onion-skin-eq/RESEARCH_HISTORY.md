@@ -102,3 +102,44 @@ Transient/tonal EQ, resonance suppression, spectral compression, semantic compre
 Old research should not spawn a permanent design document. New generations should update **ARCHITECTURE.md** and append a concise result here. Keep executable experiments/data when they remain useful for reproduction; remove duplicated narrative documents once their durable conclusions are captured here.
 
 A tougher experiment may demote an earlier conclusion. That is expected behavior, not research failure.
+
+## 2026-11-24 — Production bounded cascade projection
+
+The native `OnionSkinEQ` (shared by the instrument and standalone Onion EQ)
+now separates its existing occupancy evidence and intent from accepted dynamic
+action. `onion_projection::select` evaluates bounded alternatives against the
+same before/after conflict proxy, identity floor and physical peaking-cascade
+response sampled at the analyzer centers. A candidate must improve the proxy;
+otherwise it returns neutral. The strongest unscaled proposal defines the
+combined dynamic response budget, rather than allowing neighboring filters to
+multiply that allowance. This is a new tested engineering choice, not a
+creator-approved perceptual law. Manual EQ remains separate and unconstrained
+by the dynamic projection budget. Harmonic protection first proposes localized
+reductions in filters that influence protected centers, then re-evaluates; a
+bounded global backoff is the fallback.
+
+Native GCC C++20 -O3 -ffast-math proof used source/header blobs matched to
+commits `4e0c161` and `e1fc57a`: 4,000 independent occupancy-proxy cases
+(3,428 accepted; zero bound violations); 2,700 cascade cases across 32, 48,
+96 kHz and Q 0.85/1.85/4.5 (all accepted; independent complex transfer-function
+bounds and conflict/identity checks passed); actual 878 Hz audio processing
+and manual-EQ independence passed. At 48 kHz and Q 1.85, the old and
+first-stage implementation produced wet/dry energy 0.0077581 (about -21.1 dB)
+under the maximum-authority 878 Hz fixture; the cascade-aware implementation
+produced 0.249007 (about -6.0 dB). The two-tone fixture at Q 1.85 with harmonic
+protection off/on measured 255 Hz -5.008/-0.905 dB and 4275 Hz
+-5.969/-5.204 dB. Local proof is reproducible through
+`monkeys_ear_onion_projection_probe` and the added audio-consumer regression
+in `monkeys_ear_test_runner`. The Windows runner now requires the new probe.
+
+Evidence scope: analytic and synthetic native DSP execution, not a full
+Windows VST3/REAPER build, physical-device timing, real-stem listening,
+or perceptual masking validation. The projection is of a steady dynamic-only
+response at discrete centers; intermediate smoothing, inter-center extrema,
+manual-filter interactions, and the full V9 excitation/harmonic-family
+candidate research remain open. The current 0.86 identity threshold and
+finite search/backoff schedule are engineering priors to compare against
+musician goals and real evidence. An isolated broadband 480,000-sample
+benchmark measured 132–140 ms for the new core versus 107–121 ms for the
+first-stage core; this adds work and does not establish whole-engine
+real-time margin. No subjective sound-quality promotion is implied.

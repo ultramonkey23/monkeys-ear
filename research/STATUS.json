@@ -19,7 +19,13 @@
       "architecture": "research/onion-skin-eq/ARCHITECTURE.md",
       "history": "research/onion-skin-eq/RESEARCH_HISTORY.md",
       "evidence_level": "SYNTHETIC_AND_HOST_PROBED",
-      "product_integration": "INTEGRATED_24_BAND_ERB_ONION_EQ_WITH_STANDALONE_VST3_AND_HARMONIC_GUARD_20261124"
+      "product_integration": "INTEGRATED_24_BAND_ERB_ONION_EQ_WITH_STANDALONE_VST3_AND_HARMONIC_GUARD_20261124",
+      "projection_evolution_20261124": {
+        "implementation_commit": "e1fc57a8856f37fc4a77b41079fd53b67ff176d7",
+        "evidence": "NATIVE_GCC_SYNTHETIC_AUDIO_AND_ANALYTIC_TRANSFER_PROOF",
+        "mechanism": "Bounded improving dynamic-only cascade projection with localized harmonic protection; preserves manual authority.",
+        "remaining": "Windows full suite, host/REAPER, deadline margin, real-stem listening, inter-center and manual interaction characterization, full V9 excitation model." 
+      }
     },
     "pitch-correction": {
       "status": "PRODUCT_INTEGRATED_SYNTHETIC_AND_HOST_PROBED",
