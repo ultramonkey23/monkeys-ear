@@ -91,6 +91,9 @@ constexpr float kBeatDivisions[12]={
     16.0f,8.0f,4.0f,2.0f,1.0f,0.5f,0.25f,0.125f,
     2.0f/3.0f,1.0f/3.0f,0.75f,0.375f
 };
+inline bool finite32(float value) {
+    return (std::bit_cast<std::uint32_t>(value)&0x7f800000u)!=0x7f800000u;
+}
 inline bool finite64(double value) {
     return (std::bit_cast<std::uint64_t>(value)&0x7ff0000000000000ULL)
             !=0x7ff0000000000000ULL;
@@ -262,7 +265,7 @@ GrownPreset MonkeysEarEngine::preview_growth_candidate(std::uint32_t seed,
 GrowthLineage MonkeysEarEngine::grow_current_preset(std::uint32_t seed,
                                                        unsigned steps, float pressure) {
     // A no-op must not reload the patch or reset active resonator history.
-    if (steps == 0u || !std::isfinite(pressure) || pressure <= 0.0f) {
+    if (steps == 0u || !finite32(pressure) || pressure <= 0.0f) {
         GrowthLineage existing{};
         GrowthSnapshotCodec::decode(preset_manager_.get_current().growth_snapshot, existing);
         return existing;
@@ -330,7 +333,7 @@ void MonkeysEarEngine::set_input_route_mode(int mode) {
 }
 
 void MonkeysEarEngine::set_aftertouch(float value) {
-    if (!std::isfinite(value)) return;
+    if (!finite32(value)) return;
     aftertouch_ = clamp(value,0.0f,1.0f);
     growth_resonator_.set_expression(aftertouch_);
 }
@@ -531,7 +534,7 @@ void MonkeysEarEngine::set_parameter_normalized(int id, float v) {
 }
 
 void MonkeysEarEngine::handle_midi_note_on(int note,float velocity,int channel,int note_id) {
-    if(note<0||note>127||channel<0||channel>15||!std::isfinite(velocity))return;
+    if(note<0||note>127||channel<0||channel>15||!finite32(velocity))return;
     velocity=clamp(velocity,0.0f,1.0f);
     current_midi_note_=note;
     last_velocity_=clamp(velocity,0.f,1.f);
@@ -544,19 +547,19 @@ void MonkeysEarEngine::handle_midi_note_off(int note,int channel,int note_id) {
 }
 
 void MonkeysEarEngine::handle_midi_poly_pressure(int note,int channel,int note_id,float pressure) {
-    if (!std::isfinite(pressure)) return;
+    if (!finite32(pressure)) return;
     pressure=clamp(pressure,0.0f,1.0f);
     voice_manager_.set_poly_pressure(note,channel,note_id,pressure);
 }
 
 void MonkeysEarEngine::handle_midi_pitch_bend(float semitones) {
-    if (!std::isfinite(semitones)) return;
+    if (!finite32(semitones)) return;
     float range=preset_manager_.get_current().pitch_bend_range;
     voice_manager_.set_pitch_bend(clamp(semitones,-range,range));
 }
 
 void MonkeysEarEngine::handle_midi_cc(int cc_number, float value_0_to_1) {
-    if(!std::isfinite(value_0_to_1))return;
+    if(!finite32(value_0_to_1))return;
     switch (cc_number) {
         case 64: voice_manager_.set_sustain_pedal(value_0_to_1>=.5f); break;
         case 120: reset(); break; // MIDI All Sounds Off
