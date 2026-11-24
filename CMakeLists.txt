@@ -43,7 +43,11 @@ target_include_directories(monkeys_ear_core PUBLIC
     $<INSTALL_INTERFACE:include>
 )
 
-# Native-engine verification for offline developmental preset growth.\nadd_executable(monkeys_ear_preset_growth_probe test/test_preset_growth.cpp)\ntarget_link_libraries(monkeys_ear_preset_growth_probe PRIVATE monkeys_ear_core)\n\nadd_executable(monkeys_ear_test_runner test/test_dsp_core.cpp)
+# Native-engine verification for offline developmental preset growth.
+add_executable(monkeys_ear_preset_growth_probe test/test_preset_growth.cpp)
+target_link_libraries(monkeys_ear_preset_growth_probe PRIVATE monkeys_ear_core)
+
+add_executable(monkeys_ear_test_runner test/test_dsp_core.cpp)
 target_include_directories(monkeys_ear_test_runner PRIVATE ${CMAKE_CURRENT_SOURCE_DIR}/test)
 target_link_libraries(monkeys_ear_test_runner PRIVATE monkeys_ear_core)
 
