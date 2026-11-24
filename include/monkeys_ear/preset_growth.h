@@ -111,12 +111,29 @@ public:
         const auto mix = [](float a, float b, float depth) {
             return std::clamp(a + b * depth, 0.0f, 1.0f);
         };
+        // Geometry is a causal input to timbre, not just a visualization.
+        // Aggregate graph-edge lengths and directional spread into bounded
+        // spectral controls. Identical branch counts can yield different sound.
+        float edge_length = 0.0f;
+        float directional_spread = 0.0f;
+        for (unsigned i = 8; i < result.lineage.node_count; ++i) {
+            const auto& n = result.lineage.nodes[i];
+            const auto& parent_node = result.lineage.nodes[n.parent];
+            const float dx = n.x - parent_node.x;
+            const float dy = n.y - parent_node.y;
+            edge_length += std::sqrt(dx*dx + dy*dy);
+            directional_spread += std::abs(dx - dy);
+        }
+        const float geometry_length = std::clamp(edge_length / 12.0f, 0.0f, 1.0f);
+        const float geometry_spread = std::clamp(directional_spread / 12.0f, 0.0f, 1.0f);
         auto& p = result.preset;
         p.wave_a_family = 5; // existing programmable harmonic generator
         p.gen_shape = mix(p.gen_shape, s[0].inheritance, 0.65f);
         p.gen_odd_even = mix(p.gen_odd_even, s[1].inheritance - 0.5f, 0.6f);
         p.gen_tilt = mix(p.gen_tilt, s[2].inheritance - 0.5f, 0.5f);
+        p.gen_tilt = mix(p.gen_tilt, geometry_length - 0.5f, 0.22f);
         p.gen_formant = mix(p.gen_formant, s[3].inheritance, 0.55f);
+        p.gen_formant = mix(p.gen_formant, geometry_spread, 0.18f);
         p.wave_morph = mix(p.wave_morph, s[4].inheritance, 0.65f);
         p.phase_warp = mix(p.phase_warp, s[5].inheritance - 0.5f, 0.45f);
         p.wave_fold = mix(p.wave_fold, s[6].inheritance, 0.5f);
