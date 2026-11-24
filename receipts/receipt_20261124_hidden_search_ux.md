@@ -4,8 +4,8 @@ PROJECT_ID: monkeys-ear
 MISSION: Keep internal performance inputs out of the native editor's parameter search
 FILES_CHANGED: vst3/native_editor.cpp, test/test_vst3_host_probe.cpp, receipts/receipt_20261124_hidden_search_ux.md
 START_HEAD: fd277917de69ae9c1f4cd48e0094643bd832508e
-END_HEAD: pending
-COMMIT: pending
+END_HEAD: 5cc794529c739e2e04a6d8fabdbe9cb834cacd66
+COMMIT: 5cc794529c739e2e04a6d8fabdbe9cb834cacd66
 VALIDATION_RESULT: PASS
 RECOMMENDED_NEXT_ACTION: Exercise broader musician workflows in the real REAPER host and assess usability with a musician.
 
