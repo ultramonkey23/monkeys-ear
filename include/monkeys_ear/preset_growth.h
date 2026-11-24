@@ -77,7 +77,9 @@ struct GrowthSnapshotCodec {
             if (!std::isfinite(n.x) || !std::isfinite(n.y) || !std::isfinite(n.material) ||
                 std::abs(n.x)>1000.0f || std::abs(n.y)>1000.0f ||
                 n.material < 0.0f || n.material > 1.0f || n.site >= 8 ||
-                (i >= 8 && n.parent >= i)) return false;
+                (i < 8 && (n.parent != i || n.site != i)) ||
+                (i >= 8 && (n.parent >= i || n.site != parsed.nodes[n.parent].site)))
+                return false;
         }
         char trailing=0;
         if (in >> trailing) return false;
