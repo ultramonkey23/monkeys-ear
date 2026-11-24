@@ -8,6 +8,7 @@
 #include <array>
 #include <algorithm>
 #include <cmath>
+#include <bit>
 #include <cstdint>
 #include <cstdio>
 #include <sstream>
@@ -15,6 +16,10 @@
 #include <string>
 
 namespace monkeys_ear {
+
+inline bool growth_finite(float v) {
+    return (std::bit_cast<std::uint32_t>(v)&0x7f800000u)!=0x7f800000u;
+}
 
 struct GrowthSite {
     float energy = 0.0f;
@@ -74,7 +79,7 @@ struct GrowthSnapshotCodec {
             if (!comma(in) || !(in >> n.x) || !comma(in) || !(in >> n.y) ||
                 !comma(in) || !(in >> n.material) || !comma(in) ||
                 !(in >> n.parent) || !comma(in) || !(in >> n.site)) return false;
-            if (!std::isfinite(n.x) || !std::isfinite(n.y) || !std::isfinite(n.material) ||
+            if (!growth_finite(n.x) || !growth_finite(n.y) || !growth_finite(n.material) ||
                 std::abs(n.x)>1000.0f || std::abs(n.y)>1000.0f ||
                 n.material < 0.0f || n.material > 1.0f || n.site >= 8 ||
                 (i < 8 && (n.parent != i || n.site != i)) ||
@@ -99,7 +104,7 @@ public:
         result.lineage.seed = seed;
         // Zero pressure means no development and must not silently retune a keeper.
         // Reject non-finite controls before entering the growth recurrence.
-        if (!std::isfinite(pressure)) pressure = 0.0f;
+        if (!growth_finite(pressure)) pressure = 0.0f;
         pressure = std::clamp(pressure, 0.0f, 1.0f);
         if (pressure == 0.0f || steps == 0u) {
             GrowthLineage frozen{};
