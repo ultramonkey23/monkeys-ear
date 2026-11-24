@@ -1307,7 +1307,7 @@ private:
         for (int id = 0; id < controller_->getParameterCount(); ++id) {
             ParameterInfo info{};
             if (controller_->getParameterInfo(id, info) != kResultOk) continue;
-            if ((info.flags & kIsHidden) && search_text_.empty()) continue;
+            if (info.flags & kIsHidden) continue;
             if (search_text_.empty() && selected_area_ != 0 && info.unitId != selected_area_) continue;
             if (!search_text_.empty() && !contains_ci(to_wide(info.title), search_text_)) continue;
             filtered.push_back(id);

@@ -270,6 +270,31 @@ int main() {
     CHECK_STAGE(gui_drift>.6f&&gui_fracture>.7f,
                 "gesture coordinates are visible as real normalized host parameters");
 
+    // Search the real DEEP page, then click the first result's hit area.
+    // Hidden performance inputs must not be exposed as editable controls,
+    // even when their full host-facing title is explicitly searched.
+    SendMessageW(child,WM_LBUTTONDOWN,MK_LBUTTON,MAKELPARAM(1040,40));
+    SendMessageW(child,WM_LBUTTONUP,0,MAKELPARAM(1040,40));
+    HWND search=GetDlgItem(child,10302);
+    CHECK_STAGE(search!=nullptr && IsWindowVisible(search),"DEEP search is available");
+    const wchar_t* hidden_queries[] = {L"PERFORMANCE: Pitch Bend", L"PERFORMANCE: Aftertouch"};
+    for (const wchar_t* query : hidden_queries) {
+        SetWindowTextW(search,query);
+        RedrawWindow(child,nullptr,nullptr,RDW_INVALIDATE|RDW_UPDATENOW);
+        const int before_hidden=edits.perform_count;
+        SendMessageW(child,WM_LBUTTONDOWN,MK_LBUTTON,MAKELPARAM(500,280));
+        SendMessageW(child,WM_LBUTTONUP,0,MAKELPARAM(500,280));
+        CHECK_STAGE(edits.perform_count==before_hidden,
+                    "hidden performance inputs are not exposed as DEEP search controls");
+    }
+    SetWindowTextW(search,L"SOURCE: Pitch Bend Range");
+    RedrawWindow(child,nullptr,nullptr,RDW_INVALIDATE|RDW_UPDATENOW);
+    const int before_visible=edits.perform_count;
+    SendMessageW(child,WM_LBUTTONDOWN,MK_LBUTTON,MAKELPARAM(500,280));
+    SendMessageW(child,WM_LBUTTONUP,0,MAKELPARAM(500,280));
+    CHECK_STAGE(edits.perform_count>before_visible && edits.last_id==73,
+                "visible pitch-bend range remains searchable and editable");
+
     ViewRect resized{0,0,1280,860};
     CHECK_STAGE(view->onSize(&resized)==kResultOk &&
                 view->getSize(&size)==kResultOk && size.right==1280,
