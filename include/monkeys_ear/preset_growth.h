@@ -21,11 +21,23 @@ struct GrowthSite {
     unsigned branches = 0;
 };
 
+struct GrowthNode {
+    float x = 0.0f;
+    float y = 0.0f;
+    float material = 0.0f;
+    unsigned parent = 0;
+    unsigned site = 0;
+};
+
 struct GrowthLineage {
     std::uint32_t seed = 0;
     unsigned events = 0;
     unsigned branches = 0;
     std::array<GrowthSite, 8> sites{};
+    // Eight seed vertices followed by persistent branch vertices.
+    // Parent indices form an explicit growing graph, not merely branch counters.
+    std::array<GrowthNode, 104> nodes{};
+    unsigned node_count = 0;
 };
 
 struct GrownPreset {
@@ -43,6 +55,13 @@ public:
         result.lineage.seed = seed;
         pressure = std::clamp(pressure, 0.0f, 1.0f);
         std::uint32_t rng = seed ? seed : 0x6d2b79f5u;
+        std::array<unsigned, 8> tips{};
+        for (unsigned i = 0; i < 8; ++i) {
+            const float angle = 6.283185307f * static_cast<float>(i) / 8.0f;
+            result.lineage.nodes[i] = {std::cos(angle), std::sin(angle), 0.0f, i, i};
+            tips[i] = i;
+        }
+        result.lineage.node_count = 8;
         std::array<unsigned, 8> periods{};
         std::array<float, 8> lowpass{};
         for (unsigned i = 0; i < 8; ++i) {
@@ -64,7 +83,19 @@ public:
                 s.strain = std::clamp(s.strain * 0.98f + std::abs(highpass) * 0.13f,
                                       0.0f, 1.0f);
                 ++result.lineage.events;
-                if (s.energy > 0.52f && s.branches < 12u) {
+                if (s.energy > 0.52f && s.branches < 12u &&
+                    result.lineage.node_count < result.lineage.nodes.size()) {
+                    const unsigned parent_index = tips[i];
+                    const auto& parent_node = result.lineage.nodes[parent_index];
+                    const float direction = s.phase + 0.32f * (unit(next(rng)) - 0.5f);
+                    const float length = 0.11f + 0.08f * s.strain;
+                    const unsigned new_index = result.lineage.node_count++;
+                    result.lineage.nodes[new_index] = {
+                        parent_node.x + length * std::cos(direction),
+                        parent_node.y + length * std::sin(direction),
+                        s.strain, parent_index, i
+                    };
+                    tips[i] = new_index;
                     ++s.branches;
                     ++result.lineage.branches;
                     s.inheritance = std::clamp(s.inheritance + 0.075f +
