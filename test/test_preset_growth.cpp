@@ -56,6 +56,10 @@ int main() {
         CHECK(std::isfinite(node.x) && std::isfinite(node.y));
     }
     CHECK(quiet.lineage.branches == 0);
+    CHECK(quiet.preset.serialize() == parent.serialize());
+    CHECK(PresetGrowth::develop(parent, 23, 0, 0.65f).preset.serialize() == parent.serialize());
+    CHECK(PresetGrowth::develop(a.preset, 23, 0, 0.65f).preset.serialize() == a.preset.serialize());
+    CHECK(PresetGrowth::develop(a.preset, 23, 512, 0.0f).preset.serialize() == a.preset.serialize());
     CHECK(a.lineage.branches == repeat.lineage.branches);
     CHECK(a.preset.serialize() == repeat.preset.serialize());
     CHECK(a.preset.gen_shape != b.preset.gen_shape ||
