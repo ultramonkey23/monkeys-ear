@@ -13,6 +13,7 @@
 #include "monkeys_ear/latency_meter.h"
 #include "monkeys_ear/preset.h"
 #include "monkeys_ear/preset_growth.h"
+#include "monkeys_ear/growth_resonator.h"
 #include "monkeys_ear/chrono_state.h"
 #include "monkeys_ear/lfo.h"
 #include "monkeys_ear/performance_field.h"
@@ -56,6 +57,7 @@ public:
     // Returns its full lineage for inspection or external persistence.
     GrowthLineage grow_current_preset(std::uint32_t seed, unsigned steps = 512,
                                      float pressure = 0.6f);
+    bool is_growth_resonator_active() const { return growth_resonator_.enabled(); }
     const PresetData& get_current_preset() const;
 
     void set_master_gain_db(float db);
@@ -107,6 +109,7 @@ private:
     ParametricEQ eq_;
     ExternalSubharmonic external_sub_;
     SoundSpaceProcessor sound_space_;
+    GrowthResonator growth_resonator_;
     TubeDriveStage drive_tube_; // exact legacy path for older patches
     TubeRack tube_rack_;        // same filter -> cabinet insertion, no DSP fork
     CabinetResonator resonator_cab_;
