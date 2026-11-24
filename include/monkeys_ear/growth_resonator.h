@@ -21,6 +21,10 @@ public:
     }
     void disable() { enabled_ = false; node_count_ = 0; reset(); }
     bool enabled() const { return enabled_; }
+    // Expressive performance control, not structural mutation. Smoothed per sample.
+    void set_expression(float pressure) {
+        expression_target_ = std::isfinite(pressure) ? std::clamp(pressure,0.0f,1.0f) : 0.0f;
+    }
 
     void compile(const GrowthLineage& graph, float wet = 0.30f) {
         disable();
@@ -70,12 +74,13 @@ public:
             force[i]+=delta;
             force[p]-=delta;
         }
+        expression_ += (expression_target_-expression_)*0.0015f;
         const float excitation=std::clamp(std::isfinite(input)?input:0.0f,-2.0f,2.0f);
         float pickup=0.0f;
         float pickup_weight=0.0f;
         for (unsigned i=0; i<node_count_; ++i) {
-            const float damping=0.035f+0.025f*material_[i];
-            const float coupling=0.13f*force[i]/static_cast<float>(std::max(1u,degree_[i]));
+            const float damping=0.035f+0.025f*material_[i]-0.018f*expression_;
+            const float coupling=(0.13f+0.09f*expression_)*force[i]/static_cast<float>(std::max(1u,degree_[i]));
             const float injection=(i<8 ? 0.007f : 0.0f)*excitation;
             const float next=(2.0f-damping)*displacement_[i]
                 -(1.0f-damping)*previous_[i]+coupling+injection;
@@ -92,6 +97,7 @@ private:
     std::array<unsigned,kNodes> parent_{},degree_{};
     unsigned node_count_=0;
     float sample_rate_=48000.0f,wet_=0.30f;
+    float expression_=0.0f,expression_target_=0.0f;
     bool enabled_=false;
 };
 
