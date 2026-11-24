@@ -55,6 +55,9 @@ public:
     void load_preset(const PresetData& preset);
     // Non-audio-thread operation: develop and load a descendant of the current preset.
     // Returns its full lineage for inspection or external persistence.
+    // Pure candidate authoring: never replaces the sound being played.
+    GrownPreset preview_growth_candidate(std::uint32_t seed, unsigned steps = 512,
+                                         float pressure = 0.6f) const;
     GrowthLineage grow_current_preset(std::uint32_t seed, unsigned steps = 512,
                                      float pressure = 0.6f);
     bool is_growth_resonator_active() const { return growth_resonator_.enabled(); }
