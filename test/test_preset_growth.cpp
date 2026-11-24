@@ -32,7 +32,7 @@ static RenderResult render_energy(const PresetData& preset, bool develop = false
     for (unsigned block = 0; block < 80; ++block) {
         engine.process_block(nullptr, nullptr, left.data(), right.data(), left.size());
         for (unsigned i = 0; i < left.size(); ++i) {
-            CHECK(std::isfinite(left[i]) && std::isfinite(right[i]));
+            CHECK(growth_finite(left[i]) && growth_finite(right[i]));
             result.energy += static_cast<double>(left[i])*left[i] +
                              static_cast<double>(right[i])*right[i];
             result.signature += static_cast<double>(left[i]) *
@@ -86,7 +86,7 @@ int main() {
         const float input=i<32 ? 0.6f : 0.0f;
         const float x=body_a.process(input);
         const float y=body_b.process(input);
-        CHECK(std::isfinite(x) && std::isfinite(y));
+        CHECK(growth_finite(x) && growth_finite(y));
         topology_difference+=std::abs(double(x)-double(y));
     }
     CHECK(topology_difference>1e-6);
@@ -94,7 +94,7 @@ int main() {
         const auto& node = a.lineage.nodes[i];
         CHECK(node.parent < i);
         CHECK(node.site < 8);
-        CHECK(std::isfinite(node.x) && std::isfinite(node.y));
+        CHECK(growth_finite(node.x) && growth_finite(node.y));
     }
     CHECK(quiet.lineage.branches == 0);
     CHECK(quiet.preset.serialize() == parent.serialize());
