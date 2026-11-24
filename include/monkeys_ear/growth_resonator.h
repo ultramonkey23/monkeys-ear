@@ -20,6 +20,7 @@ public:
         displacement_.fill(0.0f);
         previous_.fill(0.0f);
         expression_ = 0.0f;
+        expression_target_ = 0.0f;
     }
     void disable() { enabled_ = false; node_count_ = 0; reset(); }
     bool enabled() const { return enabled_; }
