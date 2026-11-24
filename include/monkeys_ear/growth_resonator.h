@@ -6,70 +6,91 @@
 
 namespace monkeys_ear {
 
-// Fixed-cost real-time resonant network compiled from a developed growth graph.
-// Compilation is control-thread only. Per-sample processing allocates nothing.
+// Frozen graph wave body. Growth/compilation is offline; process() performs
+// bounded, allocation-free propagation through the actual parent/child edges.
 class GrowthResonator {
 public:
-    static constexpr unsigned kModes = 8;
+    static constexpr unsigned kNodes = 104;
     void set_sample_rate(float sample_rate) {
-        sample_rate_ = std::max(8000.0f, sample_rate);
+        sample_rate_ = std::isfinite(sample_rate) ? std::max(8000.0f, sample_rate) : 48000.0f;
         reset();
     }
     void reset() {
-        for (auto& mode : modes_) { mode.y1 = 0.0f; mode.y2 = 0.0f; }
+        displacement_.fill(0.0f);
+        previous_.fill(0.0f);
     }
-    void disable() { enabled_ = false; reset(); }
+    void disable() { enabled_ = false; node_count_ = 0; reset(); }
     bool enabled() const { return enabled_; }
 
     void compile(const GrowthLineage& graph, float wet = 0.30f) {
-        reset();
-        wet_ = std::clamp(wet, 0.0f, 0.65f);
-        enabled_ = graph.node_count > 8 && graph.node_count <= graph.nodes.size();
-        if (!enabled_) return;
-        std::array<float,kModes> length{};
-        std::array<float,kModes> strain{};
-        std::array<unsigned,kModes> counts{};
-        for (unsigned n=8; n<graph.node_count; ++n) {
-            const auto& node=graph.nodes[n];
-            if (node.site >= kModes || node.parent >= n) continue;
-            const auto& parent=graph.nodes[node.parent];
-            const float dx=node.x-parent.x, dy=node.y-parent.y;
-            length[node.site] += std::sqrt(dx*dx+dy*dy);
-            strain[node.site] += node.material;
-            ++counts[node.site];
+        disable();
+        if (graph.node_count <= 8 || graph.node_count > kNodes) return;
+        node_count_ = graph.node_count;
+        wet_ = std::isfinite(wet) ? std::clamp(wet, 0.0f, 0.65f) : 0.30f;
+        degree_.fill(0);
+        pickup_.fill(0.0f);
+        for (unsigned i=0; i<node_count_; ++i) {
+            const auto& node=graph.nodes[i];
+            if (node.site>=8 || !std::isfinite(node.material) ||
+                node.material<0.0f || node.material>1.0f ||
+                !std::isfinite(node.x) || !std::isfinite(node.y)) { disable(); return; }
+            material_[i]=node.material;
+            parent_[i]=node.parent;
+            if (i>=8) {
+                if (node.parent>=i || graph.nodes[node.parent].site!=node.site) {
+                    disable(); return;
+                }
+                ++degree_[i];
+                ++degree_[node.parent];
+                pickup_[i]=0.18f;
+            }
         }
-        for (unsigned i=0; i<kModes; ++i) {
-            auto& m=modes_[i];
-            const float mean_strain=counts[i] ? strain[i]/counts[i] : 0.0f;
-            // Length, branching and inherited material all influence resonance.
-            const float hz=std::clamp(105.0f + 68.0f*static_cast<float>(i)
-                           + 195.0f/(1.0f+length[i])
-                           + 95.0f*mean_strain, 45.0f, sample_rate_*0.40f);
-            const float radius=std::clamp(0.9970f - 0.00014f*static_cast<float>(counts[i])
-                                        -0.0010f*mean_strain, 0.985f, 0.998f);
-            const float omega=6.283185307179586f*hz/sample_rate_;
-            m.a=2.0f*radius*std::cos(omega);
-            m.b=radius*radius;
-            m.gain=counts[i] ? 0.008f/(1.0f+0.14f*counts[i]) : 0.0f;
-        }
+        // The eight persistent roots form the original octagonal ring.
+        // Root-to-root links coexist with the inherited branching tree.
+        for (unsigned i=0; i<8; ++i) degree_[i]+=2;
+        for (unsigned i=0; i<node_count_; ++i)
+            pickup_[i] += (i<8 ? 0.75f : 0.0f);
+        enabled_=true;
     }
 
     float process(float input) {
         if (!enabled_) return input;
-        float resonance=0.0f;
-        for (auto& m:modes_) {
-            // Bounded resonator: stable poles and saturated excitation.
-            const float excitation=std::clamp(input,-2.0f,2.0f)*m.gain;
-            const float y=excitation + m.a*m.y1 - m.b*m.y2;
-            m.y2=m.y1;
-            m.y1=std::clamp(y,-4.0f,4.0f);
-            resonance+=m.y1;
+        // Discrete damped graph wave equation. All edges exchange forces using
+        // the OLD displacement snapshot, so traversal order cannot bias motion.
+        std::array<float,kNodes> force{};
+        for (unsigned i=0; i<8; ++i) {
+            const unsigned j=(i+1u)&7u;
+            const float delta=displacement_[j]-displacement_[i];
+            force[i]+=delta;
+            force[j]-=delta;
         }
-        return input*(1.0f-wet_)+std::clamp(resonance,-2.0f,2.0f)*wet_;
+        for (unsigned i=8; i<node_count_; ++i) {
+            const unsigned p=parent_[i];
+            const float delta=displacement_[p]-displacement_[i];
+            force[i]+=delta;
+            force[p]-=delta;
+        }
+        const float excitation=std::clamp(std::isfinite(input)?input:0.0f,-2.0f,2.0f);
+        float pickup=0.0f;
+        float pickup_weight=0.0f;
+        for (unsigned i=0; i<node_count_; ++i) {
+            const float damping=0.035f+0.025f*material_[i];
+            const float coupling=0.13f*force[i]/static_cast<float>(std::max(1u,degree_[i]));
+            const float injection=(i<8 ? 0.007f : 0.0f)*excitation;
+            const float next=(2.0f-damping)*displacement_[i]
+                -(1.0f-damping)*previous_[i]+coupling+injection;
+            previous_[i]=displacement_[i];
+            displacement_[i]=std::clamp(std::isfinite(next)?next:0.0f,-2.0f,2.0f);
+            pickup+=displacement_[i]*pickup_[i];
+            pickup_weight+=pickup_[i];
+        }
+        const float body=pickup_weight>0.0f ? pickup/pickup_weight : 0.0f;
+        return input*(1.0f-wet_)+std::clamp(body*3.0f,-2.0f,2.0f)*wet_;
     }
 private:
-    struct Mode { float y1=0.0f,y2=0.0f,a=0.0f,b=0.0f,gain=0.0f; };
-    std::array<Mode,kModes> modes_{};
+    std::array<float,kNodes> displacement_{},previous_{},material_{},pickup_{};
+    std::array<unsigned,kNodes> parent_{},degree_{};
+    unsigned node_count_=0;
     float sample_rate_=48000.0f,wet_=0.30f;
     bool enabled_=false;
 };
