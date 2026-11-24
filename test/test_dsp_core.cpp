@@ -36,6 +36,40 @@ static float estimate_frequency(const std::vector<float>& x, float sr, size_t be
     return crossings>1 ? sr*static_cast<float>(crossings-1)/static_cast<float>(last-first) : 0.0f;
 }
 
+void test_onion_projection_audio_consumer() {
+    // Exercise the actual filter on a sustained overlapping sidechain.
+    // Projection metrics describe dynamic targets, not smoothed filter output.
+    OnionSkinEQ eq;
+    OnionSkinControls c;
+    c.enabled = true; c.intent = OnionSkinIntent::Yield;
+    c.amount = 1.0f; c.sensitivity = 1.0f;
+    c.low_protect = 0.0f; c.transient_protect = 0.0f;
+    eq.set_controls(c);
+    double dry_energy = 0.0, wet_energy = 0.0;
+    for (int i = 0; i < 24000; ++i) {
+        const float phase = TWO_PI * 878.0f * (float(i) / 48000.0f);
+        const float dry = 0.35f * std::sin(phase);
+        const float wet = eq.process_sample(dry, dry);
+        if (i >= 16000) { dry_energy += dry * dry; wet_energy += wet * wet; }
+    }
+    const auto& m = eq.metrics();
+    assert(m.identity_cosine >= 0.86f);
+    assert(m.conflict_reduction > 0.0f);
+    assert(m.band_carve_db[11] < 0.0f);
+    assert(wet_energy < dry_energy * 0.85);
+    c.enabled = false;
+    c.manual_db[11] = 3.0f;
+    eq.set_controls(c);
+    for (int i = 0; i < 12000; ++i) {
+        const float dry = 0.35f * std::sin(TWO_PI * 878.0f * (float(i) / 48000.0f));
+        (void)eq.process_sample(dry, dry);
+    }
+    assert(eq.metrics().band_carve_db[11] == 0.0f);
+    assert(eq.metrics().user_db[11] == 3.0f);
+    assert(eq.metrics().total_eq_db[11] > 2.9f);
+    std::cout << "[TEST] Onion projection audio consumer and manual authority: PASS\n";
+}
+
 void test_standalone_vocal_module() {
     std::cout << "[TEST] Standalone Vocal Module Local Tracking / Bypass... ";
     constexpr size_t N=64; constexpr float SR=48000.0f;
@@ -1354,6 +1388,7 @@ int main(int argc, char** argv) {
         test_chrono_state_mathematics();
         test_chrono_state_feedback_settles();
         test_external_audio_processor_causality();
+        test_onion_projection_audio_consumer();
         test_standalone_vocal_module();
         test_vocal_shared_evidence_expiry();
         test_ecosystem_handoff_consistency();

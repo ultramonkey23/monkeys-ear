@@ -39,7 +39,8 @@ struct OnionSkinMetrics {
 // Zero-latency, zero-allocation, lock-free 24-band ERB Onion Skin Dynamic + Surgical EQ.
 // Analyzes self and reference/peer spectral occupancy across 24 Glasberg-Moore ERB auditory critical bands
 // spanning 40 Hz - 9.6 kHz, enforces low-harmonic and transient protection plus a cosine >= 0.86
-// Projection Gate on dynamic carving, sums user 24-band surgical sculpt + Tilt + Air shelf,
+// and an improving occupancy-proxy Projection Gate on dynamic carving,
+// sums user 24-band surgical sculpt + Tilt + Air shelf,
 // and applies smooth biquad EQ filtering per sample.
 class OnionSkinEQ {
 public:

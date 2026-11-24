@@ -51,6 +51,10 @@ add_executable(monkeys_ear_test_runner test/test_dsp_core.cpp)
 target_include_directories(monkeys_ear_test_runner PRIVATE ${CMAKE_CURRENT_SOURCE_DIR}/test)
 target_link_libraries(monkeys_ear_test_runner PRIVATE monkeys_ear_core)
 
+# Bounded projection decisions used by both instrument and standalone Onion EQ.
+add_executable(monkeys_ear_onion_projection_probe test/test_onion_projection.cpp)
+target_link_libraries(monkeys_ear_onion_projection_probe PRIVATE monkeys_ear_core)
+
 # Product pattern/loop quantization program: compile-time note identity and
 # sample-frame scheduling feed the SAME real synth/FX engine via MIDI calls.
 # The cross-platform mock checks exact timing, while this target also renders

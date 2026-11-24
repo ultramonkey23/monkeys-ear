@@ -1,4 +1,5 @@
 #include "monkeys_ear/onion_skin_eq.h"
+#include "monkeys_ear/onion_projection.h"
 #include <algorithm>
 #include <cmath>
 
@@ -148,8 +149,6 @@ void OnionSkinEQ::evaluate_projection_gate() noexcept {
     }
 
     std::array<float, kNumBands> proposed_db{};
-    float conflict_before = 0.0f;
-
     for (size_t i = 0; i < kNumBands; ++i) {
         const float self_o = clamp(self_env_[i] * 3.4f, 0.0f, 1.0f);
         const float local_ref_o = clamp(ref_env_[i] * 3.4f, 0.0f, 1.0f);
@@ -169,8 +168,6 @@ void OnionSkinEQ::evaluate_projection_gate() noexcept {
             : 0.0f;
 
         const float overlap = std::sqrt(std::max(0.0f, self_o * ref_o));
-        conflict_before += overlap;
-
         const float thresh = lerp(0.28f, 0.04f, sens);
         const float excess = std::max(0.0f, overlap - thresh);
         if (excess <= 1e-4f || !controls_.enabled || amount <= 1e-4f) {
@@ -194,35 +191,14 @@ void OnionSkinEQ::evaluate_projection_gate() noexcept {
         proposed_db[i] = clamp(cut_db, -12.0f, 2.0f);
     }
 
-    // Projection Gate: check identity cosine similarity before vs after dynamic carving.
-    // Enforce cosine >= 0.86 so Onion Skin EQ never hollows out core timbre identity.
-    float scale = 1.0f;
-    float final_cos = 1.0f;
-    float final_conflict_after = conflict_before;
-
-    for (int iter = 0; iter < 5; ++iter) {
-        float dot = 0.0f, norm_a = 0.0f, norm_b = 0.0f, c_after = 0.0f;
-        for (size_t i = 0; i < kNumBands; ++i) {
-            const float s = metrics_.self_occupancy[i] + 1e-4f;
-            const float r = metrics_.ref_occupancy[i] + 1e-4f;
-            const float lin = std::pow(10.0f, (proposed_db[i] * scale) * 0.05f);
-            const float s_carved = s * lin;
-            dot += s * s_carved;
-            norm_a += s * s;
-            norm_b += s_carved * s_carved;
-            c_after += std::sqrt(std::max(0.0f, s_carved * r));
-        }
-        final_cos = (norm_a > 1e-8f && norm_b > 1e-8f) ? (dot / std::sqrt(norm_a * norm_b)) : 1.0f;
-        final_conflict_after = c_after;
-        if (final_cos >= 0.86f || scale <= 0.15f) {
-            break;
-        }
-        scale *= 0.72f;
-    }
-
-    metrics_.identity_cosine = clamp(final_cos, 0.0f, 1.0f);
-    metrics_.conflict_reduction = (conflict_before > 1e-4f)
-        ? clamp((conflict_before - final_conflict_after) / conflict_before, 0.0f, 1.0f)
+    // Evidence and candidate generation remain above. The shared selector
+    // returns only an evaluated improvement or a neutral correction.
+    const auto decision = onion_projection::select(
+        metrics_.self_occupancy, metrics_.ref_occupancy, proposed_db);
+    metrics_.identity_cosine = decision.identity;
+    metrics_.conflict_reduction = (decision.conflict_before > 1e-4f)
+        ? clamp((decision.conflict_before - decision.conflict_after) /
+                decision.conflict_before, 0.0f, 1.0f)
         : 0.0f;
 
     // Combine dynamic carve + 24-band manual surgical sculpt + Tilt + Air shelf
@@ -235,7 +211,7 @@ void OnionSkinEQ::evaluate_projection_gate() noexcept {
             air_part = air_db * w * 0.65f;
         }
         const float user_db = clamp(controls_.manual_db[i] + tilt_part + air_part, -12.0f, 12.0f);
-        const float dyn_db = controls_.enabled ? (proposed_db[i] * scale) : 0.0f;
+        const float dyn_db = decision.gain_db[i];
         metrics_.user_db[i] = user_db;
         metrics_.band_carve_db[i] = dyn_db;
         target_db_[i] = clamp(dyn_db + user_db, -15.0f, 12.0f);
