@@ -60,6 +60,17 @@ int main() {
     PresetData recalled;
     assert(recalled.deserialize(a.preset.serialize()));
     assert(recalled.wave_a_family == a.preset.wave_a_family);
+    GrowthLineage restored_graph{};
+    assert(GrowthSnapshotCodec::decode(recalled.growth_snapshot, restored_graph));
+    assert(restored_graph.node_count == a.lineage.node_count);
+    assert(restored_graph.seed == a.lineage.seed);
+    for (unsigned i=0; i<restored_graph.node_count; ++i) {
+        assert(restored_graph.nodes[i].parent == a.lineage.nodes[i].parent);
+        assert(std::abs(restored_graph.nodes[i].x-a.lineage.nodes[i].x)<0.00001f);
+    }
+    GrowthLineage rejected{};
+    assert(!GrowthSnapshotCodec::decode("G1,23,105", rejected));
+    assert(!GrowthSnapshotCodec::decode("G1,23,8,not-a-number", rejected));
     assert(std::abs(recalled.gen_shape - a.preset.gen_shape) < 0.0001f);
     // Exercise the production API, not only the standalone preset compiler.
     MonkeysEarEngine integrated;
@@ -72,7 +83,17 @@ int main() {
     const RenderResult e_a = render_energy(a.preset);
     const RenderResult graph_audio = render_energy(parent, true);
     assert(graph_audio.energy > 1e-7);
-    assert(std::abs(graph_audio.signature - e_a.signature) > 1e-6);
+    // Generated, serialized and recalled frozen candidates must sound the same.
+    assert(std::abs(graph_audio.signature - e_a.signature) < 1e-5);
+    const RenderResult recalled_audio = render_energy(recalled);
+    assert(std::abs(recalled_audio.signature - e_a.signature) < 1e-5);
+    PresetData without_graph = a.preset;
+    without_graph.growth_snapshot.clear();
+    const RenderResult legacy_audio = render_energy(without_graph);
+    assert(std::abs(legacy_audio.signature - e_a.signature) > 1e-6);
+    MonkeysEarEngine legacy_engine;
+    legacy_engine.load_preset(without_graph);
+    assert(!legacy_engine.is_growth_resonator_active());
     const RenderResult e_b = render_energy(b.preset);
     assert(e_a.energy > 1e-7 && e_b.energy > 1e-7);
     assert(std::abs(e_a.signature - e_b.signature) > 1e-6);
