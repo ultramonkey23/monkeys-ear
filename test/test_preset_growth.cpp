@@ -76,10 +76,20 @@ int main() {
     MonkeysEarEngine integrated;
     integrated.init(48000.0f, 256);
     integrated.load_preset(parent);
+    const auto original_snapshot = integrated.get_current_preset().serialize();
+    const auto candidate = integrated.preview_growth_candidate(23, 512, 0.65f);
+    assert(integrated.get_current_preset().serialize() == original_snapshot);
+    assert(!integrated.is_growth_resonator_active());
+    assert(candidate.preset.serialize() == a.preset.serialize());
     const auto integrated_lineage = integrated.grow_current_preset(23, 512, 0.65f);
     assert(integrated_lineage.branches == a.lineage.branches);
     assert(integrated.is_growth_resonator_active());
     assert(integrated.get_current_preset().serialize() == a.preset.serialize());
+    // The keeper can be saved, and a descendant explored without mutating it.
+    const auto keeper = integrated.get_current_preset();
+    const auto child = integrated.preview_growth_candidate(99, 512, 0.65f);
+    assert(integrated.get_current_preset().serialize() == keeper.serialize());
+    assert(child.preset.serialize() != keeper.serialize());
     const RenderResult e_a = render_energy(a.preset);
     const RenderResult graph_audio = render_energy(parent, true);
     assert(graph_audio.energy > 1e-7);
