@@ -261,6 +261,12 @@ GrownPreset MonkeysEarEngine::preview_growth_candidate(std::uint32_t seed,
 
 GrowthLineage MonkeysEarEngine::grow_current_preset(std::uint32_t seed,
                                                        unsigned steps, float pressure) {
+    // A no-op must not reload the patch or reset active resonator history.
+    if (steps == 0u || !std::isfinite(pressure) || pressure <= 0.0f) {
+        GrowthLineage existing{};
+        GrowthSnapshotCodec::decode(preset_manager_.get_current().growth_snapshot, existing);
+        return existing;
+    }
     // Offline/control-thread operation: preset loading reconfigures DSP state.
     const auto grown = preview_growth_candidate(seed, steps, pressure);
     load_preset(grown.preset);
