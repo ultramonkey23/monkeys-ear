@@ -187,6 +187,10 @@ struct PresetData {
     float onion_air_db = 0.0f;     // [-6..+6] dB
     std::array<float, 24> onion_band_db{};
 
+    // Frozen developmental topology. Empty for legacy presets.
+    // Encoded offline; never parsed in the sample callback.
+    std::string growth_snapshot{};
+
     PresetData();
     std::string serialize() const;
     bool deserialize(const std::string& data);
