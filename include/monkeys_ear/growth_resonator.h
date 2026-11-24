@@ -19,6 +19,7 @@ public:
     void reset() {
         displacement_.fill(0.0f);
         previous_.fill(0.0f);
+        expression_ = 0.0f;
     }
     void disable() { enabled_ = false; node_count_ = 0; reset(); }
     bool enabled() const { return enabled_; }
@@ -59,6 +60,9 @@ public:
     }
 
     float process(float input) {
+        // Invalid upstream samples must not propagate into the body or output.
+        // Preserve the exact dry bypass for all finite legacy inputs.
+        if (!growth_finite(input)) input = 0.0f;
         if (!enabled_) return input;
         // Discrete damped graph wave equation. All edges exchange forces using
         // the OLD displacement snapshot, so traversal order cannot bias motion.
@@ -76,7 +80,7 @@ public:
             force[p]-=delta;
         }
         expression_ += (expression_target_-expression_)*0.0015f;
-        const float excitation=std::clamp(growth_finite(input)?input:0.0f,-2.0f,2.0f);
+        const float excitation=std::clamp(input,-2.0f,2.0f);
         float pickup=0.0f;
         float pickup_weight=0.0f;
         for (unsigned i=0; i<node_count_; ++i) {
