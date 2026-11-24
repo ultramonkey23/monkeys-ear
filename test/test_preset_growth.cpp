@@ -4,6 +4,7 @@
 #include <cmath>
 #include <algorithm>
 #include <array>
+#include <limits>
 #include <cstdio>
 #include <vector>
 
@@ -135,6 +136,13 @@ int main() {
     MonkeysEarEngine integrated;
     integrated.init(48000.0f, 256);
     integrated.load_preset(parent);
+    // Host and hardware MIDI can deliver malformed normalized values.
+    // Invalid events must not poison voice, expression or downstream audio.
+    integrated.handle_midi_note_on(48, std::numeric_limits<float>::quiet_NaN());
+    integrated.handle_midi_pitch_bend(std::numeric_limits<float>::infinity());
+    integrated.handle_midi_poly_pressure(48, 0, -1, std::numeric_limits<float>::quiet_NaN());
+    integrated.set_aftertouch(std::numeric_limits<float>::quiet_NaN());
+
     const auto original_snapshot = integrated.get_current_preset().serialize();
     const auto candidate = integrated.preview_growth_candidate(23, 512, 0.65f);
     CHECK(integrated.get_current_preset().serialize() == original_snapshot);
