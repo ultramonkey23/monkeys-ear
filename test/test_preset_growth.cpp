@@ -1,9 +1,15 @@
 #include "monkeys_ear/preset_growth.h"
 #include "monkeys_ear/engine.h"
-#include <cassert>
+#include <cstdlib>
 #include <cmath>
 #include <cstdio>
 #include <vector>
+
+// Always execute verification, including Release/NDEBUG builds.
+#define CHECK(expr) do { if (!(expr)) { \
+    std::fprintf(stderr, "CHECK failed at %s:%d: %s\\n", __FILE__, __LINE__, #expr); \
+    std::abort(); \
+} } while (false)
 
 using namespace monkeys_ear;
 
@@ -15,7 +21,7 @@ static RenderResult render_energy(const PresetData& preset, bool develop = false
     engine.load_preset(preset);
     if (develop) {
         engine.grow_current_preset(23, 512, 0.65f);
-        assert(engine.is_growth_resonator_active());
+        CHECK(engine.is_growth_resonator_active());
     }
     engine.handle_midi_note_on(48, 0.85f);
     std::vector<float> left(256), right(256);
@@ -23,7 +29,7 @@ static RenderResult render_energy(const PresetData& preset, bool develop = false
     for (unsigned block = 0; block < 80; ++block) {
         engine.process_block(nullptr, nullptr, left.data(), right.data(), left.size());
         for (unsigned i = 0; i < left.size(); ++i) {
-            assert(std::isfinite(left[i]) && std::isfinite(right[i]));
+            CHECK(std::isfinite(left[i]) && std::isfinite(right[i]));
             result.energy += static_cast<double>(left[i])*left[i] +
                              static_cast<double>(right[i])*right[i];
             result.signature += static_cast<double>(left[i]) *
@@ -39,89 +45,89 @@ int main() {
     const auto repeat = PresetGrowth::develop(parent, 23, 512, 0.65f);
     const auto b = PresetGrowth::develop(parent, 24, 512, 0.65f);
     const auto quiet = PresetGrowth::develop(parent, 23, 512, 0.0f);
-    assert(a.lineage.events > 0);
-    assert(a.lineage.branches > 0);
-    assert(a.lineage.node_count == a.lineage.branches + 8);
-    assert(a.lineage.node_count <= a.lineage.nodes.size());
+    CHECK(a.lineage.events > 0);
+    CHECK(a.lineage.branches > 0);
+    CHECK(a.lineage.node_count == a.lineage.branches + 8);
+    CHECK(a.lineage.node_count <= a.lineage.nodes.size());
     for (unsigned i = 8; i < a.lineage.node_count; ++i) {
         const auto& node = a.lineage.nodes[i];
-        assert(node.parent < i);
-        assert(node.site < 8);
-        assert(std::isfinite(node.x) && std::isfinite(node.y));
+        CHECK(node.parent < i);
+        CHECK(node.site < 8);
+        CHECK(std::isfinite(node.x) && std::isfinite(node.y));
     }
-    assert(quiet.lineage.branches == 0);
-    assert(a.lineage.branches == repeat.lineage.branches);
-    assert(a.preset.serialize() == repeat.preset.serialize());
-    assert(a.preset.gen_shape != b.preset.gen_shape ||
+    CHECK(quiet.lineage.branches == 0);
+    CHECK(a.lineage.branches == repeat.lineage.branches);
+    CHECK(a.preset.serialize() == repeat.preset.serialize());
+    CHECK(a.preset.gen_shape != b.preset.gen_shape ||
            a.preset.gen_formant != b.preset.gen_formant ||
            a.preset.wave_fold != b.preset.wave_fold ||
            a.preset.osc_fm_amount != b.preset.osc_fm_amount);
-    assert(a.preset.serialize() != quiet.preset.serialize());
+    CHECK(a.preset.serialize() != quiet.preset.serialize());
     PresetData recalled;
-    assert(recalled.deserialize(a.preset.serialize()));
-    assert(recalled.wave_a_family == a.preset.wave_a_family);
+    CHECK(recalled.deserialize(a.preset.serialize()));
+    CHECK(recalled.wave_a_family == a.preset.wave_a_family);
     // Reusing a preset object to read an old patch must discard prior topology.
     PresetData legacy_source;
-    assert(recalled.deserialize(legacy_source.serialize()));
-    assert(recalled.growth_snapshot.empty());
-    assert(recalled.deserialize(a.preset.serialize()));
+    CHECK(recalled.deserialize(legacy_source.serialize()));
+    CHECK(recalled.growth_snapshot.empty());
+    CHECK(recalled.deserialize(a.preset.serialize()));
     GrowthLineage restored_graph{};
-    assert(GrowthSnapshotCodec::decode(recalled.growth_snapshot, restored_graph));
-    assert(restored_graph.node_count == a.lineage.node_count);
-    assert(restored_graph.seed == a.lineage.seed);
+    CHECK(GrowthSnapshotCodec::decode(recalled.growth_snapshot, restored_graph));
+    CHECK(restored_graph.node_count == a.lineage.node_count);
+    CHECK(restored_graph.seed == a.lineage.seed);
     for (unsigned i=0; i<restored_graph.node_count; ++i) {
-        assert(restored_graph.nodes[i].parent == a.lineage.nodes[i].parent);
-        assert(std::abs(restored_graph.nodes[i].x-a.lineage.nodes[i].x)<0.00001f);
+        CHECK(restored_graph.nodes[i].parent == a.lineage.nodes[i].parent);
+        CHECK(std::abs(restored_graph.nodes[i].x-a.lineage.nodes[i].x)<0.00001f);
     }
     GrowthLineage rejected{};
-    assert(!GrowthSnapshotCodec::decode("G1,23,105", rejected));
-    assert(!GrowthSnapshotCodec::decode("G1,23,8,not-a-number", rejected));
-    assert(std::abs(recalled.gen_shape - a.preset.gen_shape) < 0.0001f);
+    CHECK(!GrowthSnapshotCodec::decode("G1,23,105", rejected));
+    CHECK(!GrowthSnapshotCodec::decode("G1,23,8,not-a-number", rejected));
+    CHECK(std::abs(recalled.gen_shape - a.preset.gen_shape) < 0.0001f);
     // Exercise the production API, not only the standalone preset compiler.
     MonkeysEarEngine integrated;
     integrated.init(48000.0f, 256);
     integrated.load_preset(parent);
     const auto original_snapshot = integrated.get_current_preset().serialize();
     const auto candidate = integrated.preview_growth_candidate(23, 512, 0.65f);
-    assert(integrated.get_current_preset().serialize() == original_snapshot);
-    assert(!integrated.is_growth_resonator_active());
-    assert(candidate.preset.serialize() == a.preset.serialize());
+    CHECK(integrated.get_current_preset().serialize() == original_snapshot);
+    CHECK(!integrated.is_growth_resonator_active());
+    CHECK(candidate.preset.serialize() == a.preset.serialize());
     const auto integrated_lineage = integrated.grow_current_preset(23, 512, 0.65f);
-    assert(integrated_lineage.branches == a.lineage.branches);
-    assert(integrated.is_growth_resonator_active());
-    assert(integrated.get_current_preset().serialize() == a.preset.serialize());
+    CHECK(integrated_lineage.branches == a.lineage.branches);
+    CHECK(integrated.is_growth_resonator_active());
+    CHECK(integrated.get_current_preset().serialize() == a.preset.serialize());
     // The keeper can be saved, and a descendant explored without mutating it.
     const auto keeper = integrated.get_current_preset();
     const auto child = integrated.preview_growth_candidate(99, 512, 0.65f);
-    assert(integrated.get_current_preset().serialize() == keeper.serialize());
-    assert(child.preset.serialize() != keeper.serialize());
-    assert(child.lineage.node_count >= integrated_lineage.node_count);
+    CHECK(integrated.get_current_preset().serialize() == keeper.serialize());
+    CHECK(child.preset.serialize() != keeper.serialize());
+    CHECK(child.lineage.node_count >= integrated_lineage.node_count);
     for (unsigned i=0; i<integrated_lineage.node_count; ++i) {
-        assert(child.lineage.nodes[i].parent == integrated_lineage.nodes[i].parent);
-        assert(child.lineage.nodes[i].x == integrated_lineage.nodes[i].x);
-        assert(child.lineage.nodes[i].y == integrated_lineage.nodes[i].y);
+        CHECK(child.lineage.nodes[i].parent == integrated_lineage.nodes[i].parent);
+        CHECK(child.lineage.nodes[i].x == integrated_lineage.nodes[i].x);
+        CHECK(child.lineage.nodes[i].y == integrated_lineage.nodes[i].y);
     }
     // Sample-rate changes must retain the frozen graph and rebuild DSP.
     integrated.init(44100.0f, 128);
-    assert(integrated.is_growth_resonator_active());
-    assert(integrated.get_current_preset().serialize() == keeper.serialize());
+    CHECK(integrated.is_growth_resonator_active());
+    CHECK(integrated.get_current_preset().serialize() == keeper.serialize());
     const RenderResult e_a = render_energy(a.preset);
     const RenderResult graph_audio = render_energy(parent, true);
-    assert(graph_audio.energy > 1e-7);
+    CHECK(graph_audio.energy > 1e-7);
     // Generated, serialized and recalled frozen candidates must sound the same.
-    assert(std::abs(graph_audio.signature - e_a.signature) < 1e-5);
+    CHECK(std::abs(graph_audio.signature - e_a.signature) < 1e-5);
     const RenderResult recalled_audio = render_energy(recalled);
-    assert(std::abs(recalled_audio.signature - e_a.signature) < 1e-5);
+    CHECK(std::abs(recalled_audio.signature - e_a.signature) < 1e-5);
     PresetData without_graph = a.preset;
     without_graph.growth_snapshot.clear();
     const RenderResult legacy_audio = render_energy(without_graph);
-    assert(std::abs(legacy_audio.signature - e_a.signature) > 1e-6);
+    CHECK(std::abs(legacy_audio.signature - e_a.signature) > 1e-6);
     MonkeysEarEngine legacy_engine;
     legacy_engine.load_preset(without_graph);
-    assert(!legacy_engine.is_growth_resonator_active());
+    CHECK(!legacy_engine.is_growth_resonator_active());
     const RenderResult e_b = render_energy(b.preset);
-    assert(e_a.energy > 1e-7 && e_b.energy > 1e-7);
-    assert(std::abs(e_a.signature - e_b.signature) > 1e-6);
+    CHECK(e_a.energy > 1e-7 && e_b.energy > 1e-7);
+    CHECK(std::abs(e_a.signature - e_b.signature) > 1e-6);
     std::printf("growth preset: branches=%u vs %u, native engine energy=%.8f vs %.8f\n",
                 a.lineage.branches, b.lineage.branches, e_a.energy, e_b.energy);
     return 0;
