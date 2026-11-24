@@ -10,6 +10,9 @@
 #include <cmath>
 #include <cstdint>
 #include <cstdio>
+#include <sstream>
+#include <iomanip>
+#include <string>
 
 namespace monkeys_ear {
 
@@ -43,6 +46,45 @@ struct GrowthLineage {
 struct GrownPreset {
     PresetData preset;
     GrowthLineage lineage;
+};
+
+// Versioned frozen graph snapshot. Every node is validated before the
+// production resonator accepts it. No mutations happen during performance.
+struct GrowthSnapshotCodec {
+    static std::string encode(const GrowthLineage& lineage) {
+        if (lineage.node_count < 8 || lineage.node_count > lineage.nodes.size()) return {};
+        std::ostringstream out;
+        out << std::setprecision(9) << "G1," << lineage.seed << ',' << lineage.node_count;
+        for (unsigned i=0; i<lineage.node_count; ++i) {
+            const auto& n=lineage.nodes[i];
+            out << ',' << n.x << ',' << n.y << ',' << n.material
+                << ',' << n.parent << ',' << n.site;
+        }
+        return out.str();
+    }
+    static bool decode(const std::string& snapshot, GrowthLineage& output) {
+        if (snapshot.size() > 16384 || snapshot.compare(0,3,"G1,") != 0) return false;
+        std::istringstream in(snapshot.substr(3));
+        auto comma=[](std::istream& stream) { char c=0; return bool(stream >> c) && c==','; };
+        GrowthLineage parsed{};
+        if (!(in >> parsed.seed) || !comma(in) || !(in >> parsed.node_count) ||
+            parsed.node_count < 8 || parsed.node_count > parsed.nodes.size()) return false;
+        for (unsigned i=0; i<parsed.node_count; ++i) {
+            auto& n=parsed.nodes[i];
+            if (!comma(in) || !(in >> n.x) || !comma(in) || !(in >> n.y) ||
+                !comma(in) || !(in >> n.material) || !comma(in) ||
+                !(in >> n.parent) || !comma(in) || !(in >> n.site)) return false;
+            if (!std::isfinite(n.x) || !std::isfinite(n.y) || !std::isfinite(n.material) ||
+                std::abs(n.x)>1000.0f || std::abs(n.y)>1000.0f ||
+                n.material < 0.0f || n.material > 1.0f || n.site >= 8 ||
+                (i >= 8 && n.parent >= i)) return false;
+        }
+        char trailing=0;
+        if (in >> trailing) return false;
+        parsed.branches=parsed.node_count-8;
+        output=parsed;
+        return true;
+    }
 };
 
 class PresetGrowth {
@@ -148,6 +190,7 @@ public:
         char name[64]{};
         std::snprintf(name, sizeof(name), "Growth %08X / %u", seed, result.lineage.branches);
         p.name.assign(name);
+        p.growth_snapshot = GrowthSnapshotCodec::encode(result.lineage);
         return result;
     }
 
