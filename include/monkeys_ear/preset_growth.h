@@ -155,7 +155,20 @@ public:
                 ++result.lineage.events;
                 if (s.energy > 0.52f &&
                     result.lineage.node_count < result.lineage.nodes.size()) {
-                    const unsigned parent_index = tips[i];
+                    // Most events extend the active tip; some bifurcate from an
+                    // existing same-site ancestor. This creates actual forks,
+                    // not eight permanently linear chains.
+                    unsigned parent_index = tips[i];
+                    if ((next(rng) & 3u) == 0u) {
+                        const unsigned eligible = 1u + s.branches;
+                        unsigned rank = next(rng) % eligible;
+                        parent_index = i;
+                        for (unsigned n=8; n<result.lineage.node_count; ++n) {
+                            if (result.lineage.nodes[n].site != i) continue;
+                            if (rank == 0u) { parent_index = n; break; }
+                            --rank;
+                        }
+                    }
                     const auto& parent_node = result.lineage.nodes[parent_index];
                     const float direction = s.phase + 0.32f * (unit(next(rng)) - 0.5f);
                     const float length = 0.11f + 0.08f * s.strain;
