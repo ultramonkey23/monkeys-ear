@@ -1,6 +1,7 @@
 #pragma once
 
 #include "monkeys_ear/types.h"
+#include "monkeys_ear/onion_projection.h"
 #include <array>
 
 namespace monkeys_ear {
@@ -87,6 +88,7 @@ private:
     float sample_rate_ = 48000.0f;
     OnionSkinControls controls_{};
     OnionSkinMetrics metrics_{};
+    onion_projection::FilterGeometry projection_geometry_{};
 
     std::array<Biquad, kNumBands> self_bp_{};
     std::array<Biquad, kNumBands> ref_bp_{};

@@ -148,7 +148,7 @@ void OnionSkinEQ::evaluate_projection_gate() noexcept {
         }
     }
 
-    std::array<float, kNumBands> proposed_db{};
+    std::array<float, kNumBands> proposed_db{}, projected_harmonic_guard{};
     for (size_t i = 0; i < kNumBands; ++i) {
         const float self_o = clamp(self_env_[i] * 3.4f, 0.0f, 1.0f);
         const float local_ref_o = clamp(ref_env_[i] * 3.4f, 0.0f, 1.0f);
@@ -166,6 +166,7 @@ void OnionSkinEQ::evaluate_projection_gate() noexcept {
         const float harm_band_guard = has_pitch_guard
             ? clamp(harm_prot * self_pitch_confidence_ * harmonic_weight[i] * 0.85f, 0.0f, 0.85f)
             : 0.0f;
+        projected_harmonic_guard[i] = harm_band_guard;
 
         const float overlap = std::sqrt(std::max(0.0f, self_o * ref_o));
         const float thresh = lerp(0.28f, 0.04f, sens);
@@ -193,8 +194,11 @@ void OnionSkinEQ::evaluate_projection_gate() noexcept {
 
     // Evidence and candidate generation remain above. The shared selector
     // returns only an evaluated improvement or a neutral correction.
+    projection_geometry_.configure(sample_rate_, clamp(controls_.q_focus, 0.85f, 4.5f),
+                                   kBandCentersHz);
     const auto decision = onion_projection::select(
-        metrics_.self_occupancy, metrics_.ref_occupancy, proposed_db);
+        metrics_.self_occupancy, metrics_.ref_occupancy, proposed_db, &projection_geometry_,
+        has_pitch_guard ? &projected_harmonic_guard : nullptr);
     metrics_.identity_cosine = decision.identity;
     metrics_.conflict_reduction = (decision.conflict_before > 1e-4f)
         ? clamp((decision.conflict_before - decision.conflict_after) /
