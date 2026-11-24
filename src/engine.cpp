@@ -329,7 +329,10 @@ void MonkeysEarEngine::set_input_route_mode(int mode) {
     preset_manager_.mutable_current().input_route_mode = clamp(mode,0,2); apply_macros();
 }
 
-void MonkeysEarEngine::set_aftertouch(float value) { aftertouch_ = clamp(value,0.0f,1.0f); }
+void MonkeysEarEngine::set_aftertouch(float value) {
+    aftertouch_ = clamp(value,0.0f,1.0f);
+    growth_resonator_.set_expression(aftertouch_);
+}
 
 void MonkeysEarEngine::sync_oscillator_morph_and_generator() {
     const PresetData& p = preset_manager_.get_current();
