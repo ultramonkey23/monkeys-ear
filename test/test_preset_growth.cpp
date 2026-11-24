@@ -60,6 +60,11 @@ int main() {
     PresetData recalled;
     assert(recalled.deserialize(a.preset.serialize()));
     assert(recalled.wave_a_family == a.preset.wave_a_family);
+    // Reusing a preset object to read an old patch must discard prior topology.
+    PresetData legacy_source;
+    assert(recalled.deserialize(legacy_source.serialize()));
+    assert(recalled.growth_snapshot.empty());
+    assert(recalled.deserialize(a.preset.serialize()));
     GrowthLineage restored_graph{};
     assert(GrowthSnapshotCodec::decode(recalled.growth_snapshot, restored_graph));
     assert(restored_graph.node_count == a.lineage.node_count);
@@ -90,6 +95,16 @@ int main() {
     const auto child = integrated.preview_growth_candidate(99, 512, 0.65f);
     assert(integrated.get_current_preset().serialize() == keeper.serialize());
     assert(child.preset.serialize() != keeper.serialize());
+    assert(child.lineage.node_count >= integrated_lineage.node_count);
+    for (unsigned i=0; i<integrated_lineage.node_count; ++i) {
+        assert(child.lineage.nodes[i].parent == integrated_lineage.nodes[i].parent);
+        assert(child.lineage.nodes[i].x == integrated_lineage.nodes[i].x);
+        assert(child.lineage.nodes[i].y == integrated_lineage.nodes[i].y);
+    }
+    // Sample-rate changes must retain the frozen graph and rebuild DSP.
+    integrated.init(44100.0f, 128);
+    assert(integrated.is_growth_resonator_active());
+    assert(integrated.get_current_preset().serialize() == keeper.serialize());
     const RenderResult e_a = render_energy(a.preset);
     const RenderResult graph_audio = render_energy(parent, true);
     assert(graph_audio.energy > 1e-7);
