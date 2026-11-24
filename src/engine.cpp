@@ -247,11 +247,15 @@ void MonkeysEarEngine::load_preset(const PresetData& preset) {
     apply_macros();
 }
 
+GrownPreset MonkeysEarEngine::preview_growth_candidate(std::uint32_t seed,
+                                                       unsigned steps, float pressure) const {
+    return PresetGrowth::develop(preset_manager_.get_current(), seed, steps, pressure);
+}
+
 GrowthLineage MonkeysEarEngine::grow_current_preset(std::uint32_t seed,
                                                        unsigned steps, float pressure) {
     // Offline/control-thread operation: preset loading reconfigures DSP state.
-    const auto grown = PresetGrowth::develop(preset_manager_.get_current(), seed,
-                                            steps, pressure);
+    const auto grown = preview_growth_candidate(seed, steps, pressure);
     load_preset(grown.preset);
     return grown.lineage;
 }
