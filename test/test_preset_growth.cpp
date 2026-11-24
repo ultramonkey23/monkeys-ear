@@ -37,6 +37,14 @@ int main() {
     const auto quiet = PresetGrowth::develop(parent, 23, 512, 0.0f);
     assert(a.lineage.events > 0);
     assert(a.lineage.branches > 0);
+    assert(a.lineage.node_count == a.lineage.branches + 8);
+    assert(a.lineage.node_count <= a.lineage.nodes.size());
+    for (unsigned i = 8; i < a.lineage.node_count; ++i) {
+        const auto& node = a.lineage.nodes[i];
+        assert(node.parent < i);
+        assert(node.site < 8);
+        assert(std::isfinite(node.x) && std::isfinite(node.y));
+    }
     assert(quiet.lineage.branches == 0);
     assert(a.lineage.branches == repeat.lineage.branches);
     assert(a.preset.serialize() == repeat.preset.serialize());
