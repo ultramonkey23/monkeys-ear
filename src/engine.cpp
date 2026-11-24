@@ -28,6 +28,13 @@ void MonkeysEarEngine::init(float sample_rate, size_t max_block_size) {
     external_sub_.set_sample_rate(sample_rate_);
     sound_space_.set_sample_rate(sample_rate_);
     growth_resonator_.set_sample_rate(sample_rate_);
+    // Host sample-rate changes must rebuild frequency-dependent coefficients.
+    GrowthLineage sample_rate_graph{};
+    if (GrowthSnapshotCodec::decode(preset_manager_.get_current().growth_snapshot,
+                                    sample_rate_graph))
+        growth_resonator_.compile(sample_rate_graph);
+    else
+        growth_resonator_.disable();
     onion_eq_.set_sample_rate(sample_rate_);
     eco_bus_.ensure_connected();
     cutoff_motion_.set_sample_rate(sample_rate_, 7.0f);
