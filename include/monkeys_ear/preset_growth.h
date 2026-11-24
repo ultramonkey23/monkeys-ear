@@ -97,7 +97,16 @@ public:
                                unsigned steps = 512, float pressure = 0.6f) {
         GrownPreset result{parent, {}};
         result.lineage.seed = seed;
+        // Zero pressure means no development and must not silently retune a keeper.
+        // Reject non-finite controls before entering the growth recurrence.
+        if (!std::isfinite(pressure)) pressure = 0.0f;
         pressure = std::clamp(pressure, 0.0f, 1.0f);
+        if (pressure == 0.0f || steps == 0u) {
+            GrowthLineage frozen{};
+            if (GrowthSnapshotCodec::decode(parent.growth_snapshot, frozen))
+                result.lineage = frozen;
+            return result;
+        }
         std::uint32_t rng = seed ? seed : 0x6d2b79f5u;
         std::array<unsigned, 8> tips{};
         for (unsigned i = 0; i < 8; ++i) {
