@@ -12,6 +12,7 @@
 #include "monkeys_ear/safety_limiter.h"
 #include "monkeys_ear/latency_meter.h"
 #include "monkeys_ear/preset.h"
+#include "monkeys_ear/preset_growth.h"
 #include "monkeys_ear/chrono_state.h"
 #include "monkeys_ear/lfo.h"
 #include "monkeys_ear/performance_field.h"
@@ -51,6 +52,10 @@ public:
     void set_macro(MacroId id, float value);
     float get_macro(MacroId id) const;
     void load_preset(const PresetData& preset);
+    // Non-audio-thread operation: develop and load a descendant of the current preset.
+    // Returns its full lineage for inspection or external persistence.
+    GrowthLineage grow_current_preset(std::uint32_t seed, unsigned steps = 512,
+                                     float pressure = 0.6f);
     const PresetData& get_current_preset() const;
 
     void set_master_gain_db(float db);
