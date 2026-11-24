@@ -63,6 +63,32 @@ int main() {
         }
     }
     CHECK(has_fork);
+    // The same node coordinates/material with different edge connections must
+    // produce different audio: topology is now an executed DSP mechanism.
+    GrowthLineage graph_a{};
+    graph_a.node_count=11;
+    for (unsigned i=0; i<8; ++i) {
+        const float theta=6.283185307f*float(i)/8.0f;
+        graph_a.nodes[i]={std::cos(theta),std::sin(theta),0.0f,i,i};
+    }
+    graph_a.nodes[8]={1.1f,0.0f,0.3f,0u,0u};
+    graph_a.nodes[9]={1.2f,0.0f,0.3f,8u,0u};
+    graph_a.nodes[10]={1.3f,0.0f,0.3f,9u,0u};
+    GrowthLineage graph_b=graph_a;
+    graph_b.nodes[10].parent=8u;
+    GrowthResonator body_a,body_b;
+    body_a.compile(graph_a);
+    body_b.compile(graph_b);
+    CHECK(body_a.enabled() && body_b.enabled());
+    double topology_difference=0.0;
+    for (unsigned i=0; i<4096; ++i) {
+        const float input=i<32 ? 0.6f : 0.0f;
+        const float x=body_a.process(input);
+        const float y=body_b.process(input);
+        CHECK(std::isfinite(x) && std::isfinite(y));
+        topology_difference+=std::abs(double(x)-double(y));
+    }
+    CHECK(topology_difference>1e-6);
     for (unsigned i = 8; i < a.lineage.node_count; ++i) {
         const auto& node = a.lineage.nodes[i];
         CHECK(node.parent < i);
