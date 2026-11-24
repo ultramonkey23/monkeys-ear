@@ -23,10 +23,8 @@ inline void compute_bandpass(float sr, float freq_hz, float q,
 inline void compute_peaking(float sr, float freq_hz, float q, float gain_db,
                             float& b0, float& b1, float& b2, float& a1, float& a2) noexcept {
     const float safe_db = clamp(gain_db, -15.0f, 12.0f);
-    if (std::abs(safe_db) < 0.03f) {
-        b0 = 1.0f; b1 = 0.0f; b2 = 0.0f; a1 = 0.0f; a2 = 0.0f;
-        return;
-    }
+    // Keep normalized RBJ peaking continuous across 0.0 dB (A=1 => b0=1, b1=a1, b2=a2)
+    // so crossing the dynamic carve threshold never introduces a coefficient or state click.
     const float A = std::pow(10.0f, safe_db * 0.025f);
     const float w0 = TWO_PI * clamp(freq_hz, 30.0f, sr * 0.44f) / std::max(1.0f, sr);
     const float cos_w = std::cos(w0);
@@ -75,12 +73,20 @@ void OnionSkinEQ::reset() noexcept {
     metrics_ = OnionSkinMetrics{};
     fast_env_ = 0.0f;
     slow_env_ = 0.0f;
+    self_pitch_hz_ = 0.0f;
+    self_pitch_confidence_ = 0.0f;
     control_counter_ = 0;
 }
 
 void OnionSkinEQ::set_peer_occupancy(const std::array<float, kNumBands>& peer_occ, float peer_weight) noexcept {
     peer_occ_ = peer_occ;
     peer_weight_ = clamp(peer_weight, 0.0f, 1.0f);
+}
+
+void OnionSkinEQ::set_self_pitch(float hz, float confidence) noexcept {
+    const float clean_hz = sanitize(hz);
+    self_pitch_hz_ = (clean_hz >= 20.0f && clean_hz <= 8000.0f) ? clean_hz : 0.0f;
+    self_pitch_confidence_ = (self_pitch_hz_ > 0.0f) ? clamp(sanitize(confidence), 0.0f, 1.0f) : 0.0f;
 }
 
 void OnionSkinEQ::setup_analyzers() noexcept {
@@ -117,6 +123,30 @@ void OnionSkinEQ::evaluate_projection_gate() noexcept {
     const float transient_hold = clamp(trans_ratio * 1.4f, 0.0f, 1.0f) * trans_prot;
     metrics_.transient_hold = transient_hold;
 
+    const float harm_prot = clamp(controls_.harmonic_protect, 0.0f, 1.0f);
+    const bool has_pitch_guard = (harm_prot > 1e-4f && self_pitch_hz_ >= 35.0f && self_pitch_confidence_ > 0.2f);
+    std::array<float, kNumBands> harmonic_weight{};
+    if (has_pitch_guard) {
+        constexpr std::array<float, 3> kHarmonicStrength{{1.0f, 0.65f, 0.40f}};
+        for (size_t h = 0; h < 3; ++h) {
+            const float f_harm = self_pitch_hz_ * static_cast<float>(h + 1);
+            if (f_harm > sample_rate_ * 0.44f) continue;
+            size_t nearest = 0;
+            float best_err = 1e9f;
+            for (size_t b = 0; b < kNumBands; ++b) {
+                const float err = std::abs(std::log2(std::max(1.0f, f_harm) / kBandCentersHz[b]));
+                if (err < best_err) {
+                    best_err = err;
+                    nearest = b;
+                }
+            }
+            const float w = kHarmonicStrength[h];
+            harmonic_weight[nearest] = std::max(harmonic_weight[nearest], w);
+            if (nearest > 0) harmonic_weight[nearest - 1] = std::max(harmonic_weight[nearest - 1], w * 0.45f);
+            if (nearest + 1 < kNumBands) harmonic_weight[nearest + 1] = std::max(harmonic_weight[nearest + 1], w * 0.45f);
+        }
+    }
+
     std::array<float, kNumBands> proposed_db{};
     float conflict_before = 0.0f;
 
@@ -134,6 +164,9 @@ void OnionSkinEQ::evaluate_projection_gate() noexcept {
             low_weight = 1.0f - (static_cast<float>(i) / 8.0f);
         }
         const float band_protect = low_prot * low_weight * 0.94f;
+        const float harm_band_guard = has_pitch_guard
+            ? clamp(harm_prot * self_pitch_confidence_ * harmonic_weight[i] * 0.85f, 0.0f, 0.85f)
+            : 0.0f;
 
         const float overlap = std::sqrt(std::max(0.0f, self_o * ref_o));
         conflict_before += overlap;
@@ -153,7 +186,7 @@ void OnionSkinEQ::evaluate_projection_gate() noexcept {
             intent_scale = (i >= 12) ? 0.45f : 0.14f;
         }
 
-        const float protect = clamp((1.0f - band_protect) * (1.0f - transient_hold * 0.8f), 0.05f, 1.0f);
+        const float protect = clamp((1.0f - band_protect) * (1.0f - harm_band_guard) * (1.0f - transient_hold * 0.8f), 0.05f, 1.0f);
         float cut_db = -11.5f * amount * intent_scale * protect * clamp(excess * 3.0f, 0.0f, 1.0f);
         if (controls_.intent == OnionSkinIntent::Preserve && i <= 5 && self_o > 0.05f) {
             cut_db = std::max(cut_db, 1.2f * amount * overlap);
@@ -238,11 +271,7 @@ float OnionSkinEQ::process_sample(float input, float local_reference) noexcept {
 
     float y = input;
     for (size_t i = 0; i < kNumBands; ++i) {
-        if (std::abs(current_db_[i]) > 0.04f) {
-            y = carve_eq_[i].process(y);
-        } else {
-            carve_eq_[i].reset();
-        }
+        y = carve_eq_[i].process(y);
     }
     return sanitize(y);
 }

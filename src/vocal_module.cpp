@@ -44,12 +44,30 @@ void VocalModule::reset() noexcept {
     processor_.reset();
     local_pitch_tracker_.reset();
     eco_analyzer_.reset();
+    eco_bus_.publish_inactive(eco_slot_, 1);
     local_pitch_hz_=local_pitch_confidence_=0.f;
     last_tracked_hz_ = 0.0f;
     last_tracked_conf_ = 0.0f;
     eco_peer_linked_ = false;
     clear_ecosystem_evidence();
     health_.finite_output=true;
+}
+
+void VocalModule::set_eco_slot(int slot) noexcept {
+    const int next = clamp(slot, 0, 7);
+    if (next != eco_slot_) {
+        eco_bus_.publish_inactive(eco_slot_, 1);
+        eco_slot_ = next;
+    }
+}
+
+void VocalModule::set_eco_mode(int mode) noexcept {
+    const int next = clamp(mode, 0, 3);
+    if ((next == 0 || next == 2) && (eco_mode_ == 1 || eco_mode_ == 3)) {
+        eco_bus_.publish_inactive(eco_slot_, 1);
+    }
+    eco_mode_ = next;
+    eco_link_enabled_ = (eco_mode_ != 0);
 }
 void VocalModule::set_controls(const VocalExpressionControls& controls) noexcept {
     controls_=controls;
@@ -87,7 +105,9 @@ void VocalModule::process_block(const float* input_l,const float* input_r,float*
     if(!output_l||!output_r){health_.state_valid=false;return;}
     // Shared evidence enriches local analysis but does not automatically seize
     // authority: it wins only when valid and at least as confident as local evidence.
-    if (eco_link_enabled_) {
+    const bool allow_follow = (eco_mode_ == 2 || eco_mode_ == 3);
+    const bool allow_publish = (eco_mode_ == 1 || eco_mode_ == 3);
+    if (allow_follow) {
         EcosystemStreamFrame sf{};
         if (eco_bus_.read_synth_or_any(eco_slot_, sf) && sf.frame_id != last_eco_synth_frame_id_) {
             last_eco_synth_frame_id_ = sf.frame_id;
@@ -143,7 +163,7 @@ void VocalModule::process_block(const float* input_l,const float* input_r,float*
     }
     last_tracked_hz_ = block_tracked_hz;
     last_tracked_conf_ = block_conf;
-    if (eco_link_enabled_ && !bypass_ && n > 0) {
+    if (allow_publish && !bypass_ && n > 0) {
         EcosystemStreamFrame vpub{};
         vpub.frame_id = ++vocal_pub_frame_id_;
         vpub.role = 2;
@@ -154,6 +174,8 @@ void VocalModule::process_block(const float* input_l,const float* input_r,float*
         vpub.note_gate = (vpub.loudness > 0.01f && block_conf > 0.25f) ? 1.0f : 0.0f;
         vpub.spectral_occupancy = eco_analyzer_.self_occupancy();
         eco_bus_.publish_vocal(eco_slot_, vpub);
+    } else if (bypass_) {
+        eco_bus_.publish_inactive(eco_slot_, 1);
     }
     // Oversized blocks fall back to dry after max_block_size_, but time still
     // advances and must not keep a shared pitch alive into the next block.

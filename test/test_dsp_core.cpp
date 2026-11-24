@@ -788,7 +788,7 @@ void test_arturia_class_midi_keyboard_notes() {
 
 void test_factory_projection_for_native_editor() {
     std::cout<<"[TEST] Shared Factory Snapshot / PLAY and EXPLORE State Consistency... ";
-    constexpr int N=245;
+    constexpr int N=259;
     std::array<float,N> params{};
     std::array<bool,N> covered{};
     for(int patch=0;patch<8;++patch) {
@@ -812,6 +812,7 @@ void test_factory_projection_for_native_editor() {
         assert(covered[176]&&covered[177]);
         assert(covered[178]&&covered[180]&&covered[188]&&covered[192]&&covered[198]&&covered[201]);
         assert(covered[202]&&covered[207]&&covered[214]&&covered[216]&&covered[221]&&covered[244]);
+        for(int id=245;id<=258;++id) assert(covered[id]);
         assert(!covered[79]&&!covered[80]&&!covered[81]&&!covered[172]&&!covered[173]);
         assert(std::abs(params[0]-p.macros[0])<1e-6f);
         assert(std::abs(params[163]-p.amp_sustain)<1e-6f);
@@ -823,6 +824,53 @@ void test_factory_projection_for_native_editor() {
             assert(std::abs(params[id+2]-p.tube_rack.slots[i].drive)<1e-5f);
         }
     }
+    // Reverse projection round-trip for 245..258 (Vocal tuning, Onion F0 Guard, Pattern Sequencer)
+    PresetData custom=PresetManager::create_tube_foundry();
+    custom.vocal_expression.target.tuning.set_builtin(VocalBuiltinTuning::PhrygianDominant);
+    custom.vocal_expression.target.tuning.root_cents=500.0f; // D
+    custom.vocal_expression.target.articulation=-0.35f;
+    custom.vocal_expression.target.portamento=0.42f;
+    custom.vocal_expression.target.target_hysteresis=0.61f;
+    custom.vocal_expression.target.onset_protection=0.77f;
+    custom.onion_harmonic_protect=0.85f;
+    custom.pattern_enabled=true;
+    custom.pattern_index=2;
+    custom.pattern_steps=7;
+    custom.pattern_division=4;
+    custom.pattern_quantize=0.75f;
+    custom.pattern_gate=0.55f;
+    custom.pattern_transpose=-5;
+    params.fill(.5f);covered.fill(false);
+    ui::emit_preset_params(custom,[&](int id,float v){
+        assert(id>=0&&id<N);
+        assert(!covered[id]);
+        params[id]=v;covered[id]=true;
+    });
+    for(int id=245;id<=258;++id) assert(covered[id]);
+    const PresetData rebuilt=ui::preset_from_params([&](int id){return params[id];},"G1,23,8");
+    assert(rebuilt.vocal_expression.target.tuning.builtin==VocalBuiltinTuning::PhrygianDominant);
+    assert(std::abs(rebuilt.vocal_expression.target.tuning.root_cents-500.0f)<1e-4f);
+    assert(std::abs(rebuilt.vocal_expression.target.articulation-(-0.35f))<1e-4f);
+    assert(std::abs(rebuilt.vocal_expression.target.portamento-0.42f)<1e-4f);
+    assert(std::abs(rebuilt.vocal_expression.target.target_hysteresis-0.61f)<1e-4f);
+    assert(std::abs(rebuilt.vocal_expression.target.onset_protection-0.77f)<1e-4f);
+    assert(std::abs(rebuilt.onion_harmonic_protect-0.85f)<1e-4f);
+    assert(rebuilt.pattern_enabled);
+    assert(rebuilt.pattern_index==2);
+    assert(rebuilt.pattern_steps==7);
+    assert(rebuilt.pattern_division==4);
+    assert(std::abs(rebuilt.pattern_quantize-0.75f)<1e-4f);
+    assert(std::abs(rebuilt.pattern_gate-0.55f)<1e-4f);
+    assert(rebuilt.pattern_transpose==-5);
+    assert(rebuilt.growth_snapshot=="G1,23,8");
+    std::array<float,N> re_params{};
+    std::array<bool,N> re_covered{};
+    ui::emit_preset_params(rebuilt,[&](int id,float v){
+        assert(id>=0&&id<N);
+        assert(!re_covered[id]);
+        re_params[id]=v;re_covered[id]=true;
+        assert(std::abs(v-params[id])<1e-4f);
+    });
     // Old selector has not been silently expanded to use the new patches.
     PresetData original,newPalette;
     assert(ui::factory_patch_for_selector(79,.55f,original));

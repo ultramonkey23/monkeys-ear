@@ -13,7 +13,7 @@ namespace monkeys_ear {
 
 struct EcosystemStreamFrame {
     uint64_t frame_id = 0;
-    uint32_t role = 0;       // 1 = Instrument/FX, 2 = Vocal
+    uint32_t role = 0;       // 1 = Instrument/FX, 2 = Vocal, 3 = Aux Onion EQ
     bool active = false;
     float pitch_cents = 0.0f;
     float pitch_confidence = 0.0f;
@@ -30,14 +30,17 @@ struct alignas(64) EcosystemChannel {
 
     std::atomic<uint64_t> vocal_seq{0};
     EcosystemStreamFrame vocal{};
+
+    std::atomic<uint64_t> aux_eq_seq{0};
+    EcosystemStreamFrame aux_eq{};
 };
 
 struct alignas(64) EcosystemSharedMemory {
-    static constexpr uint32_t kMagic = 0x4D454333u; // "MEC3" (24 ERB bands)
+    static constexpr uint32_t kMagic = 0x4D454334u; // "MEC4" (24 ERB bands + 3 peer roles)
     static constexpr size_t kSlotCount = 8;
 
     uint32_t magic = 0;
-    uint32_t version = 2;
+    uint32_t version = 3;
     std::array<EcosystemChannel, kSlotCount> slots{};
 };
 
@@ -64,8 +67,11 @@ public:
     // Strictly lock-free, zero-alloc RT read/write.
     void publish_synth(int slot, const EcosystemStreamFrame& frame) noexcept;
     void publish_vocal(int slot, const EcosystemStreamFrame& frame) noexcept;
+    void publish_aux_eq(int slot, const EcosystemStreamFrame& frame) noexcept;
+    void publish_inactive(int slot, int role_index) noexcept; // 0=synth, 1=vocal, 2=aux_eq
     bool read_synth(int slot, EcosystemStreamFrame& out) const noexcept;
     bool read_vocal(int slot, EcosystemStreamFrame& out) const noexcept;
+    bool read_aux_eq(int slot, EcosystemStreamFrame& out) const noexcept;
 
     // Helper: aggregate most recent synth pitch across slots if needed, or exact slot.
     bool read_synth_or_any(int preferred_slot, EcosystemStreamFrame& out) const noexcept;

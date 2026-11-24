@@ -205,5 +205,167 @@ int main() {
     CHECK(std::abs(e_a.signature - e_b.signature) > 1e-6);
     std::printf("growth preset: branches=%u vs %u, native engine energy=%.8f vs %.8f\n",
                 a.lineage.branches, b.lineage.branches, e_a.energy, e_b.energy);
+
+    // Lossless .mepreset serialize/deserialize round-trip across params 245..258
+    {
+        PresetData p = PresetManager::create_tube_foundry();
+        p.vocal_expression.target.tuning.set_builtin(VocalBuiltinTuning::PhrygianDominant);
+        p.vocal_expression.target.tuning.root_cents = 500.0f;
+        p.vocal_expression.target.articulation = -0.35f;
+        p.vocal_expression.target.portamento = 0.42f;
+        p.vocal_expression.target.target_hysteresis = 0.61f;
+        p.vocal_expression.target.onset_protection = 0.77f;
+        p.onion_harmonic_protect = 0.85f;
+        p.pattern_enabled = true;
+        p.pattern_index = 2;
+        p.pattern_steps = 7;
+        p.pattern_division = 4;
+        p.pattern_quantize = 0.75f;
+        p.pattern_gate = 0.55f;
+        p.pattern_transpose = -5;
+        p.growth_snapshot = a.preset.growth_snapshot;
+        const std::string text = p.serialize();
+        PresetData back;
+        CHECK(back.deserialize(text));
+        CHECK(back.vocal_expression.target.tuning.builtin == VocalBuiltinTuning::PhrygianDominant);
+        CHECK(std::abs(back.vocal_expression.target.tuning.root_cents - 500.0f) < 1e-4f);
+        CHECK(std::abs(back.vocal_expression.target.articulation - (-0.35f)) < 1e-4f);
+        CHECK(std::abs(back.vocal_expression.target.portamento - 0.42f) < 1e-4f);
+        CHECK(std::abs(back.vocal_expression.target.target_hysteresis - 0.61f) < 1e-4f);
+        CHECK(std::abs(back.vocal_expression.target.onset_protection - 0.77f) < 1e-4f);
+        CHECK(std::abs(back.onion_harmonic_protect - 0.85f) < 1e-4f);
+        CHECK(back.pattern_enabled == true);
+        CHECK(back.pattern_index == 2);
+        CHECK(back.pattern_steps == 7);
+        CHECK(back.pattern_division == 4);
+        CHECK(std::abs(back.pattern_quantize - 0.75f) < 1e-4f);
+        CHECK(std::abs(back.pattern_gate - 0.55f) < 1e-4f);
+        CHECK(back.pattern_transpose == -5);
+        CHECK(back.growth_snapshot == p.growth_snapshot);
+        CHECK(back.serialize() == text);
+    }
+
+    // Load and exercise all 4 curated bank files in presets/
+    {
+        const std::array<const char*, 4> bank_files{{
+            "01_obsidian_7_8_riff.mepreset",
+            "02_velvet_phrygian_vocal.mepreset",
+            "03_abyssal_glass_cathedral.mepreset",
+            "04_boom_bap_tube_sub.mepreset"
+        }};
+        for (size_t idx = 0; idx < bank_files.size(); ++idx) {
+            std::string body;
+            for (const char* prefix : {"presets/", "../presets/"}) {
+                std::FILE* f = std::fopen((std::string(prefix) + bank_files[idx]).c_str(), "rb");
+                if (f) {
+                    std::fseek(f, 0, SEEK_END);
+                    const long sz = std::ftell(f);
+                    std::fseek(f, 0, SEEK_SET);
+                    if (sz > 0) {
+                        body.resize(static_cast<size_t>(sz));
+                        const size_t nread = std::fread(body.data(), 1, static_cast<size_t>(sz), f);
+                        body.resize(nread);
+                    }
+                    std::fclose(f);
+                    break;
+                }
+            }
+            CHECK(!body.empty());
+            PresetData bank_p;
+            CHECK(bank_p.deserialize(body));
+            if (idx == 0) {
+                CHECK(bank_p.pattern_enabled && bank_p.pattern_steps == 14 && bank_p.onion_harmonic_protect > 0.7f);
+            } else if (idx == 1) {
+                CHECK(bank_p.vocal_expression.enabled &&
+                      bank_p.vocal_expression.target.tuning.builtin == VocalBuiltinTuning::PhrygianDominant &&
+                      bank_p.eco_mode == 3);
+            } else if (idx == 2) {
+                CHECK(bank_p.sound_space.enabled && bank_p.pattern_enabled && bank_p.pattern_index == 3);
+            } else if (idx == 3) {
+                CHECK(bank_p.tube_rack.enabled && bank_p.pattern_enabled &&
+                      bank_p.pattern_transpose == -12 && bank_p.lfo_groove > 0.5f);
+            }
+            MonkeysEarEngine eng;
+            eng.init(48000.0f, 128);
+            eng.load_preset(bank_p);
+            std::array<float, 128> in_l{}, in_r{}, out_l{}, out_r{};
+            for (int i = 0; i < 128; ++i) in_l[i] = in_r[i] = 0.25f * std::sin(6.2831853f * 330.0f * i / 48000.0f);
+            if (!bank_p.pattern_enabled && bank_p.input_route_mode == 0) {
+                eng.handle_midi_note_on(48, 0.85f);
+            }
+            double e = 0.0;
+            for (int blk = 0; blk < 20; ++blk) {
+                eng.process_block(in_l.data(), in_r.data(), out_l.data(), out_r.data(), 128);
+                for (int i = 0; i < 128; ++i) {
+                    CHECK(growth_finite(out_l[i]) && growth_finite(out_r[i]));
+                    e += static_cast<double>(out_l[i]) * out_l[i];
+                }
+            }
+            CHECK(e > 1e-6);
+        }
+    }
+
+    // Explicit evolutionary workflow & strict isolation from PERFORM Drift/Fracture
+    {
+        MonkeysEarEngine evo;
+        evo.init(48000.0f, 128);
+        evo.load_preset(PresetManager::create_factory_lead());
+        CHECK(!evo.is_growth_resonator_active());
+        CHECK(evo.get_current_preset().growth_snapshot.empty());
+
+        // Modulating PERFORM: Drift (176) and PERFORM: Fracture (177) must NOT activate or mutate growth lineage
+        evo.set_parameter_normalized(176, 0.92f);
+        evo.set_parameter_normalized(177, 0.88f);
+        std::array<float, 128> z{}, ol{}, or_{};
+        evo.handle_midi_note_on(52, 0.8f);
+        for (int b = 0; b < 8; ++b) evo.process_block(z.data(), z.data(), ol.data(), or_.data(), 128);
+        CHECK(!evo.is_growth_resonator_active());
+        CHECK(evo.get_current_preset().growth_snapshot.empty());
+        CHECK(evo.get_active_lineage().node_count == 0);
+
+        // Audition -> Compare Keeper -> Commit -> Branch -> Clear
+        CHECK(evo.audition_growth_candidate(20261124u, 64, 0.65f));
+        CHECK(evo.is_auditioning_growth());
+        CHECK(!evo.is_comparing_keeper());
+        CHECK(evo.is_growth_resonator_active());
+        CHECK(evo.get_keeper_preset().growth_snapshot.empty());
+        const auto audition_snap = evo.get_current_preset().growth_snapshot;
+        CHECK(!audition_snap.empty());
+
+        CHECK(evo.set_growth_compare_keeper(true));
+        CHECK(evo.is_comparing_keeper());
+        CHECK(!evo.is_growth_resonator_active());
+        CHECK(evo.set_growth_compare_keeper(false));
+        CHECK(!evo.is_comparing_keeper());
+        CHECK(evo.is_growth_resonator_active());
+
+        const auto committed = evo.commit_auditioned_growth();
+        CHECK(!evo.is_auditioning_growth());
+        CHECK(evo.is_growth_resonator_active());
+        CHECK(committed.branches > 0);
+        CHECK(evo.get_keeper_preset().growth_snapshot == audition_snap);
+
+        // Modulating Drift/Fracture on a grown preset must NOT mutate its lineage
+        const auto lineage_before = evo.get_active_lineage();
+        evo.set_parameter_normalized(176, 0.15f);
+        evo.set_parameter_normalized(177, 0.97f);
+        for (int b = 0; b < 8; ++b) evo.process_block(z.data(), z.data(), ol.data(), or_.data(), 128);
+        CHECK(evo.is_growth_resonator_active());
+        CHECK(evo.get_current_preset().growth_snapshot == audition_snap);
+        CHECK(evo.get_active_lineage().node_count == lineage_before.node_count);
+
+        const auto branched = evo.branch_growth_descendant(9911u, 64, 0.70f);
+        CHECK(evo.is_growth_resonator_active());
+        CHECK(branched.node_count >= committed.node_count);
+        for (unsigned i = 0; i < committed.node_count; ++i) {
+            CHECK(branched.nodes[i].parent == committed.nodes[i].parent);
+        }
+
+        evo.clear_growth_lineage();
+        CHECK(!evo.is_growth_resonator_active());
+        CHECK(evo.get_current_preset().growth_snapshot.empty());
+        CHECK(evo.get_active_lineage().node_count == 0);
+    }
+
     return 0;
 }

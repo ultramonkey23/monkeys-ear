@@ -11,6 +11,7 @@
 #include <utility>
 #include <vector>
 #include "vst3_sdk_minimal.h"
+#include "monkeys_ear/ecosystem_bus.h"
 #include "monkeys_ear/vocal_product_version.h"
 
 using namespace Steinberg;
@@ -197,16 +198,38 @@ int main() {
 
     PClassInfo2 controller_info{}; CHECK_STAGE(factory2->getClassInfo2(1,&controller_info)==kResultOk,"read Vocal controller class info");
     IEditController* controller=nullptr; CHECK_STAGE(factory2->createInstance(controller_info.cid,IEditController_iid,reinterpret_cast<void**>(&controller))==kResultOk && controller!=nullptr,"create Vocal edit controller");
-    CHECK_STAGE(controller->getParameterCount()==11,"Vocal controller exposes 11 parameters");
+    CHECK_STAGE(controller->getParameterCount()==19,"Vocal controller exposes 19 parameters");
     ParameterInfo info{}; CHECK_STAGE(controller->getParameterInfo(1,info)==kResultOk,"read Vocal parameter info");
     CHECK_STAGE(info.title[0]=='V' && info.title[7]=='C',"Vocal parameter schema identity");
     CHECK_STAGE(std::abs(info.defaultNormalizedValue-0.45)<1.0e-7,"stable factory default is not current parameter value");
+    {
+        for(int32 pid=11;pid<19;++pid){
+            ParameterInfo pinfo{};
+            CHECK_STAGE(controller->getParameterInfo(pid,pinfo)==kResultOk && pinfo.title[0]=='V',
+                        "read Vocal parameter info 11..18");
+            char16 disp[128]{};
+            CHECK_STAGE(controller->getParamStringByValue(static_cast<ParamID>(pid),0.5,disp)==kResultOk && disp[0]!=0,
+                        "format Vocal display string 11..18");
+        }
+        ParamValue tv=0.0;
+        CHECK_STAGE(controller->getParamValueByString(11,u"D",tv)==kResultOk && std::abs(tv-2.0/11.0)<1e-6,
+                    "Vocal Root Key parses D");
+        CHECK_STAGE(controller->getParamValueByString(12,u"Major / Ionian",tv)==kResultOk && std::abs(tv-1.0/29.0)<1e-6,
+                    "Vocal Scale / Tuning parses Major / Ionian");
+        char16 ch_str[128]{};
+        CHECK_STAGE(controller->getParamStringByValue(18,2.0/7.0,ch_str)==kResultOk &&
+                    ch_str[0]==u'C' && ch_str[1]==u'h' && ch_str[3]==u'3',
+                    "Vocal Eco Channel formats Ch 3");
+    }
     CHECK_STAGE(controller->setParamNormalized(1,std::numeric_limits<double>::quiet_NaN())==kInvalidArgument,
                 "reject NaN host normalized parameter");
     CHECK_STAGE(controller->setParamNormalized(1,std::numeric_limits<double>::infinity())==kInvalidArgument,
                 "reject infinite host normalized parameter");
 
-    const std::array<ParamValue,11> recalled_values{1.0,0.11,0.22,0.33,0.44,0.55,0.66,0.77,0.0,0.88,0.99};
+    const std::array<ParamValue,19> recalled_values{
+        1.0,0.11,0.22,0.33,0.44,0.55,0.66,0.77,0.0,0.88,0.99,
+        2.0/11.0,1.0/29.0,0.65,0.25,0.50,0.75,0.0,3.0/7.0
+    };
     for(ParamID id=0;id<recalled_values.size();++id) {
         CHECK_STAGE(controller->setParamNormalized(id,recalled_values[id])==kResultOk,"set non-default Vocal state");
     }
@@ -225,14 +248,44 @@ int main() {
 
     MemoryStream saved_state;
     CHECK_STAGE(component->getState(&saved_state)==kResultOk,"serialize complete Vocal component state");
-    CHECK_STAGE(saved_state.bytes().size()==12u+recalled_values.size()*sizeof(float),"Vocal state envelope has exact versioned size");
+    CHECK_STAGE(saved_state.bytes().size()==12u+recalled_values.size()*sizeof(float),"Vocal v2 state envelope has exact versioned size");
     uint32 state_magic=0,state_version=0,state_count=0;
     std::memcpy(&state_magic,saved_state.bytes().data(),sizeof(state_magic));
     std::memcpy(&state_version,saved_state.bytes().data()+4,sizeof(state_version));
     std::memcpy(&state_count,saved_state.bytes().data()+8,sizeof(state_count));
-    CHECK_STAGE(state_magic==0x4D455643u && state_version==1u && state_count==recalled_values.size(),"Vocal state envelope identity");
+    CHECK_STAGE(state_magic==0x4D455643u && state_version==2u && state_count==recalled_values.size(),"Vocal v2 state envelope identity");
 
-    const std::array<ParamValue,11> guard_values{0.51,0.52,0.53,0.54,0.55,0.56,0.57,0.58,0.59,0.60,0.61};
+    // MEVC v1 (11 params) -> v2 (19 params) backward-compatible stream loading
+    {
+        MemoryStream v1_stream;
+        uint32 v1_magic=0x4D455643u, v1_ver=1u, v1_cnt=11u;
+        v1_stream.write(&v1_magic,4,nullptr);
+        v1_stream.write(&v1_ver,4,nullptr);
+        v1_stream.write(&v1_cnt,4,nullptr);
+        for(uint32 i=0;i<11u;++i){
+            float f=static_cast<float>(recalled_values[i]);
+            v1_stream.write(&f,4,nullptr);
+        }
+        v1_stream.seek(0,kIBSeekSet,nullptr);
+        CHECK_STAGE(component->setState(&v1_stream)==kResultOk,"load MEVC v1 (11-param) stream into v2 component");
+        MemoryStream v1_migrated;
+        CHECK_STAGE(component->getState(&v1_migrated)==kResultOk &&
+                    v1_migrated.bytes().size()==12u+19u*sizeof(float),
+                    "MEVC v1 stream migrates to v2 19-param envelope");
+        uint32 m_ver=0,m_cnt=0;
+        std::memcpy(&m_ver,v1_migrated.bytes().data()+4,4);
+        std::memcpy(&m_cnt,v1_migrated.bytes().data()+8,4);
+        float def13=0.f,def17=0.f;
+        std::memcpy(&def13,v1_migrated.bytes().data()+12u+13u*4u,4);
+        std::memcpy(&def17,v1_migrated.bytes().data()+12u+17u*4u,4);
+        CHECK_STAGE(m_ver==2u && m_cnt==19u && std::abs(def13-0.50f)<1e-6f && std::abs(def17-1.0f)<1e-6f,
+                    "MEVC v1->v2 migration populates default tuning/eco controls");
+    }
+
+    const std::array<ParamValue,19> guard_values{
+        0.51,0.52,0.53,0.54,0.55,0.56,0.57,0.58,0.59,0.60,0.61,
+        0.1,0.2,0.3,0.4,0.5,0.6,0.7,0.8
+    };
     for(ParamID id=0;id<guard_values.size();++id)controller->setParamNormalized(id,guard_values[id]);
     auto truncated_bytes=saved_state.bytes();
     truncated_bytes.resize(12u+5u*sizeof(float)+2u);
@@ -264,7 +317,7 @@ int main() {
     CHECK_STAGE(controller->setComponentState(&controller_restore)==kResultOk,"synchronize fresh Vocal controller from component state");
     bool recalled_exactly=true;
     for(ParamID id=0;id<recalled_values.size();++id)recalled_exactly=recalled_exactly&&std::abs(controller->getParamNormalized(id)-recalled_values[id])<1.0e-7;
-    CHECK_STAGE(recalled_exactly,"all 11 Vocal parameters survive split component/controller reconstruction");
+    CHECK_STAGE(recalled_exactly,"all 19 Vocal parameters survive split component/controller reconstruction");
     CHECK_STAGE(processor->setupProcessing(setup)==kResultOk,"fresh Vocal setupProcessing after state restore");
     float recalled_dry_delta=0.0f;
     CHECK_STAGE(process_block(processor,256,nullptr,0.0f,&recalled_dry_delta),"process recalled Vocal state");
@@ -311,6 +364,141 @@ int main() {
     float preserved_mix=0.0f;
     std::memcpy(&preserved_mix,post_invalid.bytes().data()+12u+8u*sizeof(float),sizeof(preserved_mix));
     CHECK_STAGE(std::abs(preserved_mix-1.0f)<1.0e-7f,"invalid host automation cannot poison serialized state");
+
+    // Scale-aware pitch correction difference: Chromatic vs Major on off-scale 370 Hz (F#4 in C)
+    {
+        auto render_scale = [&](double scale_norm) {
+            IComponent* sc_comp=nullptr; IAudioProcessor* sc_proc=nullptr;
+            factory2->createInstance(component_info.cid,IComponent_iid,reinterpret_cast<void**>(&sc_comp));
+            sc_comp->queryInterface(IAudioProcessor_iid,reinterpret_cast<void**>(&sc_proc));
+            ProcessSetup s{}; s.sampleRate=48000.0; s.maxSamplesPerBlock=256;
+            sc_proc->setupProcessing(s);
+            sc_comp->setActive(true);
+            class MultiChanges final : public IParameterChanges {
+            public:
+                std::vector<OnePointQueue> q;
+                tresult SMTG_STDCALL queryInterface(const TUID,void** o) override {if(o)*o=nullptr;return kResultFalse;}
+                uint32 SMTG_STDCALL addRef() override{return 1;} uint32 SMTG_STDCALL release() override{return 1;}
+                int32 SMTG_STDCALL getParameterCount() override{return static_cast<int32>(q.size());}
+                IParamValueQueue* SMTG_STDCALL getParameterData(int32 i) override{return (i>=0&&static_cast<size_t>(i)<q.size())?&q[static_cast<size_t>(i)]:nullptr;}
+                IParamValueQueue* SMTG_STDCALL addParameterData(const ParamID&,int32&) override{return nullptr;}
+            } chg;
+            chg.q.emplace_back(0,1.0);
+            chg.q.emplace_back(1,1.0);
+            chg.q.emplace_back(2,0.0);
+            chg.q.emplace_back(3,0.0);
+            chg.q.emplace_back(4,1.0);
+            chg.q.emplace_back(8,1.0);
+            chg.q.emplace_back(11,0.0); // C
+            chg.q.emplace_back(12,scale_norm);
+            chg.q.emplace_back(17,0.0); // Eco Off
+
+            std::vector<float> captured;
+            float in_l[256]{},in_r[256]{},out_l[256]{},out_r[256]{};
+            float* ich[2]={in_l,in_r}; float* och[2]={out_l,out_r};
+            AudioBusBuffers ib{2,0,ich}, ob{2,0,och};
+            ProcessData pd{}; pd.numSamples=256; pd.numInputs=1; pd.numOutputs=1; pd.inputs=&ib; pd.outputs=&ob;
+            for(int b=0;b<48;++b){
+                for(int i=0;i<256;++i){
+                    const float ph=6.283185307179586f*370.0f*static_cast<float>(b*256+i)/48000.0f;
+                    in_l[i]=in_r[i]=0.38f*std::sin(ph);
+                }
+                pd.inputParameterChanges=(b==0)?&chg:nullptr;
+                sc_proc->process(pd);
+                if(b>=32) captured.insert(captured.end(),out_l,out_l+256);
+            }
+            sc_comp->setActive(false); sc_proc->release(); sc_comp->release();
+            return captured;
+        };
+        const auto chrom=render_scale(0.0);
+        const auto maj=render_scale(1.0/29.0);
+        double diff_sq=0.0;
+        for(size_t i=0;i<chrom.size();++i){
+            const double d=static_cast<double>(chrom[i])-static_cast<double>(maj[i]);
+            diff_sq+=d*d;
+        }
+        const double scale_diff_rms=std::sqrt(diff_sq/static_cast<double>(chrom.size()));
+        CHECK_STAGE(scale_diff_rms>1.0e-3,
+                    "scale-aware pitch correction differentiates Chromatic vs Major on off-scale 370 Hz");
+    }
+
+    // Eco Channel (1..8) bus slot isolation on MEC4 shared memory
+    {
+        wchar_t shm_name[96]{};
+        std::swprintf(shm_name,96,L"Local\\MonkeysEarEcoBus4_%lu",static_cast<unsigned long>(GetCurrentProcessId()));
+        HANDLE hMap=OpenFileMappingW(FILE_MAP_READ,FALSE,shm_name);
+        CHECK_STAGE(hMap!=nullptr,"open process MEC4 shared memory bus");
+        const auto* shm=static_cast<const monkeys_ear::EcosystemSharedMemory*>(
+            MapViewOfFile(hMap,FILE_MAP_READ,0,0,sizeof(monkeys_ear::EcosystemSharedMemory)));
+        CHECK_STAGE(shm!=nullptr && shm->magic==monkeys_ear::EcosystemSharedMemory::kMagic,
+                    "verify MEC4 shared memory header");
+
+        IComponent *eco_a=nullptr,*eco_b=nullptr;
+        IAudioProcessor *proc_a=nullptr,*proc_b=nullptr;
+        factory2->createInstance(component_info.cid,IComponent_iid,reinterpret_cast<void**>(&eco_a));
+        factory2->createInstance(component_info.cid,IComponent_iid,reinterpret_cast<void**>(&eco_b));
+        eco_a->queryInterface(IAudioProcessor_iid,reinterpret_cast<void**>(&proc_a));
+        eco_b->queryInterface(IAudioProcessor_iid,reinterpret_cast<void**>(&proc_b));
+        proc_a->setupProcessing(accurate_setup); proc_b->setupProcessing(accurate_setup);
+        eco_a->setActive(true); eco_b->setActive(true);
+
+        float dummy_rms=0.0f;
+        OneParameterChange a_pub(17,1.0/3.0), a_ch2(18,1.0/7.0);
+        process_block(proc_a,256,&a_pub,0.0f,&dummy_rms);
+        process_block(proc_a,256,&a_ch2,256.0f,&dummy_rms);
+        for(int b=0;b<4;++b) process_block(proc_a,256,nullptr,static_cast<float>((b+2)*256),&dummy_rms);
+        CHECK_STAGE(shm->slots[1].vocal.active && !shm->slots[0].vocal.active && !shm->slots[2].vocal.active,
+                    "Eco Channel 2 isolates Vocal bus publication from Ch 1 and Ch 3");
+
+        OneParameterChange a_ch5(18,4.0/7.0);
+        process_block(proc_a,256,&a_ch5,6.0f*256.0f,&dummy_rms);
+        process_block(proc_a,256,nullptr,7.0f*256.0f,&dummy_rms);
+        CHECK_STAGE(!shm->slots[1].vocal.active && shm->slots[4].vocal.active,
+                    "switching Eco Channel deactivates old slot 2 and activates slot 5");
+
+        OneParameterChange b_pub(17,1.0/3.0), b_ch6(18,5.0/7.0);
+        process_block(proc_b,256,&b_pub,0.0f,&dummy_rms);
+        process_block(proc_b,256,&b_ch6,256.0f,&dummy_rms);
+        process_block(proc_b,256,nullptr,512.0f,&dummy_rms);
+        CHECK_STAGE(shm->slots[4].vocal.active && shm->slots[5].vocal.active,
+                    "multiple Vocal instances coexist independently on Ch 5 and Ch 6");
+
+        eco_a->setActive(false);
+        CHECK_STAGE(!shm->slots[4].vocal.active && shm->slots[5].vocal.active,
+                    "setActive(false) clears Ch 5 without disturbing Ch 6");
+        eco_b->setActive(false);
+        CHECK_STAGE(!shm->slots[5].vocal.active,"setActive(false) clears Ch 6");
+
+        proc_a->release(); eco_a->release();
+        proc_b->release(); eco_b->release();
+        UnmapViewOfFile(shm);
+        CloseHandle(hMap);
+    }
+
+    // VocalEditor 740x610 attach/paint/detach lifecycle
+    {
+        IPlugView* view=controller->createView("editor");
+        CHECK_STAGE(view!=nullptr,"create VocalEditor view");
+        CHECK_STAGE(view->isPlatformTypeSupported("HWND")==kResultOk,"VocalEditor supports HWND");
+        ViewRect sz{};
+        CHECK_STAGE(view->getSize(&sz)==kResultOk && (sz.right-sz.left)==740 && (sz.bottom-sz.top)==610,
+                    "VocalEditor reports 740x610 dimensions");
+        HWND parent=CreateWindowExA(0,"STATIC","VocalHost",WS_POPUP,0,0,740,610,nullptr,nullptr,GetModuleHandleA(nullptr),nullptr);
+        CHECK_STAGE(parent!=nullptr && view->attached(parent,"HWND")==kResultOk,
+                    "VocalEditor attaches to 740x610 host HWND");
+        HWND child=FindWindowExA(parent,nullptr,"MonkeysEarVocalEditorWnd",nullptr);
+        CHECK_STAGE(child!=nullptr,"VocalEditor child window created");
+        RedrawWindow(child,nullptr,nullptr,RDW_INVALIDATE|RDW_UPDATENOW);
+        SendMessageA(child,WM_LBUTTONDOWN,MK_LBUTTON,MAKELPARAM(660,35)); // ACTIVE/BYPASS toggle
+        SendMessageA(child,WM_LBUTTONUP,0,MAKELPARAM(660,35));
+        CHECK_STAGE(view->removed()==kResultOk,"VocalEditor detaches cleanly");
+        CHECK_STAGE(view->attached(parent,"HWND")==kResultOk,"VocalEditor reattaches cleanly");
+        HWND child2=FindWindowExA(parent,nullptr,"MonkeysEarVocalEditorWnd",nullptr);
+        if(child2) RedrawWindow(child2,nullptr,nullptr,RDW_INVALIDATE|RDW_UPDATENOW);
+        CHECK_STAGE(view->removed()==kResultOk,"VocalEditor detaches cleanly after reopen");
+        CHECK_STAGE(view->release()==0,"VocalEditor reference count releases to 0");
+        DestroyWindow(parent);
+    }
 
     // Deliberately create both components BEFORE the controller. The old
     // g_latest_state design incorrectly attached the controller to component B.

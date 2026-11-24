@@ -15,10 +15,16 @@ using namespace Steinberg;
 using namespace Steinberg::Vst;
 
 namespace {
-constexpr int kParamCount = 11;
-constexpr std::array<float,kParamCount> kDefaultValues{1.0f,.45f,.35f,.80f,.55f,.50f,.10f,0.0f,1.0f,.35f,.90f};
+constexpr int kParamCount = 19;
+constexpr std::array<float, kParamCount> kDefaultValues{
+    1.0f, .45f, .35f, .80f, .55f, .50f, .10f, 0.0f, 1.0f, .35f, .90f,
+    0.0f, 0.0f, 0.50f, 0.0f, 0.45f, 0.50f, 1.0f, 0.0f
+};
+constexpr std::array<const char*, 12> kRootKeyNames{
+    "C", "C#", "D", "D#", "E", "F", "F#", "G", "G#", "A", "A#", "B"
+};
 constexpr uint32 kStateMagic = 0x4D455643u; // MEVC
-constexpr uint32 kStateVersion = 1u;
+constexpr uint32 kStateVersion = 2u;
 static const TUID kVocalComponentCID = INLINE_UID(0x4D6F6E6B, 0x65794561, 0x72566F63, 0x616C3031); // Monke yEar Vocal01
 static const TUID kVocalControllerCID = INLINE_UID(0x4D6F6E6B, 0x65794561, 0x72566374, 0x726C3031); // Monke yEar Vctrl01
 
@@ -87,14 +93,14 @@ tresult read_state(IBStream* stream,const std::shared_ptr<VocalState>& state) {
     uint32 magic=0,version=0,count=0;
     if(!read_stream(stream,&magic,4)||!read_stream(stream,&version,4)||!read_stream(stream,&count,4))return kInternalError;
     if(magic!=kStateMagic||version>kStateVersion||count>kParamCount)return kResultFalse;
-    std::array<float,kParamCount> restored{};
+    std::array<float,kParamCount> restored=kDefaultValues;
     for(uint32 i=0;i<count;++i){
         float value=0;
         if(!read_stream(stream,&value,4))return kInternalError;
         if(!serialized_float_is_finite(value))return kResultFalse;
         restored[i]=std::clamp(value,0.0f,1.0f);
     }
-    for(uint32 i=0;i<count;++i){state->values[i].store(restored[i]);state->dirty[i].store(true);}
+    for(int i=0;i<kParamCount;++i){state->values[i].store(restored[i]);state->dirty[i].store(true);}
     return kResultOk;
 }
 
@@ -191,15 +197,45 @@ public:
     }
     uint32 SMTG_STDCALL getTailSamples() override{return 0;}
 private:
-    void apply_controls(){auto value=[this](int i){return state_->values[i].load();}; monkeys_ear::VocalExpressionControls c{};c.enabled=value(0)>=.5f;c.correction_strength=value(1);c.drift_retention=value(2);c.vibrato_retention=value(3);c.transition=value(4);c.formant_repair=value(5);c.spectral_residual_mix=value(6);c.character=value(7);c.mix=value(8);c.sequential_stage_mix=value(9);c.aperiodic_protection=value(10);module_.set_controls(c);module_.set_bypass(!c.enabled);}
+    void apply_controls() {
+        auto value = [this](int i) { return state_->values[i].load(); };
+        monkeys_ear::VocalExpressionControls c{};
+        c.enabled = value(0) >= .5f;
+        c.correction_strength = value(1);
+        c.drift_retention = value(2);
+        c.vibrato_retention = value(3);
+        c.transition = value(4);
+        c.formant_repair = value(5);
+        c.spectral_residual_mix = value(6);
+        c.character = value(7);
+        c.mix = value(8);
+        c.sequential_stage_mix = value(9);
+        c.aperiodic_protection = value(10);
+        const int root_idx = std::clamp(static_cast<int>(std::lround(value(11) * 11.0f)), 0, 11);
+        const int tuning_idx = std::clamp(
+            static_cast<int>(std::lround(value(12) * static_cast<float>(monkeys_ear::kVocalBuiltinTuningNames.size() - 1))),
+            0, static_cast<int>(monkeys_ear::kVocalBuiltinTuningNames.size()) - 1);
+        c.target.tuning.set_builtin(static_cast<monkeys_ear::VocalBuiltinTuning>(tuning_idx));
+        c.target.tuning.root_cents = static_cast<float>((root_idx + 3) % 12) * 100.0f;
+        c.target.articulation = value(13) * 2.0f - 1.0f;
+        c.target.portamento = value(14);
+        c.target.target_hysteresis = value(15);
+        c.target.onset_protection = value(16);
+        const int eco_mode = std::clamp(static_cast<int>(std::lround(value(17) * 3.0f)), 0, 3);
+        const int eco_slot = std::clamp(static_cast<int>(std::lround(value(18) * 7.0f)), 0, 7);
+        module_.set_eco_slot(eco_slot);
+        module_.set_eco_mode(eco_mode);
+        module_.set_controls(c);
+        module_.set_bypass(!c.enabled);
+    }
     std::atomic<uint32> ref_;std::shared_ptr<VocalState> state_;monkeys_ear::VocalModule module_{};
 };
 
 #if defined(_WIN32)
 class VocalEditor final : public IPlugView {
 public:
-    static constexpr int kWidth = 680;
-    static constexpr int kHeight = 476;
+    static constexpr int kWidth = 740;
+    static constexpr int kHeight = 610;
     static constexpr UINT_PTR kTimerId = 1;
 
     VocalEditor(IEditController* controller, IComponentHandler** handler_slot)
@@ -278,6 +314,14 @@ private:
         int param_id = -1;
         RECT rect{};
         bool is_toggle = false;
+        int steps = 0; // >0 for discrete selector with < / > halves
+    };
+
+    struct HitResult {
+        int param_id = -1;
+        bool is_toggle = false;
+        int step_dir = 0; // -1 prev, +1 next, 0 slider drag
+        int steps = 0;
     };
 
     static const char* class_name() { return "MonkeysEarVocalEditorWnd"; }
@@ -296,28 +340,36 @@ private:
 
     static std::array<ControlBox, kParamCount> layout_controls() {
         std::array<ControlBox, kParamCount> boxes{};
-        boxes[0] = {0, {556, 20, 658, 52}, true}; // Enable / Bypass toggle
-        // Left column: params 1..5
-        for (int i = 0; i < 5; ++i) {
-            const int y = 210 + i * 48;
-            boxes[1 + i] = {1 + i, {26, y, 326, y + 36}, false};
+        boxes[0] = {0, {614, 18, 716, 52}, true, 1}; // Enable / Bypass toggle
+        const int left_ids[8] = {1, 2, 3, 4, 13, 14, 15, 16};
+        for (int r = 0; r < 8; ++r) {
+            const int y = 204 + r * 40;
+            boxes[left_ids[r]] = {left_ids[r], {26, y, 358, y + 34}, false, 0};
         }
-        // Right column: params 6..10
-        for (int i = 0; i < 5; ++i) {
-            const int y = 210 + i * 48;
-            boxes[6 + i] = {6 + i, {354, y, 654, y + 36}, false};
+        const int right_ids[6] = {5, 6, 7, 8, 9, 10};
+        for (int r = 0; r < 6; ++r) {
+            const int y = 204 + r * 40;
+            boxes[right_ids[r]] = {right_ids[r], {382, y, 714, y + 34}, false, 0};
         }
+        boxes[11] = {11, {26, 534, 150, 580}, false, 11};   // Root Key C..B
+        boxes[12] = {12, {160, 534, 358, 580}, false, 29};  // 30 Builtin Scales
+        boxes[17] = {17, {382, 456, 542, 502}, false, 3};   // Eco Link Mode
+        boxes[18] = {18, {554, 456, 714, 502}, false, 7};   // Eco Channel 1..8
         return boxes;
     }
 
-    int hit_test(int x, int y) const {
+    HitResult hit_test(int x, int y) const {
         const auto boxes = layout_controls();
         for (const auto& b : boxes) {
             if (x >= b.rect.left && x <= b.rect.right && y >= b.rect.top && y <= b.rect.bottom) {
-                return b.param_id;
+                HitResult h{b.param_id, b.is_toggle, 0, b.steps};
+                if (b.steps > 1) {
+                    h.step_dir = (x < (b.rect.left + b.rect.right) / 2) ? -1 : 1;
+                }
+                return h;
             }
         }
-        return -1;
+        return {};
     }
 
     void push_param(int id, double norm) {
@@ -378,16 +430,15 @@ private:
 
         HGDIOBJ old_font = SelectObject(hdc, title_font);
         SetTextColor(hdc, RGB(242, 245, 250));
-        RECT tr{24, 16, 480, 40};
+        RECT tr{24, 14, 520, 38};
         DrawTextA(hdc, "MONKEY'S EAR VOCAL", -1, &tr, DT_LEFT | DT_VCENTER | DT_SINGLELINE);
 
         SelectObject(hdc, sub_font);
         SetTextColor(hdc, RGB(145, 162, 188));
-        RECT sr{24, 40, 520, 58};
-        DrawTextA(hdc, "PROSODIC PITCH, FORMANT & ECOSYSTEM COMPANION  |  Shift: Fine  Wheel: Step  R-Click: Reset",
+        RECT sr{24, 38, 600, 56};
+        DrawTextA(hdc, "30-SCALE PROSODIC PITCH, FORMANT & 24-ERB ECOSYSTEM COMPANION",
                   -1, &sr, DT_LEFT | DT_VCENTER | DT_SINGLELINE);
 
-        // Enable / Bypass pill
         const auto boxes = layout_controls();
         const bool enabled = controller_ ? (controller_->getParamNormalized(0) >= 0.5) : true;
         fill_round(hdc, boxes[0].rect, 10,
@@ -397,71 +448,95 @@ private:
         DrawTextA(hdc, enabled ? "ACTIVE" : "BYPASS", -1, const_cast<RECT*>(&boxes[0].rect),
                   DT_CENTER | DT_VCENTER | DT_SINGLELINE);
 
-        // Ecosystem Telemetry Panel
-        RECT eco_panel{24, 68, 656, 174};
+        const int eco_ch = controller_
+            ? std::clamp(static_cast<int>(std::lround(controller_->getParamNormalized(18) * 7.0)), 0, 7)
+            : 0;
+        const int root_idx = controller_
+            ? std::clamp(static_cast<int>(std::lround(controller_->getParamNormalized(11) * 11.0)), 0, 11)
+            : 0;
+        const int tuning_idx = controller_
+            ? std::clamp(static_cast<int>(std::lround(controller_->getParamNormalized(12) * 29.0)), 0, 29)
+            : 0;
+
+        RECT eco_panel{24, 66, 716, 176};
         fill_round(hdc, eco_panel, 10, RGB(20, 25, 36), RGB(44, 56, 78));
 
         monkeys_ear::EcosystemStreamFrame synth_f{}, vocal_f{};
-        const bool has_synth = eco_.read_synth_or_any(0, synth_f);
-        const bool has_vocal = eco_.read_vocal(0, vocal_f);
+        const bool has_synth = eco_.read_synth_or_any(eco_ch, synth_f);
+        const bool has_vocal = eco_.read_vocal(eco_ch, vocal_f);
 
         SelectObject(hdc, sub_font);
         SetTextColor(hdc, RGB(114, 214, 245));
-        RECT eh{38, 76, 360, 96};
-        DrawTextA(hdc, "CONNECTED ECOSYSTEM BUS (SLOT 0)", -1, &eh, DT_LEFT | DT_VCENTER | DT_SINGLELINE);
+        char eco_hdr[64]{};
+        std::snprintf(eco_hdr, sizeof(eco_hdr), "CONNECTED ECOSYSTEM BUS (CH %d)", eco_ch + 1);
+        RECT eh{38, 72, 370, 92};
+        DrawTextA(hdc, eco_hdr, -1, &eh, DT_LEFT | DT_VCENTER | DT_SINGLELINE);
+
+        char key_hdr[80]{};
+        std::snprintf(key_hdr, sizeof(key_hdr), "KEY: %s  |  %s",
+                      kRootKeyNames[static_cast<size_t>(root_idx)],
+                      monkeys_ear::kVocalBuiltinTuningNames[static_cast<size_t>(tuning_idx)]);
+        SetTextColor(hdc, RGB(246, 184, 68));
+        RECT kh{370, 72, 702, 92};
+        DrawTextA(hdc, key_hdr, -1, &kh, DT_RIGHT | DT_VCENTER | DT_SINGLELINE);
 
         SelectObject(hdc, small_font);
         char status_line[192]{};
         const float vocal_hz = (has_vocal && vocal_f.active && vocal_f.pitch_confidence > 0.05f)
-            ? 440.0f * std::pow(2.0f, (vocal_f.pitch_cents - 6900.0f) / 1200.0f) : 0.0f;
+            ? 440.0f * std::pow(2.0f, vocal_f.pitch_cents / 1200.0f) : 0.0f;
         const float synth_hz = (has_synth && synth_f.active)
-            ? 440.0f * std::pow(2.0f, (synth_f.pitch_cents - 6900.0f) / 1200.0f) : 0.0f;
+            ? 440.0f * std::pow(2.0f, synth_f.pitch_cents / 1200.0f) : 0.0f;
         std::snprintf(status_line, sizeof(status_line),
-            "VOCAL: %s  %.1f Hz (conf %.0f%%)     |     SYNTH PEER: %s  %.1f Hz  note %d",
+            "VOCAL: %s  %.1f Hz (conf %.0f%%)   |   SYNTH PEER: %s  %.1f Hz  note %d",
             (has_vocal && vocal_f.active) ? "LIVE" : "IDLE", vocal_hz, vocal_f.pitch_confidence * 100.0f,
             (has_synth && synth_f.active) ? "LINKED" : "WAIT", synth_hz, synth_f.midi_note);
         SetTextColor(hdc, RGB(210, 222, 238));
-        RECT es{38, 98, 642, 116};
+        RECT es{38, 93, 702, 111};
         DrawTextA(hdc, status_line, -1, &es, DT_LEFT | DT_VCENTER | DT_SINGLELINE);
 
-        // 6-band ERB Vocal (cyan) vs Synth Peer (amber) spectrum bars
-        static constexpr const char* kBandLabels[6] = {"140", "320", "720", "1.6k", "3.6k", "7.8k"};
-        for (int b = 0; b < 6; ++b) {
-            const int bx = 38 + b * 101;
-            RECT bar_bg{bx, 122, bx + 92, 152};
-            fill_round(hdc, bar_bg, 4, RGB(12, 15, 22), RGB(34, 42, 58));
+        // Full 24 Cochlear ERB bands (40 Hz - 9.6 kHz)
+        for (int b = 0; b < 24; ++b) {
+            const int bx = 38 + b * 27;
+            RECT bar_bg{bx, 115, bx + 23, 152};
+            fill_round(hdc, bar_bg, 3, RGB(12, 15, 22), RGB(34, 42, 58));
 
-            const float voc = std::clamp(vocal_f.spectral_occupancy[b] * 2.4f, 0.0f, 1.0f);
-            const float syn = std::clamp(synth_f.spectral_occupancy[b] * 2.4f, 0.0f, 1.0f);
+            const float voc = std::clamp(vocal_f.spectral_occupancy[static_cast<size_t>(b)] * 2.4f, 0.0f, 1.0f);
+            const float syn = std::clamp(synth_f.spectral_occupancy[static_cast<size_t>(b)] * 2.4f, 0.0f, 1.0f);
             if (syn > 0.01f) {
-                RECT sr_bar{bx + 3, 150 - static_cast<int>(syn * 24.0f), bx + 44, 150};
+                RECT sr_bar{bx + 2, 150 - static_cast<int>(syn * 32.0f), bx + 11, 150};
                 HBRUSH sb = CreateSolidBrush(RGB(238, 168, 66));
                 FillRect(hdc, &sr_bar, sb);
                 DeleteObject(sb);
             }
             if (voc > 0.01f) {
-                RECT vr_bar{bx + 48, 150 - static_cast<int>(voc * 24.0f), bx + 89, 150};
+                RECT vr_bar{bx + 12, 150 - static_cast<int>(voc * 32.0f), bx + 21, 150};
                 HBRUSH vb = CreateSolidBrush(RGB(74, 212, 240));
                 FillRect(hdc, &vr_bar, vb);
                 DeleteObject(vb);
             }
-            RECT bl{bx, 154, bx + 92, 168};
-            SetTextColor(hdc, RGB(130, 145, 168));
-            DrawTextA(hdc, kBandLabels[b], -1, &bl, DT_CENTER | DT_VCENTER | DT_SINGLELINE);
+        }
+        static constexpr int kTickIdx[7] = {0, 3, 7, 11, 15, 19, 23};
+        static constexpr const char* kTickLbl[7] = {"40Hz", "150", "400", "878", "1.8k", "3.6k", "9.6k"};
+        SetTextColor(hdc, RGB(130, 145, 168));
+        for (int t = 0; t < 7; ++t) {
+            const int bx = 34 + kTickIdx[t] * 27;
+            RECT bl{bx, 155, bx + 42, 170};
+            DrawTextA(hdc, kTickLbl[t], -1, &bl, DT_LEFT | DT_VCENTER | DT_SINGLELINE);
         }
 
-        // Section headers
         SelectObject(hdc, sub_font);
         SetTextColor(hdc, RGB(238, 182, 92));
-        RECT lh{26, 186, 326, 204};
-        DrawTextA(hdc, "PITCH & PROSODIC TRACKING", -1, &lh, DT_LEFT | DT_VCENTER | DT_SINGLELINE);
-        RECT rh{354, 186, 654, 204};
-        DrawTextA(hdc, "TIMBRE, RESIDUAL & OUTPUT STAGE", -1, &rh, DT_LEFT | DT_VCENTER | DT_SINGLELINE);
+        RECT lh{26, 184, 358, 200};
+        DrawTextA(hdc, "PITCH, TUNING & PROSODIC TRACKING", -1, &lh, DT_LEFT | DT_VCENTER | DT_SINGLELINE);
+        RECT rh{382, 184, 714, 200};
+        DrawTextA(hdc, "TIMBRE, RESIDUAL & ECOSYSTEM BUS", -1, &rh, DT_LEFT | DT_VCENTER | DT_SINGLELINE);
 
         static constexpr const char* kShortNames[kParamCount] = {
             "Enable", "Correction Strength", "Drift Retention", "Vibrato Retention",
             "Transition Speed", "Envelope Repair", "Spectral Residual", "Character",
-            "Dry / Wet Mix", "Sequential Staging", "Aperiodic Protection"
+            "Dry / Wet Mix", "Sequential Staging", "Aperiodic Protection",
+            "ROOT KEY", "SCALE / TUNING", "Articulation", "Portamento",
+            "Note Hysteresis", "Onset Protection", "ECO LINK MODE", "ECO CHANNEL"
         };
 
         for (int i = 1; i < kParamCount; ++i) {
@@ -471,35 +546,70 @@ private:
                        hovered ? RGB(30, 38, 54) : RGB(22, 27, 39),
                        hovered ? RGB(92, 198, 232) : RGB(44, 54, 74));
 
-            const double norm = controller_ ? std::clamp(controller_->getParamNormalized(static_cast<ParamID>(i)), 0.0, 1.0) : kDefaultValues[i];
+            const double norm = controller_
+                ? std::clamp(controller_->getParamNormalized(static_cast<ParamID>(i)), 0.0, 1.0)
+                : kDefaultValues[i];
+            if (boxes[i].steps > 1) {
+                SelectObject(hdc, small_font);
+                SetTextColor(hdc, RGB(145, 162, 188));
+                RECT lbl{r.left + 8, r.top + 3, r.right - 8, r.top + 18};
+                DrawTextA(hdc, kShortNames[i], -1, &lbl, DT_CENTER | DT_VCENTER | DT_SINGLELINE);
+
+                char disp[64]{};
+                if (i == 11) std::snprintf(disp, sizeof(disp), "<  %s  >", kRootKeyNames[static_cast<size_t>(root_idx)]);
+                else if (i == 12) std::snprintf(disp, sizeof(disp), "< %s >", monkeys_ear::kVocalBuiltinTuningNames[static_cast<size_t>(tuning_idx)]);
+                else if (i == 17) {
+                    static constexpr const char* m[4] = {"Off", "Publish", "Follow", "Bi-Dir"};
+                    const int mi = std::clamp(static_cast<int>(std::lround(norm * 3.0)), 0, 3);
+                    std::snprintf(disp, sizeof(disp), "<  %s  >", m[mi]);
+                } else {
+                    std::snprintf(disp, sizeof(disp), "<  Ch %d  >", eco_ch + 1);
+                }
+                SelectObject(hdc, sub_font);
+                SetTextColor(hdc, RGB(246, 184, 68));
+                RECT val_r{r.left + 6, r.top + 20, r.right - 6, r.bottom - 4};
+                DrawTextA(hdc, disp, -1, &val_r, DT_CENTER | DT_VCENTER | DT_SINGLELINE);
+                continue;
+            }
+
             const int track_w = (r.right - r.left) - 16;
             const int fill_w = static_cast<int>(std::round(norm * static_cast<double>(track_w)));
 
-            RECT track{r.left + 8, r.bottom - 11, r.right - 8, r.bottom - 5};
+            RECT track{r.left + 8, r.bottom - 10, r.right - 8, r.bottom - 5};
             HBRUSH tb = CreateSolidBrush(RGB(12, 15, 22));
             FillRect(hdc, &track, tb);
             DeleteObject(tb);
 
             if (fill_w > 0) {
                 RECT fill{track.left, track.top, track.left + fill_w, track.bottom};
-                HBRUSH fb = CreateSolidBrush(i <= 5 ? RGB(74, 212, 240) : RGB(238, 174, 72));
+                const bool prosodic = (i <= 4 || (i >= 13 && i <= 16));
+                HBRUSH fb = CreateSolidBrush(prosodic ? RGB(74, 212, 240) : RGB(238, 174, 72));
                 FillRect(hdc, &fill, fb);
                 DeleteObject(fb);
             }
 
             SelectObject(hdc, sub_font);
             SetTextColor(hdc, RGB(224, 232, 244));
-            RECT nl{r.left + 10, r.top + 3, r.right - 90, r.top + 22};
+            RECT nl{r.left + 10, r.top + 3, r.right - 92, r.top + 21};
             DrawTextA(hdc, kShortNames[i], -1, &nl, DT_LEFT | DT_VCENTER | DT_SINGLELINE);
 
             char val_txt[32]{};
             if (i == 4) std::snprintf(val_txt, sizeof(val_txt), "%.1f ms", 2.0 + (1.0 - norm) * 58.0);
+            else if (i == 13) std::snprintf(val_txt, sizeof(val_txt), "%+.0f%%", (norm * 2.0 - 1.0) * 100.0);
             else std::snprintf(val_txt, sizeof(val_txt), "%.0f%%", norm * 100.0);
             SelectObject(hdc, small_font);
             SetTextColor(hdc, RGB(170, 212, 232));
-            RECT vl{r.right - 88, r.top + 3, r.right - 10, r.top + 22};
+            RECT vl{r.right - 90, r.top + 3, r.right - 10, r.top + 21};
             DrawTextA(hdc, val_txt, -1, &vl, DT_RIGHT | DT_VCENTER | DT_SINGLELINE);
         }
+
+        RECT info_card{382, 514, 714, 580};
+        fill_round(hdc, info_card, 8, RGB(18, 23, 33), RGB(44, 56, 78));
+        SelectObject(hdc, small_font);
+        SetTextColor(hdc, RGB(154, 172, 198));
+        RECT ic_txt{394, 522, 704, 572};
+        DrawTextA(hdc, "Click < / > halves on Key, Scale, Eco Mode/Ch\nDrag sliders (Shift = fine) | R-Click = reset",
+                  -1, &ic_txt, DT_LEFT | DT_VCENTER);
 
         BitBlt(screen, 0, 0, kWidth, kHeight, hdc, 0, 0, SRCCOPY);
         SelectObject(hdc, old_font);
@@ -536,9 +646,9 @@ private:
                     const double next = std::clamp(self->drag_start_val_ - static_cast<double>(y - self->drag_start_y_) * sens, 0.0, 1.0);
                     self->push_param(self->drag_id_, next);
                 } else {
-                    const int h = self->hit_test(x, y);
-                    if (h != self->hover_id_) {
-                        self->hover_id_ = h;
+                    const HitResult h = self->hit_test(x, y);
+                    if (h.param_id != self->hover_id_) {
+                        self->hover_id_ = h.param_id;
                         InvalidateRect(hwnd, nullptr, FALSE);
                     }
                 }
@@ -547,18 +657,28 @@ private:
             case WM_LBUTTONDOWN: {
                 const int x = static_cast<int>(static_cast<short>(LOWORD(lParam)));
                 const int y = static_cast<int>(static_cast<short>(HIWORD(lParam)));
-                const int hit = self->hit_test(x, y);
-                if (hit == 0 && self->controller_) {
+                const HitResult hit = self->hit_test(x, y);
+                if (hit.param_id == 0 && self->controller_) {
                     self->begin_param(0);
                     const double cur = self->controller_->getParamNormalized(0);
                     self->push_param(0, cur >= 0.5 ? 0.0 : 1.0);
                     self->end_param(0);
-                } else if (hit >= 1 && self->controller_) {
+                } else if (hit.param_id >= 1 && hit.steps > 1 && self->controller_) {
+                    const int cur = std::clamp(
+                        static_cast<int>(std::lround(self->controller_->getParamNormalized(static_cast<ParamID>(hit.param_id)) * hit.steps)),
+                        0, hit.steps);
+                    const int next = (hit.step_dir < 0)
+                        ? ((cur + hit.steps) % (hit.steps + 1))
+                        : ((cur + 1) % (hit.steps + 1));
+                    self->begin_param(hit.param_id);
+                    self->push_param(hit.param_id, static_cast<double>(next) / static_cast<double>(hit.steps));
+                    self->end_param(hit.param_id);
+                } else if (hit.param_id >= 1 && self->controller_) {
                     SetCapture(hwnd);
-                    self->drag_id_ = hit;
+                    self->drag_id_ = hit.param_id;
                     self->drag_start_y_ = y;
-                    self->drag_start_val_ = self->controller_->getParamNormalized(static_cast<ParamID>(hit));
-                    self->begin_param(hit);
+                    self->drag_start_val_ = self->controller_->getParamNormalized(static_cast<ParamID>(hit.param_id));
+                    self->begin_param(hit.param_id);
                 }
                 return 0;
             }
@@ -576,11 +696,11 @@ private:
             case WM_LBUTTONDBLCLK: {
                 const int x = static_cast<int>(static_cast<short>(LOWORD(lParam)));
                 const int y = static_cast<int>(static_cast<short>(HIWORD(lParam)));
-                const int hit = self->hit_test(x, y);
-                if (hit >= 0 && hit < kParamCount) {
-                    self->begin_param(hit);
-                    self->push_param(hit, kDefaultValues[hit]);
-                    self->end_param(hit);
+                const HitResult hit = self->hit_test(x, y);
+                if (hit.param_id >= 0 && hit.param_id < kParamCount) {
+                    self->begin_param(hit.param_id);
+                    self->push_param(hit.param_id, kDefaultValues[hit.param_id]);
+                    self->end_param(hit.param_id);
                 }
                 return 0;
             }
@@ -617,8 +737,68 @@ public:
     VocalController():ref_(1),state_(std::make_shared<VocalState>()){}
     tresult SMTG_STDCALL queryInterface(const TUID iid,void** obj) override{if(!obj)return kInvalidArgument;if(!std::memcmp(iid,FUnknown_iid,sizeof(TUID))||!std::memcmp(iid,IPluginBase_iid,sizeof(TUID))||!std::memcmp(iid,IEditController_iid,sizeof(TUID))){*obj=static_cast<IEditController*>(this);addRef();return kResultOk;}*obj=nullptr;return kResultFalse;} uint32 SMTG_STDCALL addRef() override{return ++ref_;}uint32 SMTG_STDCALL release() override{uint32 n=--ref_;if(!n)delete this;return n;}tresult SMTG_STDCALL initialize(FUnknown*) override{return kResultOk;}tresult SMTG_STDCALL terminate() override{return kResultOk;}
     tresult SMTG_STDCALL setComponentState(IBStream* s) override{return read_state(s,state_);}tresult SMTG_STDCALL setState(IBStream* s) override{return read_state(s,state_);}tresult SMTG_STDCALL getState(IBStream* s) override{return write_state(s,state_);}int32 SMTG_STDCALL getParameterCount() override{return kParamCount;}
-    tresult SMTG_STDCALL getParameterInfo(int32 i,ParameterInfo& info) override{static constexpr const char* names[kParamCount]={"VOCAL: Enable","VOCAL: Correction Strength","VOCAL: Drift Retention","VOCAL: Vibrato Retention","VOCAL: Transition","VOCAL: Envelope Repair","VOCAL: Spectral Residual","VOCAL: Character","VOCAL: Mix","VOCAL: Soft Sequential Staging","VOCAL: Aperiodic Protection"};if(i<0||i>=kParamCount)return kInvalidArgument;info.id=static_cast<ParamID>(i);info.stepCount=i==0?1:0;info.unitId=0;info.flags=kCanAutomate|(i==0?kIsBypass:0);info.defaultNormalizedValue=kDefaultValues[i];copy16(info.title,names[i]);copy16(info.shortTitle,names[i]);copy16(info.units,i==4?"":"%");return kResultOk;}
-    tresult SMTG_STDCALL getParamStringByValue(ParamID id,ParamValue value,char16 string[128]) override{char text[32];if(id==0)std::snprintf(text,sizeof(text),"%s",value>=.5?"On":"Bypass");else if(id==4)std::snprintf(text,sizeof(text),"%.1f ms",2.0+(1.0-value)*58.0);else std::snprintf(text,sizeof(text),"%.1f %%",value*100.0);copy16(string,text);return kResultOk;}tresult SMTG_STDCALL getParamValueByString(ParamID,const char16*,ParamValue& value) override{value=.5;return kResultOk;}ParamValue SMTG_STDCALL normalizedParamToPlain(ParamID,ParamValue v) override{return v;}ParamValue SMTG_STDCALL plainParamToNormalized(ParamID,ParamValue v) override{return v;}ParamValue SMTG_STDCALL getParamNormalized(ParamID id) override{return id<kParamCount?state_->values[id].load():0.0;}tresult SMTG_STDCALL setParamNormalized(ParamID id,ParamValue value) override{if(id>=kParamCount||!normalized_value_is_finite(value))return kInvalidArgument;state_->values[id].store(static_cast<float>(std::clamp(value,0.0,1.0)));state_->dirty[id].store(true);return kResultOk;}tresult SMTG_STDCALL setComponentHandler(IComponentHandler* handler) override { handler_ = handler; return kResultOk; }
+    tresult SMTG_STDCALL getParameterInfo(int32 i,ParameterInfo& info) override{
+        static constexpr const char* names[kParamCount]={
+            "VOCAL: Enable","VOCAL: Correction Strength","VOCAL: Drift Retention",
+            "VOCAL: Vibrato Retention","VOCAL: Transition","VOCAL: Envelope Repair",
+            "VOCAL: Spectral Residual","VOCAL: Character","VOCAL: Mix",
+            "VOCAL: Soft Sequential Staging","VOCAL: Aperiodic Protection",
+            "VOCAL: Root Key","VOCAL: Scale / Tuning","VOCAL: Articulation",
+            "VOCAL: Portamento","VOCAL: Note Hysteresis","VOCAL: Onset Protection",
+            "VOCAL: Eco Link Mode","VOCAL: Eco Channel"
+        };
+        if(i<0||i>=kParamCount)return kInvalidArgument;
+        info.id=static_cast<ParamID>(i);
+        info.stepCount = (i==0)?1 : (i==11)?11 : (i==12)?29 : (i==17)?3 : (i==18)?7 : 0;
+        info.unitId=0;
+        info.flags=kCanAutomate|(i==0?kIsBypass:0)|(info.stepCount>1?kIsList:0);
+        info.defaultNormalizedValue=kDefaultValues[i];
+        copy16(info.title,names[i]);copy16(info.shortTitle,names[i]);
+        copy16(info.units,(i==4)?"ms":(i==11||i==12||i==17||i==18)?"":"%");
+        return kResultOk;
+    }
+    tresult SMTG_STDCALL getParamStringByValue(ParamID id,ParamValue value,char16 string[128]) override{
+        if(id>=kParamCount||!string||!normalized_value_is_finite(value))return kInvalidArgument;
+        const double v=std::clamp(value,0.0,1.0);
+        char text[64]{};
+        if(id==0)std::snprintf(text,sizeof(text),"%s",v>=.5?"On":"Bypass");
+        else if(id==4)std::snprintf(text,sizeof(text),"%.1f ms",2.0+(1.0-v)*58.0);
+        else if(id==11){
+            const int r=std::clamp(static_cast<int>(std::lround(v*11.0)),0,11);
+            std::snprintf(text,sizeof(text),"%s",kRootKeyNames[static_cast<size_t>(r)]);
+        } else if(id==12){
+            const int s=std::clamp(static_cast<int>(std::lround(v*29.0)),0,29);
+            std::snprintf(text,sizeof(text),"%s",monkeys_ear::kVocalBuiltinTuningNames[static_cast<size_t>(s)]);
+        } else if(id==13){
+            std::snprintf(text,sizeof(text),"%+.1f %%",(v*2.0-1.0)*100.0);
+        } else if(id==17){
+            static constexpr const char* m[4]={"Off","Publish","Follow","Bi-Dir"};
+            std::snprintf(text,sizeof(text),"%s",m[std::clamp(static_cast<int>(std::lround(v*3.0)),0,3)]);
+        } else if(id==18){
+            std::snprintf(text,sizeof(text),"Ch %d",1+std::clamp(static_cast<int>(std::lround(v*7.0)),0,7));
+        } else std::snprintf(text,sizeof(text),"%.1f %%",v*100.0);
+        copy16(string,text);
+        return kResultOk;
+    }
+    tresult SMTG_STDCALL getParamValueByString(ParamID id,const char16* raw,ParamValue& value) override{
+        if(id>=kParamCount||!raw)return kInvalidArgument;
+        std::string in;
+        for(int i=0;i<127&&raw[i];++i){if(raw[i]>127)return kResultFalse;in+=static_cast<char>(std::tolower(static_cast<unsigned char>(raw[i])));}
+        if(id==11){
+            for(size_t i=0;i<kRootKeyNames.size();++i){
+                std::string k(kRootKeyNames[i]);
+                for(char& ch:k)ch=static_cast<char>(std::tolower(static_cast<unsigned char>(ch)));
+                if(in==k){value=static_cast<double>(i)/11.0;return kResultOk;}
+            }
+        } else if(id==12){
+            for(size_t i=0;i<monkeys_ear::kVocalBuiltinTuningNames.size();++i){
+                std::string k(monkeys_ear::kVocalBuiltinTuningNames[i]);
+                for(char& ch:k)ch=static_cast<char>(std::tolower(static_cast<unsigned char>(ch)));
+                if(in==k){value=static_cast<double>(i)/29.0;return kResultOk;}
+            }
+        }
+        value=.5;return kResultOk;
+    }ParamValue SMTG_STDCALL normalizedParamToPlain(ParamID,ParamValue v) override{return v;}ParamValue SMTG_STDCALL plainParamToNormalized(ParamID,ParamValue v) override{return v;}ParamValue SMTG_STDCALL getParamNormalized(ParamID id) override{return id<kParamCount?state_->values[id].load():0.0;}tresult SMTG_STDCALL setParamNormalized(ParamID id,ParamValue value) override{if(id>=kParamCount||!normalized_value_is_finite(value))return kInvalidArgument;state_->values[id].store(static_cast<float>(std::clamp(value,0.0,1.0)));state_->dirty[id].store(true);return kResultOk;}tresult SMTG_STDCALL setComponentHandler(IComponentHandler* handler) override { handler_ = handler; return kResultOk; }
     IPlugView* SMTG_STDCALL createView(const char8* name) override {
 #if defined(_WIN32)
         if (!name || std::strcmp(name, "editor") == 0) {

@@ -2,6 +2,7 @@
 
 #include "monkeys_ear/ecosystem_bus.h"
 #include "monkeys_ear/onion_skin_eq.h"
+#include "monkeys_ear/tonal.h"
 #include "monkeys_ear/types.h"
 #include <array>
 #include <cstdint>
@@ -29,6 +30,7 @@ struct OnionEqControls {
     float sensitivity = 0.55f;
     float low_protect = 0.70f;
     float transient_protect = 0.60f;
+    float harmonic_protect = 0.0f;
     float tilt_db = 0.0f;
     float q_focus = 1.85f;
     float air_db = 0.0f;
@@ -85,6 +87,8 @@ private:
     EcosystemBusClient eco_bus_{};
     uint64_t instance_tag_ = 0;
     uint64_t pub_seq_ = 0;
+    int last_eco_slot_ = 0;
+    ExternalSubharmonic self_pitch_tracker_{};
     std::array<float, OnionSkinEQ::kNumBands> last_self_occ_{};
 };
 

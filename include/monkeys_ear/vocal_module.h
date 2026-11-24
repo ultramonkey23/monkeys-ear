@@ -27,10 +27,12 @@ public:
 
     void set_controls(const VocalExpressionControls& controls) noexcept;
     const VocalExpressionControls& controls() const noexcept { return controls_; }
-    void set_eco_slot(int slot) noexcept { eco_slot_ = clamp(slot, 0, 7); }
+    void set_eco_slot(int slot) noexcept;
     int eco_slot() const noexcept { return eco_slot_; }
-    void set_eco_link_enabled(bool enabled) noexcept { eco_link_enabled_ = enabled; }
-    bool eco_link_enabled() const noexcept { return eco_link_enabled_; }
+    void set_eco_mode(int mode) noexcept;
+    int eco_mode() const noexcept { return eco_mode_; }
+    void set_eco_link_enabled(bool enabled) noexcept { set_eco_mode(enabled ? 3 : 0); }
+    bool eco_link_enabled() const noexcept { return eco_mode_ != 0; }
     bool is_eco_peer_linked() const noexcept { return eco_peer_linked_; }
     float active_tracked_hz() const noexcept { return last_tracked_hz_; }
     float active_confidence() const noexcept { return last_tracked_conf_; }
@@ -67,6 +69,7 @@ private:
     EcosystemBusClient eco_bus_{};
     OnionSkinEQ eco_analyzer_{};
     int eco_slot_ = 0;
+    int eco_mode_ = 3; // 0=Off, 1=Publish, 2=Follow, 3=Bidirectional
     bool eco_link_enabled_ = true;
     bool eco_peer_linked_ = false;
     uint64_t last_eco_synth_frame_id_ = 0;

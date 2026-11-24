@@ -18,6 +18,7 @@ void OnionEqModule::prepare(float sample_rate, uint32_t max_block_size) noexcept
     max_block_size_ = std::max<uint32_t>(1u, max_block_size);
     eq_l_.set_sample_rate(sample_rate_);
     eq_r_.set_sample_rate(sample_rate_);
+    self_pitch_tracker_.set_sample_rate(sample_rate_);
     eco_bus_.ensure_connected();
     set_controls(controls_);
 }
@@ -25,6 +26,8 @@ void OnionEqModule::prepare(float sample_rate, uint32_t max_block_size) noexcept
 void OnionEqModule::reset() noexcept {
     eq_l_.reset();
     eq_r_.reset();
+    self_pitch_tracker_.reset();
+    eco_bus_.publish_inactive(last_eco_slot_, 2);
     merged_metrics_ = OnionSkinMetrics{};
     health_.in_peak = 0.0f;
     health_.out_peak = 0.0f;
@@ -35,7 +38,14 @@ void OnionEqModule::reset() noexcept {
 }
 
 void OnionEqModule::set_controls(const OnionEqControls& controls) noexcept {
+    const int prev_slot = std::clamp(controls_.eco_slot, 0, static_cast<int>(EcosystemBusClient::kSlotCount) - 1);
     controls_ = controls;
+    const int next_slot = std::clamp(controls_.eco_slot, 0, static_cast<int>(EcosystemBusClient::kSlotCount) - 1);
+    if (prev_slot != next_slot || controls_.bypass ||
+        (controls_.eco_mode != EcoLinkMode::Publish && controls_.eco_mode != EcoLinkMode::Bidirectional)) {
+        eco_bus_.publish_inactive(prev_slot, 2);
+    }
+    last_eco_slot_ = next_slot;
     OnionSkinControls inner{};
     inner.enabled = !controls_.bypass && controls_.dynamic_enabled;
     inner.intent = controls_.intent;
@@ -43,6 +53,7 @@ void OnionEqModule::set_controls(const OnionEqControls& controls) noexcept {
     inner.sensitivity = clamp(sanitize(controls_.sensitivity), 0.0f, 1.0f);
     inner.low_protect = clamp(sanitize(controls_.low_protect), 0.0f, 1.0f);
     inner.transient_protect = clamp(sanitize(controls_.transient_protect), 0.0f, 1.0f);
+    inner.harmonic_protect = clamp(sanitize(controls_.harmonic_protect), 0.0f, 1.0f);
     inner.tilt_db = clamp(sanitize(controls_.tilt_db), -6.0f, 6.0f);
     inner.q_focus = clamp(sanitize(controls_.q_focus), 0.85f, 4.50f);
     inner.air_db = clamp(sanitize(controls_.air_db), -6.0f, 6.0f);
@@ -94,16 +105,18 @@ void OnionEqModule::process_block(const float* in_l,
         }
         peer_weight = 1.0f;
     } else if (allow_eco && (controls_.eco_mode == EcoLinkMode::Follow || controls_.eco_mode == EcoLinkMode::Bidirectional)) {
-        EcosystemStreamFrame sf{}, vf{};
+        EcosystemStreamFrame sf{}, vf{}, af{};
         const uint64_t own_prefix = (instance_tag_ << 32);
         const bool has_s = eco_bus_.read_synth(eco_slot, sf) && sf.active && ((sf.frame_id & 0xFFFFFFFF00000000ULL) != own_prefix);
         const bool has_v = eco_bus_.read_vocal(eco_slot, vf) && vf.active && ((vf.frame_id & 0xFFFFFFFF00000000ULL) != own_prefix);
-        if (has_s || has_v) {
+        const bool has_a = eco_bus_.read_aux_eq(eco_slot, af) && af.active && ((af.frame_id & 0xFFFFFFFF00000000ULL) != own_prefix);
+        if (has_s || has_v || has_a) {
             eco_active = true;
             for (size_t b = 0; b < OnionSkinEQ::kNumBands; ++b) {
                 const float s_val = has_s ? clamp(sf.spectral_occupancy[b], 0.0f, 1.0f) : 0.0f;
                 const float v_val = has_v ? clamp(vf.spectral_occupancy[b], 0.0f, 1.0f) : 0.0f;
-                peer_occ[b] = std::max(s_val, v_val);
+                const float a_val = has_a ? clamp(af.spectral_occupancy[b], 0.0f, 1.0f) : 0.0f;
+                peer_occ[b] = std::max({s_val, v_val, a_val});
             }
             peer_weight = clamp(sanitize(controls_.peer_mask_weight), 0.0f, 1.0f);
         }
@@ -123,6 +136,17 @@ void OnionEqModule::process_block(const float* in_l,
     for (uint32_t i = 0; i < n; ++i) {
         const float l_in = in_l ? sanitize(in_l[i]) : 0.0f;
         const float r_in = in_r ? sanitize(in_r[i]) : l_in;
+        const float mono_in = 0.5f * (l_in + r_in);
+        if (controls_.harmonic_protect > 1e-4f && !controls_.bypass) {
+            (void)self_pitch_tracker_.process(mono_in);
+            const float f0 = self_pitch_tracker_.tracked_frequency_hz();
+            const float conf = self_pitch_tracker_.confidence();
+            eq_l_.set_self_pitch(f0, conf);
+            eq_r_.set_self_pitch(f0, conf);
+        } else {
+            eq_l_.set_self_pitch(0.0f, 0.0f);
+            eq_r_.set_self_pitch(0.0f, 0.0f);
+        }
         const float abs_in = std::max(std::abs(l_in), std::abs(r_in));
         if (abs_in > in_pk) in_pk = abs_in;
 
@@ -212,19 +236,18 @@ void OnionEqModule::process_block(const float* in_l,
     if (!controls_.bypass && n > 0 && (controls_.eco_mode == EcoLinkMode::Publish || controls_.eco_mode == EcoLinkMode::Bidirectional)) {
         EcosystemStreamFrame pub{};
         pub.frame_id = (instance_tag_ << 32) | (++pub_seq_);
-        pub.role = 3; // Onion EQ standalone publisher
+        pub.role = 3; // Onion EQ dedicated aux_eq publisher (never collides with synth or vocal)
         pub.active = true;
+        const float f0 = self_pitch_tracker_.tracked_frequency_hz();
+        const float conf = self_pitch_tracker_.confidence();
+        pub.pitch_cents = (f0 > 20.0f) ? (1200.0f * std::log2(f0 / 440.0f)) : 0.0f;
+        pub.pitch_confidence = conf;
         pub.loudness = clamp(std::sqrt(rms_sq / static_cast<float>(n)), 0.0f, 1.0f);
         pub.note_gate = pub.loudness > 0.005f ? 1.0f : 0.0f;
         pub.spectral_occupancy = merged_metrics_.self_occupancy;
-        // Publish on synth slot only if idle, or vocal slot for ecosystem visibility without overriding active synth lead when unnecessary:
-        EcosystemStreamFrame existing_synth{};
-        const bool synth_busy = eco_bus_.read_synth(eco_slot, existing_synth) && existing_synth.active && existing_synth.role == 1;
-        if (!synth_busy) {
-            eco_bus_.publish_synth(eco_slot, pub);
-        } else {
-            eco_bus_.publish_vocal(eco_slot, pub);
-        }
+        eco_bus_.publish_aux_eq(eco_slot, pub);
+    } else if (controls_.bypass) {
+        eco_bus_.publish_inactive(eco_slot, 2);
     }
 }
 

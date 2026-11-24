@@ -20,6 +20,7 @@
 #include "monkeys_ear/tonal.h"
 #include "monkeys_ear/onion_skin_eq.h"
 #include "monkeys_ear/ecosystem_bus.h"
+#include "monkeys_ear/pattern_sequencer.h"
 
 namespace monkeys_ear {
 
@@ -60,8 +61,22 @@ public:
                                          float pressure = 0.6f) const;
     GrowthLineage grow_current_preset(std::uint32_t seed, unsigned steps = 512,
                                      float pressure = 0.6f);
+    // Explicit evolutionary exploration workflow (keeper remains intact during A/B & audition)
+    bool audition_growth_candidate(std::uint32_t seed, unsigned steps = 512,
+                                   float pressure = 0.6f);
+    bool set_growth_compare_keeper(bool play_keeper);
+    GrowthLineage commit_auditioned_growth();
+    GrowthLineage branch_growth_descendant(std::uint32_t seed, unsigned steps = 512,
+                                           float pressure = 0.6f);
+    void clear_growth_lineage();
+    bool is_auditioning_growth() const { return auditioning_growth_; }
+    bool is_comparing_keeper() const { return compare_playing_keeper_; }
+    const PresetData& get_keeper_preset() const { return keeper_preset_; }
+    GrowthLineage get_active_lineage() const;
     bool is_growth_resonator_active() const { return growth_resonator_.enabled(); }
+    void apply_growth_lineage_rt(const GrowthLineage& lineage, bool enable) noexcept;
     const PresetData& get_current_preset() const;
+    int get_sequencer_step() const { return pattern_sequencer_.current_step(); }
 
     void set_master_gain_db(float db);
     void set_waveform(Waveform wf);
@@ -133,6 +148,12 @@ private:
     float performance_fracture_smoothed_=0.0f;
     OnionSkinEQ onion_eq_;
     EcosystemBusClient eco_bus_;
+    EnginePatternSequencer pattern_sequencer_{};
+    PresetData keeper_preset_{};
+    PresetData audition_preset_{};
+    bool auditioning_growth_ = false;
+    bool compare_playing_keeper_ = false;
+    int last_eco_slot_ = 0;
     uint64_t eco_frame_counter_ = 0;
     bool eco_peer_active_ = false;
     float eco_peer_pitch_cents_ = 0.0f;
@@ -150,6 +171,11 @@ private:
 
     void apply_macros();
     void update_lfo_clock();
+    void update_pattern_sequencer();
+    void apply_preset_direct(const PresetData& preset);
+    void render_audio_span(const float* input_l, const float* input_r,
+                           float* output_l, float* output_r,
+                           size_t num_samples, float& block_energy_sq);
 };
 
 } // namespace monkeys_ear

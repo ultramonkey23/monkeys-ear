@@ -36,7 +36,9 @@ void MonkeysEarEngine::init(float sample_rate, size_t max_block_size) {
     else
         growth_resonator_.disable();
     onion_eq_.set_sample_rate(sample_rate_);
+    pattern_sequencer_.prepare(sample_rate_);
     eco_bus_.ensure_connected();
+    keeper_preset_ = preset_manager_.get_current();
     cutoff_motion_.set_sample_rate(sample_rate_, 7.0f);
     resonance_motion_.set_sample_rate(sample_rate_, 10.0f);
     fm_motion_.set_sample_rate(sample_rate_, 5.0f);
@@ -68,6 +70,8 @@ void MonkeysEarEngine::reset() {
     sound_space_.reset();
     growth_resonator_.reset();
     onion_eq_.reset();
+    pattern_sequencer_.reset(*this);
+    eco_bus_.publish_inactive(last_eco_slot_, 0);
     eco_peer_active_ = false;
     eco_peer_pitch_cents_ = 0.0f;
     eco_peer_confidence_ = 0.0f;
@@ -111,6 +115,24 @@ void MonkeysEarEngine::update_lfo_clock() {
     lfo1_.set_rate_hz(clamp(rate,0.05f,30.0f));
 }
 
+void MonkeysEarEngine::update_pattern_sequencer() {
+    const auto& p = preset_manager_.get_current();
+    const float tempo = (p.lfo_follow_host_tempo && host_tempo_valid_)
+        ? host_tempo_bpm_ : p.tempo_bpm;
+    PatternSequencerSettings seq{};
+    seq.enabled = p.pattern_enabled;
+    seq.pattern_index = p.pattern_index;
+    seq.loop_steps = p.pattern_steps;
+    seq.division = p.pattern_division;
+    seq.quantize_strength = p.pattern_quantize;
+    seq.swing = p.lfo_groove;
+    seq.gate = p.pattern_gate;
+    seq.transpose_semi = p.pattern_transpose;
+    seq.bpm = static_cast<double>(tempo);
+    seq.sample_rate = static_cast<double>(sample_rate_);
+    pattern_sequencer_.configure(*this, seq);
+}
+
 void MonkeysEarEngine::set_host_transport(double tempo, bool tempo_valid,
                                            double project_quarters,
                                            bool quarter_position_valid, bool playing) {
@@ -120,6 +142,7 @@ void MonkeysEarEngine::set_host_transport(double tempo, bool tempo_valid,
         host_tempo_valid_=valid;
         host_tempo_bpm_=bpm;
         update_lfo_clock();
+        update_pattern_sequencer();
     }
     const auto& p=preset_manager_.get_current();
     if(playing&&p.lfo_tempo_sync&&p.lfo_follow_host_tempo
@@ -127,6 +150,9 @@ void MonkeysEarEngine::set_host_transport(double tempo, bool tempo_valid,
         const double beats=kBeatDivisions[std::clamp(p.lfo_subdivision,0,11)];
         const double phase=std::fmod(project_quarters/beats,1.0);
         lfo1_.reset_phase(static_cast<float>(phase));
+    }
+    if (p.pattern_enabled && p.lfo_follow_host_tempo) {
+        pattern_sequencer_.sync_to_host_quarters(project_quarters, quarter_position_valid, playing);
     }
 }
 
@@ -234,6 +260,7 @@ void MonkeysEarEngine::apply_macros() {
     eq_.set_gain_compensation(p.eq_gain_compensation);
     sound_space_.set_controls(p.sound_space);
     sync_oscillator_morph_and_generator();
+    update_pattern_sequencer();
 }
 
 void MonkeysEarEngine::set_macro(MacroId id, float value) {
@@ -245,7 +272,7 @@ float MonkeysEarEngine::get_macro(MacroId id) const {
     return preset_manager_.get_macro(id);
 }
 
-void MonkeysEarEngine::load_preset(const PresetData& preset) {
+void MonkeysEarEngine::apply_preset_direct(const PresetData& preset) {
     preset_manager_.load_preset(preset);
     // Frozen graph is recalled through the same native preset load pathway.
     // Legacy and invalid snapshots retain the exact disabled signal path.
@@ -255,6 +282,14 @@ void MonkeysEarEngine::load_preset(const PresetData& preset) {
     else
         growth_resonator_.disable();
     apply_macros();
+}
+
+void MonkeysEarEngine::load_preset(const PresetData& preset) {
+    keeper_preset_ = preset;
+    audition_preset_ = preset;
+    auditioning_growth_ = false;
+    compare_playing_keeper_ = false;
+    apply_preset_direct(preset);
 }
 
 GrownPreset MonkeysEarEngine::preview_growth_candidate(std::uint32_t seed,
@@ -274,6 +309,71 @@ GrowthLineage MonkeysEarEngine::grow_current_preset(std::uint32_t seed,
     const auto grown = preview_growth_candidate(seed, steps, pressure);
     load_preset(grown.preset);
     return grown.lineage;
+}
+
+bool MonkeysEarEngine::audition_growth_candidate(std::uint32_t seed, unsigned steps, float pressure) {
+    if (steps == 0u || !finite32(pressure) || pressure <= 0.0f) return false;
+    if (!auditioning_growth_) {
+        keeper_preset_ = preset_manager_.get_current();
+    }
+    const auto grown = PresetGrowth::develop(keeper_preset_, seed, steps, pressure);
+    audition_preset_ = grown.preset;
+    auditioning_growth_ = true;
+    compare_playing_keeper_ = false;
+    apply_preset_direct(audition_preset_);
+    return grown.lineage.branches > 0 || !audition_preset_.growth_snapshot.empty();
+}
+
+bool MonkeysEarEngine::set_growth_compare_keeper(bool play_keeper) {
+    if (!auditioning_growth_) return false;
+    compare_playing_keeper_ = play_keeper;
+    apply_preset_direct(compare_playing_keeper_ ? keeper_preset_ : audition_preset_);
+    return true;
+}
+
+GrowthLineage MonkeysEarEngine::commit_auditioned_growth() {
+    if (auditioning_growth_) {
+        keeper_preset_ = audition_preset_;
+        auditioning_growth_ = false;
+        compare_playing_keeper_ = false;
+        apply_preset_direct(keeper_preset_);
+    } else {
+        keeper_preset_ = preset_manager_.get_current();
+    }
+    return get_active_lineage();
+}
+
+GrowthLineage MonkeysEarEngine::branch_growth_descendant(std::uint32_t seed, unsigned steps, float pressure) {
+    if (auditioning_growth_ && !compare_playing_keeper_) {
+        commit_auditioned_growth();
+    } else if (auditioning_growth_ && compare_playing_keeper_) {
+        auditioning_growth_ = false;
+        compare_playing_keeper_ = false;
+        apply_preset_direct(keeper_preset_);
+    }
+    return grow_current_preset(seed, steps, pressure);
+}
+
+void MonkeysEarEngine::clear_growth_lineage() {
+    auditioning_growth_ = false;
+    compare_playing_keeper_ = false;
+    keeper_preset_ = preset_manager_.get_current();
+    keeper_preset_.growth_snapshot.clear();
+    apply_preset_direct(keeper_preset_);
+}
+
+GrowthLineage MonkeysEarEngine::get_active_lineage() const {
+    GrowthLineage g{};
+    GrowthSnapshotCodec::decode(preset_manager_.get_current().growth_snapshot, g);
+    return g;
+}
+
+void MonkeysEarEngine::apply_growth_lineage_rt(const GrowthLineage& lineage, bool enable) noexcept {
+    if (enable && lineage.node_count > 0) {
+        growth_resonator_.compile(lineage);
+    } else {
+        growth_resonator_.disable();
+    }
 }
 
 const PresetData& MonkeysEarEngine::get_current_preset() const {
@@ -364,11 +464,17 @@ void MonkeysEarEngine::sync_oscillator_morph_and_generator() {
     osc_ctrl.sensitivity = p.onion_sensitivity;
     osc_ctrl.low_protect = p.onion_low_protect;
     osc_ctrl.transient_protect = p.onion_transient_protect;
+    osc_ctrl.harmonic_protect = p.onion_harmonic_protect;
     osc_ctrl.tilt_db = p.onion_tilt_db;
     osc_ctrl.q_focus = p.onion_q_focus;
     osc_ctrl.air_db = p.onion_air_db;
     osc_ctrl.manual_db = p.onion_band_db;
     onion_eq_.set_controls(osc_ctrl);
+    const int safe_slot = clamp(p.eco_slot, 0, static_cast<int>(EcosystemBusClient::kSlotCount) - 1);
+    if (safe_slot != last_eco_slot_ || (p.eco_mode != 1 && p.eco_mode != 3)) {
+        eco_bus_.publish_inactive(last_eco_slot_, 0);
+    }
+    last_eco_slot_ = safe_slot;
 }
 
 void MonkeysEarEngine::set_parameter_normalized(int id, float v) {
@@ -435,6 +541,37 @@ void MonkeysEarEngine::set_parameter_normalized(int id, float v) {
         else p.performance_fracture=v;
         // The audio callback smooths both axes; no heavyweight DSP reset.
         return;
+    }
+    if (id >= 245 && id <= 258) {
+        switch (id) {
+            case 245: {
+                const int root_idx = std::clamp(static_cast<int>(std::lround(v * 11.0f)), 0, 11);
+                p.vocal_expression.target.tuning.root_cents = static_cast<float>((root_idx + 3) % 12) * 100.0f;
+                apply_macros();
+                return;
+            }
+            case 246: {
+                const int tidx = std::clamp(static_cast<int>(std::lround(v * 29.0f)), 0, 29);
+                const float keep_root = p.vocal_expression.target.tuning.root_cents;
+                p.vocal_expression.target.tuning.set_builtin(static_cast<VocalBuiltinTuning>(tidx));
+                p.vocal_expression.target.tuning.root_cents = keep_root;
+                apply_macros();
+                return;
+            }
+            case 247: p.vocal_expression.target.articulation = v * 2.0f - 1.0f; apply_macros(); return;
+            case 248: p.vocal_expression.target.portamento = v; apply_macros(); return;
+            case 249: p.vocal_expression.target.target_hysteresis = v; apply_macros(); return;
+            case 250: p.vocal_expression.target.onset_protection = v; apply_macros(); return;
+            case 251: p.onion_harmonic_protect = v; sync_oscillator_morph_and_generator(); return;
+            case 252: p.pattern_enabled = v >= 0.5f; update_pattern_sequencer(); return;
+            case 253: p.pattern_index = std::clamp(static_cast<int>(std::lround(v * 7.0f)), 0, 7); update_pattern_sequencer(); return;
+            case 254: p.pattern_steps = 1 + std::clamp(static_cast<int>(std::lround(v * 31.0f)), 0, 31); update_pattern_sequencer(); return;
+            case 255: p.pattern_division = std::clamp(static_cast<int>(std::lround(v * 5.0f)), 0, 5); update_pattern_sequencer(); return;
+            case 256: p.pattern_quantize = v; update_pattern_sequencer(); return;
+            case 257: p.pattern_gate = 0.10f + v * 0.90f; update_pattern_sequencer(); return;
+            case 258: p.pattern_transpose = std::clamp(static_cast<int>(std::lround((v - 0.5f) * 24.0f)), -12, 12); update_pattern_sequencer(); return;
+            default: return;
+        }
     }
     if(id>=178&&id<=244){
         switch(id){
@@ -588,18 +725,22 @@ void MonkeysEarEngine::process_block(
     latency_meter_.start_block();
 
     const PresetData& p = preset_manager_.get_current();
-    float env_amt = p.filter_env_amount;
-    const float gesture_coeff=1.0f-std::exp(-1.0f/(sample_rate_*.012f));
-    const float drift_target=field_unit(p.performance_drift);
-    const float fracture_target=field_unit(p.performance_fracture);
-
     if (p.eco_mode == 2 || p.eco_mode == 3) {
-        EcosystemStreamFrame peer{};
-        if (eco_bus_.read_vocal(p.eco_slot, peer)) {
+        EcosystemStreamFrame vpeer{}, apeer{};
+        const bool has_v = eco_bus_.read_vocal(p.eco_slot, vpeer) && vpeer.active;
+        const bool has_a = eco_bus_.read_aux_eq(p.eco_slot, apeer) && apeer.active;
+        if (has_v || has_a) {
             eco_peer_active_ = true;
-            eco_peer_pitch_cents_ = peer.pitch_cents;
-            eco_peer_confidence_ = peer.pitch_confidence;
-            onion_eq_.set_peer_occupancy(peer.spectral_occupancy, p.eco_peer_weight);
+            const EcosystemStreamFrame& pitch_src = has_v ? vpeer : apeer;
+            eco_peer_pitch_cents_ = pitch_src.pitch_cents;
+            eco_peer_confidence_ = pitch_src.pitch_confidence;
+            std::array<float, OnionSkinEQ::kNumBands> merged_occ{};
+            for (size_t b = 0; b < OnionSkinEQ::kNumBands; ++b) {
+                const float vo = has_v ? vpeer.spectral_occupancy[b] : 0.0f;
+                const float ao = has_a ? apeer.spectral_occupancy[b] : 0.0f;
+                merged_occ[b] = std::max(vo, ao);
+            }
+            onion_eq_.set_peer_occupancy(merged_occ, p.eco_peer_weight);
         } else {
             eco_peer_active_ = false;
             onion_eq_.set_peer_occupancy({}, 0.0f);
@@ -610,6 +751,45 @@ void MonkeysEarEngine::process_block(
     }
 
     float block_energy_sq = 0.0f;
+    pattern_sequencer_.process(*this, num_samples, [&](size_t offset, size_t chunk) {
+        if (chunk == 0) return;
+        const float* in_l_ptr = input_l ? (input_l + offset) : nullptr;
+        const float* in_r_ptr = input_r ? (input_r + offset) : nullptr;
+        render_audio_span(in_l_ptr, in_r_ptr, output_l + offset, output_r + offset, chunk, block_energy_sq);
+    });
+
+    if (p.eco_mode == 1 || p.eco_mode == 3) {
+        EcosystemStreamFrame pub{};
+        pub.frame_id = ++eco_frame_counter_;
+        pub.role = 1;
+        pub.active = true;
+        pub.midi_note = current_midi_note_;
+        const size_t active_voices = voice_manager_.active_voice_count();
+        pub.note_gate = (active_voices > 0) ? 1.0f : 0.0f;
+        pub.pitch_cents = (current_midi_note_ >= 0) ? (static_cast<float>(current_midi_note_ - 69) * 100.0f) : 0.0f;
+        pub.pitch_confidence = (active_voices > 0) ? 1.0f : (audio_envelope_ > 0.02f ? external_sub_.confidence() : 0.0f);
+        pub.velocity = last_velocity_;
+        pub.loudness = clamp(std::sqrt(block_energy_sq / static_cast<float>(std::max<size_t>(1, num_samples))), 0.0f, 1.0f);
+        pub.spectral_occupancy = onion_eq_.self_occupancy();
+        eco_bus_.publish_synth(p.eco_slot, pub);
+    }
+
+    latency_meter_.end_block();
+}
+
+void MonkeysEarEngine::render_audio_span(
+    const float* input_l,
+    const float* input_r,
+    float* output_l,
+    float* output_r,
+    size_t num_samples,
+    float& block_energy_sq
+) {
+    const PresetData& p = preset_manager_.get_current();
+    float env_amt = p.filter_env_amount;
+    const float gesture_coeff=1.0f-std::exp(-1.0f/(sample_rate_*.012f));
+    const float drift_target=field_unit(p.performance_drift);
+    const float fracture_target=field_unit(p.performance_fracture);
 
     for (size_t i = 0; i < num_samples; ++i) {
         // Performance field: smooth manual/host gesture edits before they
@@ -720,6 +900,10 @@ void MonkeysEarEngine::process_block(
         float eq_freq=lfo_val*p.mod_lfo_eq_frequency*.75f;
         float eq_gain=lfo_val*p.mod_lfo_eq_gain*9.0f;
         float equalized=eq_.process(recombined,eq_freq,eq_gain);
+        const float self_pitch_conf = (voice_manager_.active_voice_count() > 0)
+            ? 1.0f
+            : ((p.input_route_mode != 0) ? external_sub_.confidence() : 0.0f);
+        onion_eq_.set_self_pitch(center_hz, self_pitch_conf);
         equalized = onion_eq_.process_sample(equalized, weight_layer + ext_sample * 0.5f);
 
         // 8. Stereo Ping-Pong Delay + True Stereo Unison Side Panorama
@@ -755,24 +939,6 @@ void MonkeysEarEngine::process_block(
         output_l[i] = out_l;
         output_r[i] = out_r;
     }
-
-    if (p.eco_mode == 1 || p.eco_mode == 3) {
-        EcosystemStreamFrame pub{};
-        pub.frame_id = ++eco_frame_counter_;
-        pub.role = 1;
-        pub.active = true;
-        pub.midi_note = current_midi_note_;
-        const size_t active_voices = voice_manager_.active_voice_count();
-        pub.note_gate = (active_voices > 0) ? 1.0f : 0.0f;
-        pub.pitch_cents = (current_midi_note_ >= 0) ? (static_cast<float>(current_midi_note_ - 69) * 100.0f) : 0.0f;
-        pub.pitch_confidence = (active_voices > 0) ? 1.0f : (audio_envelope_ > 0.02f ? external_sub_.confidence() : 0.0f);
-        pub.velocity = last_velocity_;
-        pub.loudness = clamp(std::sqrt(block_energy_sq / static_cast<float>(std::max<size_t>(1, num_samples))), 0.0f, 1.0f);
-        pub.spectral_occupancy = onion_eq_.self_occupancy();
-        eco_bus_.publish_synth(p.eco_slot, pub);
-    }
-
-    latency_meter_.end_block();
 }
 
 LatencyStats MonkeysEarEngine::get_latency_stats() const {

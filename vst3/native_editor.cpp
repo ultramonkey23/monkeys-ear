@@ -1,8 +1,12 @@
 #include "native_editor.h"
+#include "editor_bridge.h"
+#include "preset_param_snapshot.h"
 #include "ui_assets.h"
 #include "monkeys_ear/onion_skin_eq.h"
 #include "monkeys_ear/wavetable.h"
 #include "monkeys_ear/ecosystem_bus.h"
+#include "monkeys_ear/pattern_sequencer.h"
+#include "monkeys_ear/preset_growth.h"
 #include <algorithm>
 #include <array>
 #include <atomic>
@@ -10,7 +14,10 @@
 #include <cstdio>
 #include <cwctype>
 #include <cstring>
+#include <filesystem>
+#include <fstream>
 #include <memory>
+#include <sstream>
 #include <string>
 #include <vector>
 
@@ -159,8 +166,44 @@ int usable_steps(int id, int advertised) {
     case 199: return 7;
     case 202: return 9;
     case 216: return 3;
+    case 245: return 11;
+    case 246: return 29;
+    case 252: return 1;
+    case 253: return 7;
+    case 254: return 31;
+    case 255: return 5;
+    case 258: return 24;
     default: return advertised;
     }
+}
+
+std::vector<std::filesystem::path> discover_preset_directories() {
+    std::vector<std::filesystem::path> out;
+    std::error_code ec;
+    auto add_if_dir = [&](const std::filesystem::path& p) {
+        if (!p.empty() && std::filesystem::is_directory(p, ec)) {
+            const auto norm = std::filesystem::weakly_canonical(p, ec);
+            const auto& cand = ec ? p : norm;
+            if (std::find(out.begin(), out.end(), cand) == out.end()) out.push_back(cand);
+        }
+    };
+    add_if_dir(std::filesystem::current_path(ec) / "presets");
+    wchar_t mod_path[MAX_PATH]{};
+    HMODULE mod = nullptr;
+    if (GetModuleHandleExW(GET_MODULE_HANDLE_EX_FLAG_FROM_ADDRESS | GET_MODULE_HANDLE_EX_FLAG_UNCHANGED_REFCOUNT,
+                           reinterpret_cast<LPCWSTR>(&kModuleAnchor), &mod) &&
+        GetModuleFileNameW(mod, mod_path, MAX_PATH) > 0) {
+        std::filesystem::path p(mod_path);
+        for (int depth = 0; depth < 3 && p.has_parent_path(); ++depth) {
+            p = p.parent_path();
+            add_if_dir(p / "presets");
+        }
+    }
+    if (out.empty()) {
+        std::filesystem::path fallback = std::filesystem::current_path(ec) / "presets";
+        out.push_back(fallback);
+    }
+    return out;
 }
 
 struct Hit {
@@ -193,6 +236,10 @@ public:
     NativeEditor(IEditController* c, IComponentHandler** handler)
         : controller_(c), handler_slot_(handler) {
         controller_->addRef();
+        void* raw_bridge = nullptr;
+        if (controller_->queryInterface(kMonkeysEarEditorBridge_iid, &raw_bridge) == kResultOk && raw_bridge) {
+            bridge_ = static_cast<IMonkeysEarEditorBridge*>(raw_bridge);
+        }
         gdiplus_acquire();
         chassis_bmp_ = assets::load_bitmap_from_bytes(
             assets::kStudioChassisPlateJpg, sizeof(assets::kStudioChassisPlateJpg));
@@ -201,6 +248,12 @@ public:
         last_host_values_.assign(
             static_cast<size_t>(std::max<int32>(0, controller_->getParameterCount())),
             -2.0);
+        refresh_preset_bank();
+        slot_a_ = capture_current_preset("Slot A");
+        slot_b_ = slot_a_;
+        slot_b_.name = "Slot B";
+        keeper_preset_ = slot_a_;
+        audition_preset_ = slot_a_;
         title_font_ = CreateFontW(-28, 0, 0, 0, FW_BOLD, FALSE, FALSE, FALSE,
             DEFAULT_CHARSET, OUT_DEFAULT_PRECIS, CLIP_DEFAULT_PRECIS,
             CLEARTYPE_QUALITY, DEFAULT_PITCH, L"Segoe UI");
@@ -224,6 +277,10 @@ public:
         chassis_bmp_.reset();
         crest_bmp_.reset();
         gdiplus_release();
+        if (bridge_) {
+            bridge_->release_bridge_ref();
+            bridge_ = nullptr;
+        }
         controller_->release();
     }
 
@@ -466,7 +523,7 @@ private:
                 any_changed = true;
             }
         }
-        const bool live_page = (page_ == 4 || page_ == 5) && ((anim_tick_ & 1) == 0);
+        const bool live_page = (page_ == 4 || page_ == 5 || page_ == 6) && ((anim_tick_ & 1) == 0);
         if (any_changed || live_page) invalidate();
     }
 
@@ -666,11 +723,130 @@ private:
             if (it->action == 4) { apply_wave_preset(it->target); return; }
             if (it->action == 10) { apply_harmonic_preset(it->target); return; }
             if (it->action == 12) { apply_erb_curve_preset(it->target); return; }
+            if (it->action == 13) {
+                if (reset) {
+                    const double cur = controller_->getParamNormalized(252);
+                    change_single(252, cur >= 0.5 ? 0.0 : 1.0);
+                } else {
+                    change_single(254, static_cast<double>(std::clamp(it->target, 1, 32) - 1) / 31.0);
+                }
+                return;
+            }
+            if (it->action == 14) {
+                if (it->target >= 0 && static_cast<size_t>(it->target) < bank_entries_.size()) {
+                    selected_bank_idx_ = it->target;
+                    const auto& e = bank_entries_[static_cast<size_t>(it->target)];
+                    apply_preset_to_host(e.preset);
+                    keeper_preset_ = e.preset;
+                    audition_preset_ = e.preset;
+                    auditioning_growth_ = !e.preset.growth_snapshot.empty();
+                    compare_keeper_ = false;
+                    bank_status_ = L"LOADED: " + ascii_wide(e.name.c_str());
+                    invalidate();
+                }
+                return;
+            }
+            if (it->action == 15) {
+                const auto dirs = discover_preset_directories();
+                if (!dirs.empty()) {
+                    std::error_code ec;
+                    std::filesystem::create_directories(dirs.front(), ec);
+                    char fname[64]{};
+                    std::snprintf(fname, sizeof(fname), "user_patch_%02d.mepreset", user_save_counter_++);
+                    const auto dest = dirs.front() / fname;
+                    auto p = capture_current_preset(fname);
+                    std::ofstream out(dest, std::ios::binary | std::ios::trunc);
+                    const std::string body = p.serialize();
+                    if (out.is_open() && (out.write(body.data(), static_cast<std::streamsize>(body.size())), out.good())) {
+                        out.close();
+                        refresh_preset_bank();
+                        bank_status_ = L"SAVED " + ascii_wide(fname);
+                    } else {
+                        bank_status_ = L"SAVE FAILED";
+                    }
+                    invalidate();
+                }
+                return;
+            }
+            if (it->action == 16) { slot_a_ = capture_current_preset("Slot A"); active_slot_ = 0; bank_status_ = L"STORED A"; invalidate(); return; }
+            if (it->action == 17) { slot_b_ = capture_current_preset("Slot B"); active_slot_ = 1; bank_status_ = L"STORED B"; invalidate(); return; }
+            if (it->action == 18) { apply_preset_to_host(slot_a_); active_slot_ = 0; bank_status_ = L"RECALLED A"; return; }
+            if (it->action == 19) { apply_preset_to_host(slot_b_); active_slot_ = 1; bank_status_ = L"RECALLED B"; return; }
+            if (it->action == 20) { evo_seed_ -= 0x101u; invalidate(); return; }
+            if (it->action == 21) { evo_seed_ += 0x101u; invalidate(); return; }
+            if (it->action == 22) { evo_pressure_idx_ = (evo_pressure_idx_ + 1) % 4; invalidate(); return; }
+            if (it->action == 23) {
+                static constexpr float kPressures[4] = {0.25f, 0.50f, 0.75f, 1.00f};
+                if (!auditioning_growth_) keeper_preset_ = capture_current_preset("Keeper Baseline");
+                auto grown = monkeys_ear::PresetGrowth::develop(
+                    keeper_preset_, evo_seed_, 48u, kPressures[evo_pressure_idx_ % 4]);
+                evo_seed_ += 0x9E3779B9u;
+                ++evo_generation_;
+                audition_preset_ = grown.preset;
+                auditioning_growth_ = true;
+                compare_keeper_ = false;
+                apply_preset_to_host(audition_preset_);
+                bank_status_ = L"AUDITION: " + ascii_wide(audition_preset_.name.c_str());
+                return;
+            }
+            if (it->action == 24) {
+                if (auditioning_growth_) {
+                    compare_keeper_ = !compare_keeper_;
+                    apply_preset_to_host(compare_keeper_ ? keeper_preset_ : audition_preset_);
+                    bank_status_ = compare_keeper_ ? L"COMPARE: KEEPER" : L"COMPARE: EVO CANDIDATE";
+                }
+                return;
+            }
+            if (it->action == 25) {
+                const char* keeper_name = auditioning_growth_ ? audition_preset_.name.c_str() : "Frozen Keeper";
+                keeper_preset_ = capture_current_preset(std::string(keeper_name));
+                audition_preset_ = keeper_preset_;
+                compare_keeper_ = false;
+                bank_status_ = L"FROZEN AS KEEPER";
+                invalidate();
+                return;
+            }
+            if (it->action == 26) {
+                static constexpr float kPressures[4] = {0.25f, 0.50f, 0.75f, 1.00f};
+                const auto parent = capture_current_preset("Branch Parent");
+                keeper_preset_ = parent;
+                auto child = monkeys_ear::PresetGrowth::develop(
+                    parent, evo_seed_ ^ static_cast<std::uint32_t>(evo_generation_ + 1),
+                    64u, kPressures[evo_pressure_idx_ % 4]);
+                ++evo_generation_;
+                evo_seed_ += 0x7F4A7C15u;
+                audition_preset_ = child.preset;
+                auditioning_growth_ = true;
+                compare_keeper_ = false;
+                apply_preset_to_host(audition_preset_);
+                bank_status_ = L"BRANCHED GEN " + std::to_wstring(evo_generation_);
+                return;
+            }
+            if (it->action == 27) {
+                auditioning_growth_ = false;
+                compare_keeper_ = false;
+                evo_generation_ = 0;
+                keeper_preset_.growth_snapshot.clear();
+                audition_preset_.growth_snapshot.clear();
+                if (bridge_) bridge_->set_growth_snapshot("", false);
+                bank_status_ = L"GROWTH LINEAGE CLEARED";
+                invalidate();
+                return;
+            }
             if (it->action == 5 || it->action == 6) {
                 const int id = it->target;
                 ParameterInfo info{};
                 if (controller_->getParameterInfo(id, info) != kResultOk) return;
                 const int steps = std::max(1, usable_steps(id, info.stepCount));
+                if (id >= 245) {
+                    const int cur_idx = std::clamp(
+                        static_cast<int>(std::lround(controller_->getParamNormalized(id) * steps)), 0, steps);
+                    const int next_idx = (it->action == 5)
+                        ? ((cur_idx + steps) % (steps + 1))
+                        : ((cur_idx + 1) % (steps + 1));
+                    change_single(id, static_cast<double>(next_idx) / static_cast<double>(steps));
+                    return;
+                }
                 const int cur_idx = std::clamp(
                     static_cast<int>(controller_->getParamNormalized(id) * (steps + 1.0)), 0, steps);
                 const int next_idx = (it->action == 5)
@@ -1295,7 +1471,290 @@ private:
         draw_knob(dc, g, 786, 536, 90, 148, 197, L"TRANS PT", kGold);
         draw_knob(dc, g, 882, 536, 90, 148, 218, L"SPEC TILT", kEmerald);
         draw_knob(dc, g, 978, 536, 86, 148, 219, L"Q FOCUS", kEmerald);
-        draw_param(dc, g, 58, 604, 428, 80, 220, L"AIR SHIMMER (> 4.2 kHz)", kAccent);
+        draw_param(dc, g, 58, 604, 210, 80, 220, L"AIR SHIMMER (>4.2k)", kAccent);
+        draw_param(dc, g, 276, 604, 210, 80, 251, L"F0 HARMONIC GUARD", kGold);
+    }
+
+    static bool step_preview_info(int pattern_index, int step, int loop_steps, int& semi_out, int& vel_out) noexcept {
+        if (step < 0 || step >= loop_steps) return false;
+        switch (std::clamp(pattern_index, 0, 7)) {
+            case 0: {
+                static constexpr int seq[16] = {0, 0, 12, 1, 0, 7, 10, 0, 1, 13, 7, 0, 3, 1, 0, -2};
+                static constexpr int vels[16] = {120, 88, 110, 96, 118, 92, 104, 122, 95, 112, 98, 90, 115, 100, 88, 108};
+                if (step % 2 == 0 || (step % 7 == 3) || (step % 7 == 5)) {
+                    semi_out = seq[step % 16]; vel_out = vels[step % 16]; return true;
+                }
+                return false;
+            }
+            case 1: {
+                static constexpr int on[8] = {0, 3, 6, 8, 10, 11, 14, 15};
+                static constexpr int offs[8] = {-12, -12, -9, -12, -5, -7, -2, -9};
+                static constexpr int vels[8] = {124, 96, 110, 118, 86, 106, 94, 78};
+                for (int k = 0; k < 8; ++k) {
+                    if ((step % 16) == on[k]) { semi_out = offs[k]; vel_out = vels[k]; return true; }
+                }
+                return false;
+            }
+            case 2: {
+                static constexpr int mel[10] = {0, 7, 8, 7, 1, 0, 12, 8, 7, 6};
+                semi_out = mel[step % 10]; vel_out = (step % 5 == 0) ? 118 : 88; return true;
+            }
+            case 3: {
+                static constexpr int arp[8] = {0, 7, 14, 19, 15, 19, 24, 14};
+                semi_out = arp[step % 8]; vel_out = 92 + (step % 4) * 8; return true;
+            }
+            case 4: {
+                static constexpr int notes16[16] = {-12, 0, -12, 0, 3, 0, 12, 0, -12, -12, 7, 10, 12, 10, 7, 3};
+                if (step % 5 != 4) { semi_out = notes16[step % 16]; vel_out = (step % 4 == 0) ? 124 : 84; return true; }
+                return false;
+            }
+            case 5: {
+                static constexpr int weave[12] = {0, 5, 10, 12, 7, 5, 0, 3, 7, 14, 12, 7};
+                semi_out = weave[step % 12]; vel_out = (step % 3 == 0) ? 115 : 85; return true;
+            }
+            case 6: {
+                if (step % 2 == 0) { semi_out = -12; vel_out = 118; return true; }
+                if ((step % 4) == 3) { semi_out = 7; vel_out = 94; return true; }
+                return false;
+            }
+            default: {
+                if (step % 4 == 0) { semi_out = 7; vel_out = 102; return true; }
+                return false;
+            }
+        }
+    }
+
+    monkeys_ear::PresetData capture_current_preset(const std::string& name = "User Patch") const {
+        const std::string snap = bridge_ ? bridge_->get_growth_snapshot() : std::string{};
+        auto p = monkeys_ear::ui::preset_from_params([this](int id) {
+            return static_cast<float>(controller_->getParamNormalized(static_cast<ParamID>(id)));
+        }, snap);
+        p.name = name;
+        return p;
+    }
+
+    void apply_preset_to_host(const monkeys_ear::PresetData& preset) {
+        monkeys_ear::ui::emit_preset_params(preset, [this](int id, float v) {
+            change_single(id, static_cast<double>(v));
+        });
+        if (bridge_) {
+            bridge_->set_growth_snapshot(preset.growth_snapshot, !preset.growth_snapshot.empty());
+        }
+        invalidate();
+    }
+
+    void refresh_preset_bank() {
+        bank_entries_.clear();
+        std::error_code ec;
+        for (const auto& dir : discover_preset_directories()) {
+            if (!std::filesystem::is_directory(dir, ec)) continue;
+            for (const auto& entry : std::filesystem::directory_iterator(dir, ec)) {
+                if (!entry.is_regular_file(ec)) continue;
+                if (entry.path().extension() != ".mepreset") continue;
+                std::ifstream in(entry.path(), std::ios::binary);
+                if (!in.is_open()) continue;
+                std::ostringstream ss;
+                ss << in.rdbuf();
+                monkeys_ear::PresetData loaded;
+                if (loaded.deserialize(ss.str())) {
+                    bank_entries_.push_back(BankEntry{entry.path(), std::string(loaded.name.c_str()), loaded});
+                }
+            }
+        }
+        std::sort(bank_entries_.begin(), bank_entries_.end(), [](const BankEntry& a, const BankEntry& b) {
+            return a.path.filename().string() < b.path.filename().string();
+        });
+    }
+
+    void draw_seq_groove(HDC dc, Gdiplus::Graphics& g) {
+        title(dc, L"PATTERN SEQUENCER, TIMING GROOVE & VOCAL TARGET TUNING",
+              L"Zero-alloc odd-meter pattern engine + non-destructive quantize, swing, gate, and 30-scale vocal tuning.", 122);
+
+        const bool seq_on = controller_->getParamNormalized(252) >= 0.5;
+        const int pat_idx = std::clamp(static_cast<int>(std::lround(controller_->getParamNormalized(253) * 7.0)), 0, 7);
+        const int loop_steps = 1 + std::clamp(static_cast<int>(std::lround(controller_->getParamNormalized(254) * 31.0)), 0, 31);
+        const int playhead = bridge_ ? std::clamp(bridge_->get_sequencer_step(), 0, std::max(0, loop_steps - 1)) : 0;
+
+        // Top Step Grid Panel (44, 176, 1032, 168)
+        rectangle(g, 44, 176, 1032, 168, RGB(12, 17, 25), kOutline, 14, 244);
+        wchar_t seq_hdr[128]{};
+        std::swprintf(seq_hdr, 128, L"PATTERN %d / %d STEPS  |  PLAYHEAD STEP %d  |  CLICK ANY STEP CELL TO SET LOOP LENGTH",
+                      pat_idx + 1, loop_steps, seq_on ? (playhead + 1) : 0);
+        label(dc, body_font_, seq_on ? kAccent : kMuted, seq_hdr, 58, 184, 980, 22);
+
+        constexpr int gx = 58, gy = 214, gw = 1004, gh = 114;
+        const int cell_w = gw / 32;
+        for (int s = 0; s < 32; ++s) {
+            const int cx = gx + s * cell_w + 1;
+            const bool active_loop = (s < loop_steps);
+            const bool is_play = seq_on && (s == playhead);
+            int semi = 0, vel = 0;
+            const bool hit = step_preview_info(pat_idx, s, loop_steps, semi, vel);
+            const COLORREF fill = !active_loop ? RGB(15, 19, 26)
+                : (is_play ? RGB(32, 92, 90) : (hit ? RGB(26, 48, 66) : RGB(20, 26, 36)));
+            const COLORREF edge = is_play ? kGold : (active_loop ? (hit ? kAccent : kOutline) : RGB(30, 36, 46));
+            rectangle(g, cx, gy, cell_w - 3, gh, fill, edge, 6);
+            if (hit) {
+                const int bar_h = std::max(10, (vel * (gh - 34)) / 127);
+                rectangle(g, cx + 3, gy + gh - 22 - bar_h, cell_w - 9, bar_h,
+                          is_play ? kGold : kAccent, edge, 4);
+            }
+            label(dc, micro_font_, active_loop ? (is_play ? kGold : kText) : kMuted,
+                  std::to_wstring(s + 1), cx, gy + gh - 18, cell_w - 3, 16, DT_CENTER);
+            add_hit(cx, gy, cell_w - 3, gh, 254, 13, s + 1);
+        }
+
+        // Middle: Pattern Transport & Groove Matrix (44, 354, 1032, 166)
+        rectangle(g, 44, 354, 1032, 166, kPanel, kOutline, 14, 232);
+        label(dc, body_font_, kGold, L"TRANSPORT, ODD-METER LOOP & GROOVE QUANTIZATION", 58, 360, 620, 22);
+        draw_param(dc, g, 58, 388, 170, 56, 252, L"SEQ PLAY", seq_on ? kEmerald : kMuted);
+        draw_param(dc, g, 236, 388, 256, 56, 253, L"PATTERN", kAccent);
+        draw_param(dc, g, 500, 388, 190, 56, 254, L"LOOP STEPS", kGold);
+        draw_param(dc, g, 698, 388, 190, 56, 255, L"DIVISION", kGold);
+        draw_param(dc, g, 896, 388, 166, 56, 174, L"HOST CLOCK", kAccent);
+
+        draw_param(dc, g, 58, 452, 194, 56, 170, L"TEMPO BPM", kAccent);
+        draw_param(dc, g, 260, 452, 194, 56, 175, L"GROOVE SWING", kGold);
+        draw_param(dc, g, 462, 452, 200, 56, 256, L"QUANTIZE", kEmerald);
+        draw_param(dc, g, 670, 452, 194, 56, 257, L"GATE LEN", kAccent);
+        draw_param(dc, g, 872, 452, 190, 56, 258, L"TRANSPOSE", kViolet);
+
+        // Bottom: 30-Scale Vocal Target Tuning & Expression Preservation (44, 530, 1032, 168)
+        rectangle(g, 44, 530, 1032, 168, kPanel, kOutline, 14, 232);
+        label(dc, body_font_, kViolet, L"VOCAL PITCH TARGET: 30 TUNINGS, VIBRATO & ONSET PRESERVATION", 58, 536, 700, 22);
+        draw_param(dc, g, 58, 566, 180, 56, 113, L"VOCAL ENGINE", kViolet);
+        draw_param(dc, g, 246, 566, 180, 56, 245, L"ROOT KEY", kGold);
+        draw_param(dc, g, 434, 566, 300, 56, 246, L"SCALE / TUNING", kAccent);
+        draw_param(dc, g, 742, 566, 156, 56, 247, L"ARTICULAT", kViolet);
+        draw_param(dc, g, 906, 566, 156, 56, 248, L"PORTAMENTO", kAccent);
+
+        draw_param(dc, g, 58, 630, 240, 56, 249, L"NOTE HYSTERESIS", kEmerald);
+        draw_param(dc, g, 306, 630, 240, 56, 250, L"ONSET PROTECT", kGold);
+        draw_param(dc, g, 554, 630, 250, 56, 115, L"DRIFT RETENTION", kAccent);
+        draw_param(dc, g, 812, 630, 250, 56, 116, L"VIBRATO RETENT", kViolet);
+    }
+
+    void draw_evo_bank(HDC dc, Gdiplus::Graphics& g) {
+        title(dc, L"PRESET BANK (.mepreset), A/B COMPARE & EVOLUTIONARY EXPLORER",
+              L"Audition developmental sound lineage, A/B compare vs keeper, freeze, branch descendants, or save/load .mepreset files.", 122);
+
+        // Left: .mepreset Bank & A/B Compare (44, 176, 512, 522)
+        rectangle(g, 44, 176, 512, 522, kPanel, kOutline, 14, 234);
+        label(dc, body_font_, kAccent, L"PATCH BANK (presets/*.mepreset)", 58, 184, 320, 22);
+        rectangle(g, 392, 182, 150, 26, RGB(26, 72, 74), kAccent, 8);
+        label(dc, micro_font_, kAccent, L"SAVE .MEPRESET", 392, 182, 150, 26, DT_CENTER);
+        add_hit(392, 182, 150, 26, -1, 15, 0);
+
+        const int show_count = std::min<int>(8, static_cast<int>(bank_entries_.size()));
+        if (show_count == 0) {
+            label(dc, small_font_, kMuted, L"No .mepreset files found in presets/ yet. Click SAVE .MEPRESET.", 58, 224, 480, 24);
+        }
+        for (int i = 0; i < show_count; ++i) {
+            const int py = 216 + i * 40;
+            const bool sel = (selected_bank_idx_ == i);
+            rectangle(g, 58, py, 484, 34, sel ? RGB(26, 72, 74) : RGB(17, 22, 30), sel ? kAccent : kOutline, 8);
+            const std::wstring pname = ascii_wide(bank_entries_[static_cast<size_t>(i)].name.c_str());
+            const std::wstring fname = bank_entries_[static_cast<size_t>(i)].path.filename().wstring();
+            label(dc, body_font_, sel ? kAccent : kText, pname, 68, py, 260, 34);
+            label(dc, micro_font_, kMuted, fname, 330, py, 202, 34, DT_RIGHT);
+            add_hit(58, py, 484, 34, -1, 14, i);
+        }
+
+        // A/B Compare strip
+        label(dc, body_font_, kGold, L"INSTANT A / B COMPARE & RECALL", 58, 548, 380, 22);
+        const wchar_t* ab_labels[4] = {L"STORE A", L"STORE B", L"RECALL A", L"RECALL B"};
+        for (int b = 0; b < 4; ++b) {
+            const int bx = 58 + b * 122;
+            const bool active = (b >= 2) && ((b == 2 && active_slot_ == 0) || (b == 3 && active_slot_ == 1));
+            rectangle(g, bx, 578, 114, 34, active ? RGB(44, 34, 14) : RGB(22, 28, 38), active ? kGold : kOutline, 8);
+            label(dc, small_font_, active ? kGold : kText, ab_labels[b], bx, 578, 114, 34, DT_CENTER);
+            add_hit(bx, 578, 114, 34, -1, 16 + b, 0);
+        }
+        label(dc, small_font_, kEmerald, bank_status_.empty() ? L"Lossless KEY=VALUE .mepreset ready" : bank_status_,
+              58, 622, 484, 24);
+        draw_param(dc, g, 58, 650, 484, 38, 173, L"FACTORY PALETTE", kGold);
+
+        // Right: Explicit Evolutionary Sound Explorer (570, 176, 506, 522)
+        rectangle(g, 570, 176, 506, 522, kPanel, kOutline, 14, 234);
+        label(dc, body_font_, kViolet, L"EVOLUTIONARY LINEAGE EXPLORER", 584, 184, 460, 22);
+        label(dc, small_font_, kMuted, L"Deterministic offline structural growth — isolated from DRIFT / FRACTURE modulation.",
+              584, 206, 480, 18);
+
+        // Seed & Pressure Controls
+        constexpr float kPressures[4] = {0.25f, 0.50f, 0.75f, 1.00f};
+        wchar_t evo_meta[128]{};
+        std::swprintf(evo_meta, 128, L"SEED: 0x%08X   |   PRESSURE: %.0f%%   |   GEN: %d",
+                      evo_seed_, kPressures[evo_pressure_idx_ % 4] * 100.0f, evo_generation_);
+        rectangle(g, 584, 232, 478, 32, RGB(14, 19, 28), kViolet, 8);
+        label(dc, body_font_, kGold, evo_meta, 590, 232, 466, 32, DT_CENTER);
+
+        rectangle(g, 584, 272, 114, 34, RGB(24, 30, 42), kOutline, 8);
+        label(dc, small_font_, kText, L"SEED -", 584, 272, 114, 34, DT_CENTER);
+        add_hit(584, 272, 114, 34, -1, 20, 0);
+
+        rectangle(g, 704, 272, 114, 34, RGB(24, 30, 42), kOutline, 8);
+        label(dc, small_font_, kText, L"SEED +", 704, 272, 114, 34, DT_CENTER);
+        add_hit(704, 272, 114, 34, -1, 21, 0);
+
+        rectangle(g, 824, 272, 238, 34, RGB(34, 24, 52), kViolet, 8);
+        label(dc, small_font_, kViolet, L"CYCLE PRESSURE (25/50/75/100%)", 824, 272, 238, 34, DT_CENTER);
+        add_hit(824, 272, 238, 34, -1, 22, 0);
+
+        // Explicit Audition / Compare / Freeze / Branch / Clear buttons
+        rectangle(g, 584, 320, 234, 42, auditioning_growth_ ? RGB(26, 72, 74) : RGB(22, 32, 42), kAccent, 10);
+        label(dc, body_font_, kAccent, L"AUDITION CANDIDATE", 584, 320, 234, 42, DT_CENTER);
+        add_hit(584, 320, 234, 42, -1, 23, 0);
+
+        rectangle(g, 828, 320, 234, 42, compare_keeper_ ? RGB(54, 40, 14) : RGB(22, 28, 38), kGold, 10);
+        label(dc, body_font_, kGold, compare_keeper_ ? L"VIEW: KEEPER (BASELINE)" : L"COMPARE KEEPER / EVO", 828, 320, 234, 42, DT_CENTER);
+        add_hit(828, 320, 234, 42, -1, 24, 0);
+
+        rectangle(g, 584, 372, 152, 42, RGB(20, 56, 38), kEmerald, 10);
+        label(dc, body_font_, kEmerald, L"FREEZE KEEPER", 584, 372, 152, 42, DT_CENTER);
+        add_hit(584, 372, 152, 42, -1, 25, 0);
+
+        rectangle(g, 744, 372, 156, 42, RGB(42, 28, 62), kViolet, 10);
+        label(dc, body_font_, kViolet, L"BRANCH CHILD", 744, 372, 156, 42, DT_CENTER);
+        add_hit(744, 372, 156, 42, -1, 26, 0);
+
+        rectangle(g, 908, 372, 154, 42, RGB(54, 24, 26), kCoral, 10);
+        label(dc, body_font_, kCoral, L"CLEAR LINEAGE", 908, 372, 154, 42, DT_CENTER);
+        add_hit(908, 372, 154, 42, -1, 27, 0);
+
+        // Decoded live GrowthLineage graph preview
+        rectangle(g, 584, 428, 478, 256, RGB(12, 16, 24), kOutline, 12);
+        const std::string active_snap = bridge_ ? bridge_->get_growth_snapshot() : std::string{};
+        monkeys_ear::GrowthLineage decoded{};
+        const bool has_tree = !active_snap.empty() && monkeys_ear::GrowthSnapshotCodec::decode(active_snap, decoded);
+        wchar_t tree_hdr[128]{};
+        if (has_tree) {
+            std::swprintf(tree_hdr, 128, L"FROZEN LINEAGE ACTIVE  |  SEED 0x%08X  |  NODES: %u  |  BRANCHES: %u",
+                          decoded.seed, decoded.node_count, decoded.branches);
+        } else {
+            std::swprintf(tree_hdr, 128, L"CONVENTIONAL / BASELINE RESONATOR (NO GROWTH LINEAGE ACTIVE)");
+        }
+        label(dc, micro_font_, has_tree ? kEmerald : kMuted, tree_hdr, 596, 434, 454, 18);
+
+        if (has_tree) {
+            const float cx0 = 823.0f, cy0 = 562.0f, scale = 88.0f;
+            Gdiplus::Pen branch_pen(gp_col(kViolet, 210), 1.6f);
+            for (unsigned i = 8; i < decoded.node_count; ++i) {
+                const auto& n = decoded.nodes[i];
+                const auto& pn = decoded.nodes[n.parent];
+                g.DrawLine(&branch_pen, cx0 + pn.x * scale, cy0 - pn.y * scale,
+                           cx0 + n.x * scale, cy0 - n.y * scale);
+            }
+            for (unsigned i = 0; i < decoded.node_count; ++i) {
+                const auto& n = decoded.nodes[i];
+                Gdiplus::SolidBrush nb(gp_col(i < 8 ? kGold : kAccent, 235));
+                const float r = (i < 8) ? 4.0f : 2.5f;
+                g.FillEllipse(&nb, cx0 + n.x * scale - r, cy0 - n.y * scale - r, 2.0f * r, 2.0f * r);
+            }
+        } else {
+            label(dc, small_font_, kMuted,
+                  L"Click AUDITION CANDIDATE to grow a deterministic structural patch, COMPARE to A/B against Keeper, then FREEZE or BRANCH.",
+                  608, 520, 430, 64);
+        }
     }
 
     void draw_explore(HDC dc, Gdiplus::Graphics& g) {
@@ -1355,6 +1814,14 @@ private:
 
         // Preserve exact tab & output button rects across the header bar
         draw_param(dc, g, 616, 23, 170, 46, 8, L"OUTPUT");
+        rectangle(g, 616, 73, 84, 26, page_ == 6 ? RGB(26, 72, 74) : kPanel, page_ == 6 ? kGold : kOutline, 8);
+        label(dc, micro_font_, page_ == 6 ? kGold : kText, L"SEQ / GRV", 616, 73, 84, 26, DT_CENTER);
+        add_hit(616, 73, 84, 26, -1, 1, 6);
+
+        rectangle(g, 704, 73, 84, 26, page_ == 7 ? RGB(48, 34, 68) : kPanel, page_ == 7 ? kViolet : kOutline, 8);
+        label(dc, micro_font_, page_ == 7 ? kViolet : kText, L"EVO / BNK", 704, 73, 84, 26, DT_CENTER);
+        add_hit(704, 73, 84, 26, -1, 1, 7);
+
         rectangle(g, 796, 22, 63, 37, page_ == 0 ? RGB(26, 72, 74) : kPanel, page_ == 0 ? kAccent : kOutline, 10);
         label(dc, body_font_, page_ == 0 ? kAccent : kText, L"PLAY", 796, 22, 63, 37, DT_CENTER);
         add_hit(796, 22, 63, 37, -1, 1, 0);
@@ -1389,6 +1856,8 @@ private:
         else if (page_ == 3) draw_perform(dc, g);
         else if (page_ == 4) draw_wave_gen(dc, g);
         else if (page_ == 5) draw_onion_eco(dc, g);
+        else if (page_ == 6) draw_seq_groove(dc, g);
+        else if (page_ == 7) draw_evo_bank(dc, g);
         else draw_explore(dc, g);
 
         const bool connected = handler() != nullptr;
@@ -1406,9 +1875,16 @@ private:
               footer, 44, 708, 1032, 22);
     }
 
+    struct BankEntry {
+        std::filesystem::path path;
+        std::string name;
+        monkeys_ear::PresetData preset;
+    };
+
     std::atomic<uint32> references_{1};
     IEditController* controller_;
     IComponentHandler** handler_slot_;
+    IMonkeysEarEditorBridge* bridge_ = nullptr;
     IPlugFrame* frame_ = nullptr;
     HMODULE module_ = nullptr;
     HWND window_ = nullptr, combo_ = nullptr, search_ = nullptr;
@@ -1422,6 +1898,20 @@ private:
     double drag_anchor_raw_ = 0.0, drag_anchor_value_ = 0.0;
     RECT drag_rect_{};
     monkeys_ear::EcosystemBusClient eco_bus_{};
+    std::vector<BankEntry> bank_entries_;
+    int selected_bank_idx_ = -1;
+    int active_slot_ = 0;
+    int user_save_counter_ = 1;
+    monkeys_ear::PresetData slot_a_{};
+    monkeys_ear::PresetData slot_b_{};
+    monkeys_ear::PresetData keeper_preset_{};
+    monkeys_ear::PresetData audition_preset_{};
+    bool auditioning_growth_ = false;
+    bool compare_keeper_ = false;
+    std::uint32_t evo_seed_ = 0x20261124u;
+    int evo_pressure_idx_ = 1;
+    int evo_generation_ = 0;
+    std::wstring bank_status_;
     std::wstring search_text_;
     std::vector<Hit> hits_;
     std::vector<double> last_host_values_;

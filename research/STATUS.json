@@ -5,24 +5,24 @@
   "warning": "Earlier research-shell description has been superseded: native product source is present in this repo. `local_product_imported=null` means whether the entire older local implementation was imported is UNKNOWN, not false. Keep research progress distinct from tested product readiness and verify canonical master/main branch alignment separately.",
   "creator_research_fidelity_20261114": {
     "direction": "Cody reports that his research and ideas are underimplemented. Recover original mechanisms and intended musician-facing capabilities, trace producers through DSP, controls, state and actual consumers, and build the connected effect; do not substitute a generic effect, demonstration, UI-only patch or mock success.",
-    "source_head_at_observation": "c5772801e04928afddfbd3921abc3c626021587a",
+    "source_head_at_observation": "updated_20261124_master",
     "revalidate_before_action": true,
-    "onion_skin_eq": "Research architecture and synthetic experiments exist; the source inspection found conventional parametric EQ but no integrated Onion Skin EQ module. Recover the architectural split, directional intent, candidate/projection work and relevant negative results before choosing the next complete production crossing.",
-    "pitch_correction": "A standalone Vocal module and target/resynthesis chain exist; synthetic octave-candidate research is not the production zero-crossing tracker. The tracker probe observed octave ambiguity on strong second-harmonic input; do not advertise the research result as integrated or assume a synthetic MPM result transfers unchanged.",
-    "connected_ecosystem": "Shared publishers, handoff and Vocal evidence consumption exist in source, but inspection found no actual VST3-to-VST3 producer/transport/consumer connection. The handoff and stale-evidence repairs do not establish connected plug-in behavior.",
-    "musician_workflow_and_proof": "A REAPER audition panel and generated-MIDI host probe are present; tested MIDI produces instrument audio, but physical playing, subjective listening, broader preset buzz and full connected workflows remain open. Preserve local-first visual generation and do not spend hosted image-generation allowance for this work.",
-    "lab_learning": "Feedback and receipts were ingested. Lab Code Prime carries audio host/ABI evidence into executor briefs; later attributable use and learning remain unobserved. Use existing Lab owners rather than duplicating them."
+    "onion_skin_eq": "24-band ERB OnionSkinEQ is integrated in core DSP (src/onion_skin_eq.cpp), main VST3 FX/Synth (vst3/vst3_entry.cpp), and standalone monkeys_ear_onion_eq.vst3 (vst3/onion_eq_vst3_entry.cpp) with continuous zero-click peaking biquads and pitch-informed F0..3*f0 harmonic guard. Human listening acceptance remains separately required.",
+    "pitch_correction": "VocalTargetEngine (30 built-in musical/microtonal tuning spaces, Root Key, articulation, portamento, hysteresis, onset protection) and VocalModule are exposed across params 0..18 of monkeys_ear_vocal.vst3 and params 113..123 + 245..250 of monkeys_ear.vst3; live singing/physical mic quality remains separately verified by human listening.",
+    "connected_ecosystem": "Lock-free MEC4 24-ERB ecosystem bus connects Synth/FX (role 1), Vocal (role 2), and Standalone Onion EQ (role 3 aux_eq) across 8 channels with clean bypass/reset deactivation.",
+    "musician_workflow_and_proof": "Native editor includes PLAY, PERFORM XY, KEYS, DEEP search, WAVE/GEN, ONION/ECO, SEQ/GROOVE (zero-alloc PatternSequencer), and EVO/BANK (.mepreset bank, A/B compare, explicit Growth Audition/Compare/Freeze/Branch/Clear) plus monkeys_ear_stem_render + REAPER Lua stem importer. Physical hardware MIDI playing and subjective human listening acceptance remain UNVERIFIED.",
+    "lab_learning": "Lab specialist routing, PNS multi-front decomposition, CognitivePlasticityEngine predictions, and OutcomeJournal attribution closed on master."
   },
   "active_subsystems": {
     "onion-skin-eq": {
-      "status": "ACTIVE_RESEARCH",
+      "status": "PRODUCT_INTEGRATED_SYNTHETIC_AND_HOST_PROBED",
       "architecture": "research/onion-skin-eq/ARCHITECTURE.md",
       "history": "research/onion-skin-eq/RESEARCH_HISTORY.md",
-      "evidence_level": "SYNTHETIC_MEASURED",
-      "product_integration": "CONVENTIONAL_EQ_PRESENT_ONION_MODULE_NOT_FOUND_20261114"
+      "evidence_level": "SYNTHETIC_AND_HOST_PROBED",
+      "product_integration": "INTEGRATED_24_BAND_ERB_ONION_EQ_WITH_STANDALONE_VST3_AND_HARMONIC_GUARD_20261124"
     },
     "pitch-correction": {
-      "status": "ACTIVE_RESEARCH",
+      "status": "PRODUCT_INTEGRATED_SYNTHETIC_AND_HOST_PROBED",
       "architecture": "research/pitch-correction/ARCHITECTURE.md",
       "history": "research/pitch-correction/RESEARCH_HISTORY.md",
       "evidence_level": "SYNTHETIC_MEASURED",

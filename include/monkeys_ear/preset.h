@@ -185,7 +185,17 @@ struct PresetData {
     float onion_tilt_db = 0.0f;    // [-6..+6] dB
     float onion_q_focus = 1.85f;   // [0.85..4.5]
     float onion_air_db = 0.0f;     // [-6..+6] dB
+    float onion_harmonic_protect = 0.0f; // [0..1] F0/H2/H3 harmonic guard
     std::array<float, 24> onion_band_db{};
+
+    // Optional in-engine zero-alloc Pattern Sequencer controls (params 252..258)
+    bool pattern_enabled = false;
+    int pattern_index = 0;         // 0..7 built-in musical patterns
+    int pattern_steps = 16;        // 1..32 steps (odd meters supported)
+    int pattern_division = 3;      // 0=1/4, 1=1/8, 2=1/8T, 3=1/16, 4=1/16T, 5=1/32
+    float pattern_quantize = 1.0f; // 0..1 non-destructive quantization strength
+    float pattern_gate = 0.65f;    // 0.1..1.0 note gate ratio
+    int pattern_transpose = 0;     // -12..+12 semitones
 
     // Frozen developmental topology. Empty for legacy presets.
     // Encoded offline; never parsed in the sample callback.

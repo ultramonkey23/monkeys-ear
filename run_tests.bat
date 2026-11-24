@@ -30,6 +30,7 @@ rem Every expected executable is mandatory. The previous "if exist" pattern
 rem could silently skip a missing Vocal host probe and still print ALL PASS.
 for %%T in (
     monkeys_ear_test_runner
+    monkeys_ear_preset_growth_probe
     monkeys_ear_tube_rack_probe
     monkeys_ear_tone_algorithms_probe
     monkeys_ear_reverb_rt_probe
@@ -56,6 +57,15 @@ for %%T in (
         popd
         exit /b !TEST_ERR!
     )
+)
+
+echo [TEST] monkeys_ear_stem_render.exe --selftest
+".\monkeys_ear_stem_render.exe" --selftest
+set "TEST_ERR=!errorlevel!"
+if not "!TEST_ERR!"=="0" (
+    echo [FAIL] monkeys_ear_stem_render.exe --selftest failed with code !TEST_ERR!
+    popd
+    exit /b !TEST_ERR!
 )
 
 popd

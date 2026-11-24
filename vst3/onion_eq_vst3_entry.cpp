@@ -30,7 +30,7 @@ using namespace Steinberg::Vst;
 
 namespace {
 
-constexpr int kParamCount = 41;
+constexpr int kParamCount = 42;
 // 0: Bypass (0=Active)
 // 1: Dynamic Enable (1=On)
 // 2: Intent (0.5=Yield)
@@ -49,6 +49,7 @@ constexpr int kParamCount = 41;
 // 15: Dry/Wet Mix (1.0 -> 100%)
 // 16: Output Trim (0.50 -> 0.0 dB)
 // 17..40: 24 ERB bands (0.50 -> 0.0 dB)
+// 41: Harmonic F0 Guard (0.0 -> Off; preserves f0/H2/H3 fundamental focus)
 constexpr std::array<float, kParamCount> kDefaultValues = []() {
     std::array<float, kParamCount> d{};
     d[0] = 0.0f;
@@ -68,12 +69,13 @@ constexpr std::array<float, kParamCount> kDefaultValues = []() {
     d[14] = 0.0f;
     d[15] = 1.0f;
     d[16] = 0.50f;
-    for (int i = 17; i < kParamCount; ++i) d[static_cast<size_t>(i)] = 0.50f;
+    for (int i = 17; i <= 40; ++i) d[static_cast<size_t>(i)] = 0.50f;
+    d[41] = 0.0f;
     return d;
 }();
 
 constexpr uint32 kStateMagic = 0x4D454F51u; // "MEOQ"
-constexpr uint32 kStateVersion = 1u;
+constexpr uint32 kStateVersion = 2u;
 
 static const TUID kOnionComponentCID  = INLINE_UID(0x4D6F6E6B, 0x65794561, 0x724F6E69, 0x6F6E4531); // MonkeyEarOnionE1
 static const TUID kOnionControllerCID = INLINE_UID(0x4D6F6E6B, 0x65794561, 0x724F6374, 0x726C4531); // MonkeyEarOctrlE1
@@ -207,9 +209,9 @@ tresult read_state(IBStream* stream, const std::shared_ptr<OnionState>& state) {
         if (!serialized_float_is_finite(value)) return kResultFalse;
         restored[i] = std::clamp(value, 0.0f, 1.0f);
     }
-    for (uint32 i = 0; i < count; ++i) {
-        state->values[i].store(restored[i]);
-        state->dirty[i].store(true);
+    for (int i = 0; i < kParamCount; ++i) {
+        state->values[static_cast<size_t>(i)].store(restored[static_cast<size_t>(i)]);
+        state->dirty[static_cast<size_t>(i)].store(true);
     }
     return kResultOk;
 }
@@ -238,6 +240,7 @@ monkeys_ear::OnionEqControls decode_controls(const std::shared_ptr<OnionState>& 
     for (size_t b = 0; b < monkeys_ear::OnionSkinEQ::kNumBands; ++b) {
         c.manual_db[b] = (v(17 + static_cast<int>(b)) - 0.5f) * 24.0f;
     }
+    c.harmonic_protect = v(41);
     return c;
 }
 
@@ -1056,26 +1059,27 @@ private:
                 const wchar_t* title;
                 COLORREF col;
             };
-            constexpr KnobSpec knobs[9] = {
+            constexpr KnobSpec knobs[10] = {
                 {3,  L"AMOUNT",      kViolet},
                 {4,  L"SENSITIVITY", kViolet},
                 {5,  L"LOW PROT",    kAccent},
                 {6,  L"TRANSIENT",   kGold},
+                {41, L"F0 GUARD",    kAccent},
                 {7,  L"SPEC TILT",   kEmerald},
                 {8,  L"Q FOCUS",     kEmerald},
                 {9,  L"AIR SHIMMER", kAccent},
                 {15, L"DRY / WET",   kGold},
                 {16, L"OUT TRIM",    kText},
             };
-            for (int i = 0; i < 9; ++i) {
-                const int kx = 28 + i * 103;
-                draw_knob(mem, g, kx, 446, 97, 132, knobs[i].id, knobs[i].title, knobs[i].col);
+            for (int i = 0; i < 10; ++i) {
+                const int kx = 24 + i * 93;
+                draw_knob(mem, g, kx, 446, 89, 132, knobs[i].id, knobs[i].title, knobs[i].col);
             }
 
             // Bottom Footer Bar
             const int show_id = drag_id_ >= 0 ? drag_id_ : hover_id_;
             std::wstring footer = L"Ready — Sweep-paint 24 ERB critical bands (40 Hz - 9.6 kHz) or route Sidechain 3/4 / Ecosystem Peer.";
-            if (show_id >= 17 && show_id < kParamCount) {
+            if (show_id >= 17 && show_id <= 40) {
                 const int b = show_id - 17;
                 const float hz = monkeys_ear::OnionSkinEQ::kBandCentersHz[static_cast<size_t>(b)];
                 wchar_t fbuf[128]{};
@@ -1361,6 +1365,8 @@ public:
         const char* title = nullptr;
         if (i < 17) {
             title = kFixedNames[i];
+        } else if (i == 41) {
+            title = "ONION: Harmonic F0 Guard";
         } else {
             const int b = i - 17;
             std::snprintf(name_buf, sizeof(name_buf), "ONION: ERB Band %d (%.0f Hz)",
@@ -1380,8 +1386,8 @@ public:
         copy16(info.title, title);
         copy16(info.shortTitle, title);
         const char* unit = "";
-        if (i == 7 || i == 9 || i == 16 || i >= 17) unit = "dB";
-        else if (i == 3 || i == 4 || i == 5 || i == 6 || i == 13 || i == 15) unit = "%";
+        if (i == 7 || i == 9 || (i >= 16 && i <= 40)) unit = "dB";
+        else if (i == 3 || i == 4 || i == 5 || i == 6 || i == 13 || i == 15 || i == 41) unit = "%";
         copy16(info.units, unit);
         return kResultOk;
     }
@@ -1412,7 +1418,7 @@ public:
         } else if (id == 14) {
             constexpr const char* st[3] = {"Stereo L/R", "Mid Only", "Side Only"};
             std::snprintf(text, sizeof(text), "%s", st[std::clamp(static_cast<int>(std::lround(v * 2.0)), 0, 2)]);
-        } else if (id == 16 || id >= 17) {
+        } else if (id == 16 || (id >= 17 && id <= 40)) {
             std::snprintf(text, sizeof(text), "%+.1f dB", (v - 0.5) * 24.0);
         } else {
             std::snprintf(text, sizeof(text), "%.0f %%", v * 100.0);

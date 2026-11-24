@@ -11,6 +11,19 @@
 using namespace Steinberg;
 using namespace Steinberg::Vst;
 
+static const TUID kBridge_iid = INLINE_UID(
+    0x4D6F6E6B, 0x65794561, 0x72427264, 0x67653031
+);
+
+class IMonkeysEarEditorBridgeProbe {
+public:
+    virtual ~IMonkeysEarEditorBridgeProbe() = default;
+    virtual std::string get_growth_snapshot() const = 0;
+    virtual void set_growth_snapshot(const std::string& snapshot, bool active) = 0;
+    virtual int get_sequencer_step() const = 0;
+    virtual void release_bridge_ref() noexcept = 0;
+};
+
 typedef IPluginFactory* (SMTG_STDCALL *GetPluginFactoryProc)();
 
 #define CHECK_STAGE(condition, stage) do { if (!(condition)) { std::cerr << "[FAIL] " << stage << "\n"; return 1; } else { std::cout << "[PASS] " << stage << "\n"; } } while (0)
@@ -192,8 +205,33 @@ int main() {
     CHECK_STAGE(factory2->getClassInfo2(2,&info2)==kResultOk,"read controller class info");
     IEditController* controller=nullptr; res=factory2->createInstance(info2.cid,IEditController_iid,(void**)&controller);
     CHECK_STAGE(res==kResultOk && controller!=nullptr,"create edit controller");
-    CHECK_STAGE(controller->getParameterCount()==245,"controller exposes 245 stable host parameters");
-    for(int32 i=0;i<245;++i){ParameterInfo pInfo{};CHECK_STAGE(controller->getParameterInfo(i,pInfo)==kResultOk,"read parameter info");}
+    CHECK_STAGE(controller->getParameterCount()==259,"controller exposes 259 stable host parameters");
+    for(int32 i=0;i<259;++i){ParameterInfo pInfo{};CHECK_STAGE(controller->getParameterInfo(i,pInfo)==kResultOk,"read parameter info");}
+    {
+        for(int32 i=245;i<=258;++i){
+            ParameterInfo pi{};
+            CHECK_STAGE(controller->getParameterInfo(i,pi)==kResultOk && pi.title[0]!=0,
+                        "read parameter info for 245..258");
+            char16 disp[128]{};
+            CHECK_STAGE(controller->getParamStringByValue(static_cast<ParamID>(i),0.5,disp)==kResultOk && disp[0]!=0,
+                        "format display string for 245..258");
+        }
+        ParamValue tv=0.0;
+        CHECK_STAGE(controller->getParamValueByString(245,u"D",tv)==kResultOk && std::abs(tv-2.0/11.0)<1e-6,
+                    "VOCAL: Root Key parses D");
+        CHECK_STAGE(controller->getParamValueByString(246,u"Phrygian Dominant",tv)==kResultOk && std::abs(tv-10.0/29.0)<1e-6,
+                    "VOCAL: Scale / Tuning parses Phrygian Dominant");
+        CHECK_STAGE(controller->getParamValueByString(252,u"On",tv)==kResultOk && tv==1.0,
+                    "SEQ: Enable parses On");
+        CHECK_STAGE(controller->getParamValueByString(253,u"Abyssal 5/4 Pulse",tv)==kResultOk && std::abs(tv-2.0/7.0)<1e-6,
+                    "SEQ: Pattern parses Abyssal 5/4 Pulse");
+        CHECK_STAGE(controller->getParamValueByString(254,u"7",tv)==kResultOk && std::abs(tv-6.0/31.0)<1e-6,
+                    "SEQ: Loop Steps parses 7 steps");
+        CHECK_STAGE(controller->getParamValueByString(255,u"1/8",tv)==kResultOk && std::abs(tv-1.0/5.0)<1e-6,
+                    "SEQ: Division parses 1/8");
+        CHECK_STAGE(controller->getParamValueByString(258,u"-6",tv)==kResultOk && std::abs(tv-0.25)<1e-6,
+                    "SEQ: Transpose parses -6 st");
+    }
 
     RecordingHandler edits;
     CHECK_STAGE(controller->setComponentHandler(&edits)==kResultOk,
@@ -295,21 +333,92 @@ int main() {
     CHECK_STAGE(edits.perform_count>before_visible && edits.last_id==73,
                 "visible pitch-bend range remains searchable and editable");
 
+    // Page 6: SEQ / GRV tab, step click (7 steps), and paint coverage
+    SendMessageW(child,WM_LBUTTONDOWN,MK_LBUTTON,MAKELPARAM(658,86));
+    SendMessageW(child,WM_LBUTTONUP,0,MAKELPARAM(658,86));
+    RedrawWindow(child,nullptr,nullptr,RDW_INVALIDATE|RDW_UPDATENOW);
+    const int before_seq_step=edits.perform_count;
+    SendMessageW(child,WM_LBUTTONDOWN,MK_LBUTTON,MAKELPARAM(258,270)); // step 7 (index 6)
+    SendMessageW(child,WM_LBUTTONUP,0,MAKELPARAM(258,270));
+    CHECK_STAGE(edits.perform_count>before_seq_step && edits.last_id==254 &&
+                std::abs(controller->getParamNormalized(254)-6.0/31.0)<1e-6,
+                "SEQ / GRV step click sets odd-meter 7-step loop");
+
+    // Page 7: EVO / BNK tab, .mepreset bank load, A/B store/recall, Evolutionary actions
+    IMonkeysEarEditorBridgeProbe* bridge=nullptr;
+    CHECK_STAGE(controller->queryInterface(kBridge_iid,reinterpret_cast<void**>(&bridge))==kResultOk && bridge!=nullptr,
+                "controller exposes IMonkeysEarEditorBridge");
+    SendMessageW(child,WM_LBUTTONDOWN,MK_LBUTTON,MAKELPARAM(746,86));
+    SendMessageW(child,WM_LBUTTONUP,0,MAKELPARAM(746,86));
+    RedrawWindow(child,nullptr,nullptr,RDW_INVALIDATE|RDW_UPDATENOW);
+    // Click first .mepreset bank entry (if present in presets/)
+    SendMessageW(child,WM_LBUTTONDOWN,MK_LBUTTON,MAKELPARAM(200,233));
+    SendMessageW(child,WM_LBUTTONUP,0,MAKELPARAM(200,233));
+    RedrawWindow(child,nullptr,nullptr,RDW_INVALIDATE|RDW_UPDATENOW);
+    // A/B store/recall
+    controller->setParamNormalized(0,0.77);
+    SendMessageW(child,WM_LBUTTONDOWN,MK_LBUTTON,MAKELPARAM(115,595)); // STORE A
+    SendMessageW(child,WM_LBUTTONUP,0,MAKELPARAM(115,595));
+    controller->setParamNormalized(0,0.23);
+    SendMessageW(child,WM_LBUTTONDOWN,MK_LBUTTON,MAKELPARAM(237,595)); // STORE B
+    SendMessageW(child,WM_LBUTTONUP,0,MAKELPARAM(237,595));
+    SendMessageW(child,WM_LBUTTONDOWN,MK_LBUTTON,MAKELPARAM(359,595)); // RECALL A
+    SendMessageW(child,WM_LBUTTONUP,0,MAKELPARAM(359,595));
+    CHECK_STAGE(std::abs(controller->getParamNormalized(0)-0.77)<1e-5,
+                "EVO / BNK A/B store and recall A restores exact state");
+    SendMessageW(child,WM_LBUTTONDOWN,MK_LBUTTON,MAKELPARAM(481,595)); // RECALL B
+    SendMessageW(child,WM_LBUTTONUP,0,MAKELPARAM(481,595));
+    CHECK_STAGE(std::abs(controller->getParamNormalized(0)-0.23)<1e-5,
+                "EVO / BNK A/B recall B restores exact state");
+    // Evolutionary AUDITION / COMPARE / FREEZE / BRANCH / CLEAR
+    SendMessageW(child,WM_LBUTTONDOWN,MK_LBUTTON,MAKELPARAM(700,341)); // AUDITION
+    SendMessageW(child,WM_LBUTTONUP,0,MAKELPARAM(700,341));
+    RedrawWindow(child,nullptr,nullptr,RDW_INVALIDATE|RDW_UPDATENOW);
+    CHECK_STAGE(!bridge->get_growth_snapshot().empty(),
+                "EVO AUDITION activates frozen candidate lineage via bridge");
+    SendMessageW(child,WM_LBUTTONDOWN,MK_LBUTTON,MAKELPARAM(945,341)); // COMPARE -> KEEPER
+    SendMessageW(child,WM_LBUTTONUP,0,MAKELPARAM(945,341));
+    RedrawWindow(child,nullptr,nullptr,RDW_INVALIDATE|RDW_UPDATENOW);
+    CHECK_STAGE(bridge->get_growth_snapshot().empty(),
+                "EVO COMPARE switches back to baseline keeper");
+    SendMessageW(child,WM_LBUTTONDOWN,MK_LBUTTON,MAKELPARAM(945,341)); // COMPARE -> EVO CANDIDATE
+    SendMessageW(child,WM_LBUTTONUP,0,MAKELPARAM(945,341));
+    RedrawWindow(child,nullptr,nullptr,RDW_INVALIDATE|RDW_UPDATENOW);
+    SendMessageW(child,WM_LBUTTONDOWN,MK_LBUTTON,MAKELPARAM(660,393)); // FREEZE KEEPER
+    SendMessageW(child,WM_LBUTTONUP,0,MAKELPARAM(660,393));
+    RedrawWindow(child,nullptr,nullptr,RDW_INVALIDATE|RDW_UPDATENOW);
+    SendMessageW(child,WM_LBUTTONDOWN,MK_LBUTTON,MAKELPARAM(822,393)); // BRANCH CHILD
+    SendMessageW(child,WM_LBUTTONUP,0,MAKELPARAM(822,393));
+    RedrawWindow(child,nullptr,nullptr,RDW_INVALIDATE|RDW_UPDATENOW);
+    CHECK_STAGE(!bridge->get_growth_snapshot().empty(),
+                "EVO FREEZE & BRANCH produces active descendant lineage");
+    SendMessageW(child,WM_LBUTTONDOWN,MK_LBUTTON,MAKELPARAM(985,393)); // CLEAR LINEAGE
+    SendMessageW(child,WM_LBUTTONUP,0,MAKELPARAM(985,393));
+    RedrawWindow(child,nullptr,nullptr,RDW_INVALIDATE|RDW_UPDATENOW);
+    CHECK_STAGE(bridge->get_growth_snapshot().empty(),
+                "EVO CLEAR LINEAGE resets growth snapshot cleanly");
+    bridge->release_bridge_ref();
+
     ViewRect resized{0,0,1280,860};
     CHECK_STAGE(view->onSize(&resized)==kResultOk &&
                 view->getSize(&size)==kResultOk && size.right==1280,
                 "editor resizes with the host");
     CHECK_STAGE(view->removed()==kResultOk,"editor safely detaches from host");
+    const DWORD gdi_warm=GetGuiResources(GetCurrentProcess(),GR_GDIOBJECTS);
     CHECK_STAGE(view->attached(parent,"HWND")==kResultOk,
                 "editor can reopen without duplicated window state");
+    HWND child2=FindWindowExW(parent,nullptr,L"MonkeysEarNativeEditor_01",nullptr);
+    if(child2) RedrawWindow(child2,nullptr,nullptr,RDW_INVALIDATE|RDW_UPDATENOW);
     CHECK_STAGE(view->removed()==kResultOk,"editor cleans up after reopen");
+    const DWORD gdi_after=GetGuiResources(GetCurrentProcess(),GR_GDIOBJECTS);
+    CHECK_STAGE(gdi_after<=gdi_warm+2,"zero GDI leaks on NativeEditor attach/paint/detach");
     CHECK_STAGE(view->release()==0,"editor reference lifetime completes");
     DestroyWindow(parent);
     controller->setComponentHandler(nullptr);
 
     MemoryStream state_stream;
     CHECK_STAGE(fx_comp->getState(&state_stream)==kResultOk,"serialize FX state");
-    CHECK_STAGE(state_stream.bytes.size()==12u+245u*sizeof(float),"serialized state size");
+    CHECK_STAGE(state_stream.bytes.size()==12u+259u*sizeof(float)+5u,"serialized state size");
     state_stream.pos=0; CHECK_STAGE(controller->setComponentState(&state_stream)==kResultOk,"controller accepts component state");
     ParameterInfo tube_type{},amp_sustain{},division{};
     CHECK_STAGE(controller->getParameterInfo(154,tube_type)==kResultOk && tube_type.stepCount==13,
@@ -395,7 +504,7 @@ int main() {
     std::memcpy(legacy.bytes.data()+8,&legacy_count,4);
     CHECK_STAGE(instr_comp->setState(&legacy)==kResultOk,"read legacy v3 host snapshot without new rack fields");
     MemoryStream migrated;CHECK_STAGE(instr_comp->getState(&migrated)==kResultOk &&
-        migrated.bytes.size()==12u+245u*sizeof(float),"legacy snapshot migrated with appended controls");
+        migrated.bytes.size()==12u+259u*sizeof(float)+5u,"legacy snapshot migrated with appended controls");
     // A v6/176-parameter project must adopt *neutral* gesture axes.
     MemoryStream previous_wave;
     previous_wave.bytes=a_state.bytes;
@@ -407,25 +516,67 @@ int main() {
                 "load previous wave's 176-parameter instrument state");
     MemoryStream migrated6;
     CHECK_STAGE(instr_comp->getState(&migrated6)==kResultOk &&
-                migrated6.bytes.size()==12u+245u*sizeof(float),
-                "migrate v6 session to 245 without losing old parameters");
+                migrated6.bytes.size()==12u+259u*sizeof(float)+5u,
+                "migrate v6 session to 259 without losing old parameters");
     float default_drift=99,default_fracture=99;
     std::memcpy(&default_drift,migrated6.bytes.data()+12u+176u*sizeof(float),4);
     std::memcpy(&default_fracture,migrated6.bytes.data()+12u+177u*sizeof(float),4);
     CHECK_STAGE(default_drift==0.f&&default_fracture==0.f,
                 "old session has zero sonic change from absent performance controls");
-    // Also verify v8/202-parameter Wave 1 snapshot migrates cleanly to v9/245
-    MemoryStream wave1_state;
-    wave1_state.bytes=a_state.bytes;
-    wave1_state.bytes.resize(12u+202u*sizeof(float));
-    const uint32 v8_schema=8,v8_count=202;
-    std::memcpy(wave1_state.bytes.data()+4,&v8_schema,4);
-    std::memcpy(wave1_state.bytes.data()+8,&v8_count,4);
-    CHECK_STAGE(instr_comp->setState(&wave1_state)==kResultOk,"migrate v8 202-param snapshot");
-    MemoryStream migrated8;
-    CHECK_STAGE(instr_comp->getState(&migrated8)==kResultOk &&
-                migrated8.bytes.size()==12u+245u*sizeof(float),
-                "v8 202-param snapshot migrates cleanly to 245");
+    // Verify v9/245-parameter snapshot migrates cleanly to v10/259
+    MemoryStream v9_state;
+    v9_state.bytes=a_state.bytes;
+    v9_state.bytes.resize(12u+245u*sizeof(float));
+    const uint32 v9_schema=9,v9_count=245;
+    std::memcpy(v9_state.bytes.data()+4,&v9_schema,4);
+    std::memcpy(v9_state.bytes.data()+8,&v9_count,4);
+    CHECK_STAGE(instr_comp->setState(&v9_state)==kResultOk,"migrate v9 245-param snapshot to v10");
+    MemoryStream migrated9;
+    CHECK_STAGE(instr_comp->getState(&migrated9)==kResultOk &&
+                migrated9.bytes.size()==12u+259u*sizeof(float)+5u,
+                "v9 245-param snapshot migrates cleanly to v10 259-param");
+    float default_seq_en=99.f,default_seq_tr=99.f;
+    std::memcpy(&default_seq_en,migrated9.bytes.data()+12u+252u*sizeof(float),4);
+    std::memcpy(&default_seq_tr,migrated9.bytes.data()+12u+258u*sizeof(float),4);
+    CHECK_STAGE(default_seq_en==0.f && std::abs(default_seq_tr-0.5f)<1e-6f,
+                "v9->v10 migration initializes SEQ off and transpose 0 st");
+
+    // v10 round-trip preserving frozen growth_snapshot lineage via IMonkeysEarEditorBridge
+    {
+        IConnectionPoint *icp=nullptr,*ccp=nullptr;
+        CHECK_STAGE(instr_comp->queryInterface(IConnectionPoint_iid,reinterpret_cast<void**>(&icp))==kResultOk &&
+                    controller->queryInterface(IConnectionPoint_iid,reinterpret_cast<void**>(&ccp))==kResultOk,
+                    "query IConnectionPoint for bridge lineage test");
+        CHECK_STAGE(ccp->connect(icp)==kResultOk,"connect controller to component for bridge lineage");
+        IMonkeysEarEditorBridgeProbe* br=nullptr;
+        CHECK_STAGE(controller->queryInterface(kBridge_iid,reinterpret_cast<void**>(&br))==kResultOk && br!=nullptr,
+                    "query bridge for v10 growth round-trip");
+        const std::string g1="G1,23,9,1,0,0,0,0,0.7071,0.7071,0,1,1,0,1,0,2,2,-0.7071,0.7071,0,3,3,-1,0,0,4,4,-0.7071,-0.7071,0,5,5,0,-1,0,6,6,0.7071,-0.7071,0,7,7,1.1,0,0.3,0,0";
+        br->set_growth_snapshot(g1,true);
+        MemoryStream v10_with_growth;
+        CHECK_STAGE(instr_comp->getState(&v10_with_growth)==kResultOk &&
+                    v10_with_growth.bytes.size()==12u+259u*sizeof(float)+5u+g1.size(),
+                    "v10 state stream embeds frozen growth_snapshot trailer");
+        IComponent* fresh_c=nullptr; IEditController* fresh_k=nullptr;
+        CHECK_STAGE(factory2->createInstance(info0.cid,IComponent_iid,reinterpret_cast<void**>(&fresh_c))==kResultOk &&
+                    factory2->createInstance(info2.cid,IEditController_iid,reinterpret_cast<void**>(&fresh_k))==kResultOk,
+                    "instantiate fresh component/controller for v10 growth restore");
+        v10_with_growth.pos=0;
+        CHECK_STAGE(fresh_c->setState(&v10_with_growth)==kResultOk,"fresh component loads v10 growth stream");
+        v10_with_growth.pos=0;
+        CHECK_STAGE(fresh_k->setComponentState(&v10_with_growth)==kResultOk,"fresh controller loads v10 growth stream");
+        IMonkeysEarEditorBridgeProbe* fresh_br=nullptr;
+        CHECK_STAGE(fresh_k->queryInterface(kBridge_iid,reinterpret_cast<void**>(&fresh_br))==kResultOk &&
+                    fresh_br->get_growth_snapshot()==g1,
+                    "v10 round-trip preserves frozen growth_snapshot lineage via bridge");
+        fresh_br->release_bridge_ref();
+        fresh_k->release();
+        fresh_c->release();
+        br->set_growth_snapshot("",false);
+        ccp->disconnect(icp);
+        br->release_bridge_ref();
+        icp->release(); ccp->release();
+    }
     IMidiMapping* midi_map=nullptr; CHECK_STAGE(controller->queryInterface(IMidiMapping_iid,(void**)&midi_map)==kResultOk && midi_map!=nullptr,"controller exposes MIDI mapping");
     ParamID bend_id=0,pressure_id=0;
     CHECK_STAGE(midi_map->getMidiControllerAssignment(0,0,129,bend_id)==kResultOk && bend_id==80,"pitch-bend mapping");
@@ -469,7 +620,7 @@ int main() {
     // reopen. Execute a real IComponent::setState/process/getState round-trip.
     MemoryStream edited_patch;
     CHECK_STAGE(instr_comp->getState(&edited_patch)==kResultOk &&
-                edited_patch.bytes.size()==12u+245u*sizeof(float),
+                edited_patch.bytes.size()==12u+259u*sizeof(float)+5u,
                 "capture instrument snapshot before edited-patch recall");
     const auto patch_override=[&](int id,float value){
         std::memcpy(edited_patch.bytes.data()+12u+
@@ -545,7 +696,7 @@ int main() {
                 "sounding stereo instrument clears stale host silence flags");
     MemoryStream selected_patch_state;
     CHECK_STAGE(instr_comp->getState(&selected_patch_state)==kResultOk &&
-                selected_patch_state.bytes.size()==12u+245u*sizeof(float),
+                selected_patch_state.bytes.size()==12u+259u*sizeof(float)+5u,
                 "host can serialize live selected factory patch");
     float selected_tube=0,selected_groove=0;
     std::memcpy(&selected_tube,selected_patch_state.bytes.data()+12u+124u*sizeof(float),4);
@@ -566,7 +717,7 @@ int main() {
                 "perform FRACTURE through host parameter events");
     MemoryStream gesture_state;
     CHECK_STAGE(instr_comp->getState(&gesture_state)==kResultOk &&
-                gesture_state.bytes.size()==12u+245u*sizeof(float),
+                gesture_state.bytes.size()==12u+259u*sizeof(float)+5u,
                 "serialize audible performance field with the actual patch");
     float recorded_drift=0.f,recorded_fracture=0.f;
     std::memcpy(&recorded_drift,gesture_state.bytes.data()+12u+176u*sizeof(float),4);
@@ -643,6 +794,43 @@ int main() {
     float flushed=1.f;
     memcpy(&flushed,flush_state.bytes.data()+12u+8u*sizeof(float),4);
     CHECK_STAGE(flushed==0.f,"zero-sample flush applied last master gain value");
+
+    // EnginePatternSequencer inside VST3 processor generates real non-zero audio when SEQ: Enable (252) is On
+    // without host MIDI notes, while reporting 0 samples latency.
+    {
+        IComponent* seq_comp=nullptr;
+        IAudioProcessor* seq_proc=nullptr;
+        CHECK_STAGE(factory2->createInstance(info0.cid,IComponent_iid,reinterpret_cast<void**>(&seq_comp))==kResultOk &&
+                    seq_comp->queryInterface(IAudioProcessor_iid,reinterpret_cast<void**>(&seq_proc))==kResultOk,
+                    "instantiate fresh instrument for VST3 PatternSequencer probe");
+        CHECK_STAGE(seq_proc->setupProcessing(instr_setup)==kResultOk &&
+                    seq_comp->setActive(true)==kResultOk &&
+                    seq_proc->getLatencySamples()==0u,
+                    "VST3 PatternSequencer reports 0 latency");
+        TwoPointChanges seq_on(252,0,1.0,1.0);
+        TwoPointChanges seq_steps(254,0,6.0/31.0,6.0/31.0); // 7 steps
+        std::vector<float> sl(128),sr(128);
+        float* sch[]={sl.data(),sr.data()};
+        AudioBusBuffers sout{}; sout.numChannels=2; sout.channelBuffers32=sch;
+        ProcessData sdata{}; sdata.numSamples=128; sdata.numOutputs=1; sdata.outputs=&sout;
+        sdata.inputEvents=nullptr; // NO host MIDI notes
+        float seq_peak=0.0f;
+        bool seq_finite=true;
+        for(int blk=0;blk<16;++blk){
+            sdata.inputParameterChanges=(blk==0)?&seq_on:((blk==1)?&seq_steps:nullptr);
+            if(seq_proc->process(sdata)!=kResultOk){CHECK_STAGE(false,"process VST3 PatternSequencer block");}
+            for(int i=0;i<128;++i){
+                if(!std::isfinite(sl[i]) || !std::isfinite(sr[i])) seq_finite=false;
+                seq_peak=std::max(seq_peak,std::max(std::abs(sl[i]),std::abs(sr[i])));
+            }
+        }
+        CHECK_STAGE(seq_finite && seq_peak>0.001f && seq_proc->getLatencySamples()==0u,
+                    "VST3 PatternSequencer produces finite non-zero audio without host MIDI notes at 0 latency");
+        seq_comp->setActive(false);
+        seq_proc->release();
+        seq_comp->release();
+    }
+
     instr_comp->setActive(false); instr_proc->release();
 
     IAudioProcessor* fx_proc=nullptr; res=fx_comp->queryInterface(IAudioProcessor_iid,(void**)&fx_proc); CHECK_STAGE(res==kResultOk && fx_proc!=nullptr,"FX exposes audio processor");

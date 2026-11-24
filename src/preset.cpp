@@ -66,6 +66,7 @@ PresetData::PresetData()
 
 std::string PresetData::serialize() const {
     std::ostringstream oss;
+    oss << std::setprecision(9);
     oss << "NAME=" << name << "\n";
     for (size_t i = 0; i < NUM_MACROS; ++i) {
         oss << "MACRO_" << i << "=" << macros[i] << "\n";
@@ -171,7 +172,15 @@ std::string PresetData::serialize() const {
        <<"\nOSC_BALANCE="<<osc_balance
        <<"\nONION_TILT_DB="<<onion_tilt_db
        <<"\nONION_Q_FOCUS="<<onion_q_focus
-       <<"\nONION_AIR_DB="<<onion_air_db;
+       <<"\nONION_AIR_DB="<<onion_air_db
+       <<"\nONION_HARM_PROTECT="<<onion_harmonic_protect
+       <<"\nPAT_ENABLED="<<(pattern_enabled?1:0)
+       <<"\nPAT_INDEX="<<pattern_index
+       <<"\nPAT_STEPS="<<pattern_steps
+       <<"\nPAT_DIV="<<pattern_division
+       <<"\nPAT_QUANT="<<pattern_quantize
+       <<"\nPAT_GATE="<<pattern_gate
+       <<"\nPAT_TRANSPOSE="<<pattern_transpose;
     for (size_t i = 0; i < 8; ++i) {
         oss << "\nGEN_H" << (i + 1) << "=" << gen_harmonics[i];
     }
@@ -279,6 +288,14 @@ bool PresetData::deserialize(const std::string& data) {
         else if (key == "ONION_TILT_DB") onion_tilt_db=clamp(std::stof(val_str),-6.0f,6.0f);
         else if (key == "ONION_Q_FOCUS") onion_q_focus=clamp(std::stof(val_str),0.85f,4.5f);
         else if (key == "ONION_AIR_DB") onion_air_db=clamp(std::stof(val_str),-6.0f,6.0f);
+        else if (key == "ONION_HARM_PROTECT") onion_harmonic_protect=clamp(std::stof(val_str),0.0f,1.0f);
+        else if (key == "PAT_ENABLED") pattern_enabled=(std::stoi(val_str)!=0);
+        else if (key == "PAT_INDEX") pattern_index=clamp(std::stoi(val_str),0,7);
+        else if (key == "PAT_STEPS") pattern_steps=clamp(std::stoi(val_str),1,32);
+        else if (key == "PAT_DIV") pattern_division=clamp(std::stoi(val_str),0,5);
+        else if (key == "PAT_QUANT") pattern_quantize=clamp(std::stof(val_str),0.0f,1.0f);
+        else if (key == "PAT_GATE") pattern_gate=clamp(std::stof(val_str),0.1f,1.0f);
+        else if (key == "PAT_TRANSPOSE") pattern_transpose=clamp(std::stoi(val_str),-12,12);
         else if (key.rfind("GEN_H",0)==0 && key.size()==6) {
             int h = key[5] - '1';
             if (h >= 0 && h < 8) gen_harmonics[static_cast<size_t>(h)] = clamp(std::stof(val_str), 0.0f, 1.0f);
@@ -378,7 +395,7 @@ bool PresetData::deserialize(const std::string& data) {
         else if(key=="VOCAL_TARGET_HYSTERESIS")vocal_expression.target.target_hysteresis=std::stof(val_str);
         else if(key=="VOCAL_ONSET_PROTECTION")vocal_expression.target.onset_protection=std::stof(val_str);
         else if(key=="VOCAL_DIRECTIONALITY")vocal_expression.target.directionality=std::stof(val_str);
-        else if(key=="VOCAL_TUNING_BUILTIN")vocal_expression.target.tuning.builtin=static_cast<VocalBuiltinTuning>(std::stoi(val_str));
+        else if(key=="VOCAL_TUNING_BUILTIN"){vocal_expression.target.tuning.set_builtin(static_cast<VocalBuiltinTuning>(clamp(std::stoi(val_str),0,static_cast<int>(VocalBuiltinTuning::Count)-1)));}
         else if(key=="VOCAL_TUNING_ROOT")vocal_expression.target.tuning.root_cents=std::stof(val_str);
         else if(key=="VOCAL_TUNING_PERIOD")vocal_expression.target.tuning.period_cents=std::max(1.0f,std::stof(val_str));
         else if(key=="VOCAL_TUNING_COUNT")vocal_expression.target.tuning.degree_count=0;

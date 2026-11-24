@@ -2,6 +2,7 @@
 #undef NDEBUG // Probe assertions must run in Release builds.
 #endif
 #include "monkeys_ear/pattern_transport.h"
+#include "monkeys_ear/pattern_sequencer.h"
 #include <array>
 #include <algorithm>
 #include <bit>
@@ -269,5 +270,119 @@ int main() {
 #ifdef MONKEYS_EAR_PATTERN_INTEGRATION
     test_real_monkeys_ear_audio();
 #endif
+    {
+        // EnginePatternSequencer: odd-meter 7/8 (loop_steps = 7), non-destructive swing + quantize + transpose (-12..+12)
+        struct SeqRecorder {
+            struct Ev { std::uint64_t frame; bool on; int note; int id; };
+            std::array<Ev, 256> events{};
+            std::size_t count = 0;
+            std::uint64_t clock = 0;
+            void handle_midi_note_on(int note, float vel, int, int id) {
+                assert(vel > 0.0f && vel <= 1.0f);
+                assert(id >= kSequencerNoteIdBase);
+                if (count < events.size()) events[count++] = {clock, true, note, id};
+            }
+            void handle_midi_note_off(int note, int, int id) {
+                assert(id >= kSequencerNoteIdBase);
+                if (count < events.size()) events[count++] = {clock, false, note, id};
+            }
+        };
+
+        auto capture_seq = [](const PatternSequencerSettings& cfg, SeqRecorder& rec, std::size_t frames) {
+            EnginePatternSequencer seq;
+            seq.prepare(cfg.sample_rate);
+            seq.configure(rec, cfg);
+            for (std::size_t pos = 0; pos < frames; pos += 64) {
+                const std::size_t blk = std::min<std::size_t>(64, frames - pos);
+                seq.process(rec, blk, [&](size_t, size_t chunk) {
+                    rec.clock += chunk;
+                });
+            }
+            return seq.program();
+        };
+
+        PatternSequencerSettings base{};
+        base.enabled = true;
+        base.pattern_index = 0; // Feral 7/8 Riff
+        base.loop_steps = 7;
+        base.division = 1; // 1/8 note -> 480 ticks = 12000 frames @ 120 BPM, 48 kHz -> 7 steps = 84000 frames
+        base.quantize_strength = 0.0f;
+        base.swing = 0.0f;
+        base.gate = 0.65f;
+        base.transpose_semi = 0;
+        base.bpm = 120.0;
+        base.sample_rate = 48000.0;
+
+        SeqRecorder r_raw, r_quant, r_swung, r_up12, r_dn12;
+        const auto prog_raw = capture_seq(base, r_raw, 84000);
+        assert(prog_raw.loop_frames == 84000);
+        assert(r_raw.count > 0);
+
+        auto quant_cfg = base;
+        quant_cfg.quantize_strength = 1.0f;
+        const auto prog_quant = capture_seq(quant_cfg, r_quant, 84000);
+        assert(prog_quant.loop_frames == 84000);
+
+        auto swung_cfg = quant_cfg;
+        swung_cfg.swing = 0.85f;
+        const auto prog_swung = capture_seq(swung_cfg, r_swung, 84000);
+        assert(prog_swung.loop_frames == 84000);
+
+        bool raw_vs_quant_diff = false;
+        bool quant_vs_swung_diff = false;
+        for (std::size_t i = 0; i < std::min(r_raw.count, r_quant.count); ++i) {
+            if (r_raw.events[i].frame != r_quant.events[i].frame) raw_vs_quant_diff = true;
+        }
+        for (std::size_t i = 0; i < std::min(r_quant.count, r_swung.count); ++i) {
+            if (r_quant.events[i].frame != r_swung.events[i].frame) quant_vs_swung_diff = true;
+        }
+        assert(raw_vs_quant_diff);
+        assert(quant_vs_swung_diff);
+
+        // Non-destructive verification: toggling quantize/swing back on the SAME sequencer restores exact raw frames
+        {
+            EnginePatternSequencer live_seq;
+            SeqRecorder live_rec;
+            live_seq.prepare(48000.0);
+            live_seq.configure(live_rec, swung_cfg);
+            live_seq.configure(live_rec, base);
+            live_rec.count = 0;
+            live_rec.clock = 0;
+            live_seq.process(live_rec, 84000, [&](size_t, size_t chunk) { live_rec.clock += chunk; });
+            assert(live_rec.count == r_raw.count);
+            for (std::size_t i = 0; i < live_rec.count; ++i) {
+                assert(live_rec.events[i].frame == r_raw.events[i].frame);
+                assert(live_rec.events[i].note == r_raw.events[i].note);
+            }
+        }
+
+        // Transpose (-12..+12)
+        auto up_cfg = base; up_cfg.transpose_semi = 12;
+        auto dn_cfg = base; dn_cfg.transpose_semi = -12;
+        capture_seq(up_cfg, r_up12, 84000);
+        capture_seq(dn_cfg, r_dn12, 84000);
+        assert(r_up12.count == r_raw.count && r_dn12.count == r_raw.count);
+        for (std::size_t i = 0; i < r_raw.count; ++i) {
+            assert(r_up12.events[i].note == std::clamp(r_raw.events[i].note + 12, 24, 108));
+            assert(r_dn12.events[i].note == std::clamp(r_raw.events[i].note - 12, 24, 108));
+        }
+
+#ifdef MONKEYS_EAR_PATTERN_INTEGRATION
+        // MIDI note_id >= 10000 isolation inside MonkeysEarEngine: disabling sequencer never cuts held keyboard note
+        MonkeysEarEngine eng;
+        eng.init(48000.0f, 128);
+        eng.load_preset(PresetManager::create_factory_lead());
+        eng.handle_midi_note_on(72, 0.85f, 0, 42); // Live keyboard note (id=42 < 10000)
+        eng.set_parameter_normalized(252, 1.0f);     // SEQ Enable ON
+        eng.set_parameter_normalized(254, 6.0f / 31.0f); // 7 steps
+        std::array<float, 128> ol{}, or_{};
+        for (int b = 0; b < 40; ++b) eng.process_block(nullptr, nullptr, ol.data(), or_.data(), 128);
+        assert(eng.get_active_voices() >= 1);
+        eng.set_parameter_normalized(252, 0.0f);     // SEQ Enable OFF
+        for (int b = 0; b < 10; ++b) eng.process_block(nullptr, nullptr, ol.data(), or_.data(), 128);
+        assert(eng.get_active_voices() >= 1);        // Held live note 42 survives sequencer stop!
+        eng.handle_midi_note_off(72, 0, 42);
+#endif
+    }
     std::puts("[PASS] Monkey's Ear production pattern/quantize transport");
 }

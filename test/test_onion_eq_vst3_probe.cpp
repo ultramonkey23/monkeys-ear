@@ -226,7 +226,19 @@ int main() {
     IEditController* ctrl = nullptr;
     CHECK_STAGE(factory2->createInstance(ctrl_info.cid, IEditController_iid, reinterpret_cast<void**>(&ctrl)) == kResultOk && ctrl != nullptr,
                 "create Onion Skin EQ controller");
-    CHECK_STAGE(ctrl->getParameterCount() == 41, "controller exposes all 41 parameters");
+    CHECK_STAGE(ctrl->getParameterCount() == 42, "controller exposes all 42 parameters");
+    {
+        ParameterInfo info41{};
+        CHECK_STAGE(ctrl->getParameterInfo(41, info41) == kResultOk &&
+                    std::string(reinterpret_cast<const char*>(&info41.title[0])).empty() == false,
+                    "read parameter 41 info");
+        std::string title41;
+        for (int i = 0; i < 127 && info41.title[i]; ++i) title41 += static_cast<char>(info41.title[i]);
+        CHECK_STAGE(title41 == "ONION: Harmonic F0 Guard", "parameter 41 title is ONION: Harmonic F0 Guard");
+        char16 str41[128]{};
+        CHECK_STAGE(ctrl->getParamStringByValue(41, 0.75, str41) == kResultOk && str41[0] == u'7' && str41[1] == u'5',
+                    "parameter 41 formats percentage display string");
+    }
 
     IConnectionPoint* comp_cp = nullptr;
     IConnectionPoint* ctrl_cp = nullptr;
@@ -242,25 +254,62 @@ int main() {
     // Verify zero-sample parameter flush updates component state
     MultiParameterChanges flush_chg;
     flush_chg.add_queue(15).add(0, 0.42);
+    flush_chg.add_queue(41).add(0, 0.85);
     ProcessData flush_pd{};
     flush_pd.numSamples = 0;
     flush_pd.inputParameterChanges = &flush_chg;
     CHECK_STAGE(proc->process(flush_pd) == kResultOk, "accept zero-sample parameter flush");
 
     MemoryStream saved;
-    CHECK_STAGE(comp->getState(&saved) == kResultOk && saved.bytes().size() == 12u + 41u * sizeof(float),
-                "serialize MEOQ component state");
+    CHECK_STAGE(comp->getState(&saved) == kResultOk && saved.bytes().size() == 12u + 42u * sizeof(float),
+                "serialize MEOQ v2 component state");
     uint32 magic = 0, ver = 0, cnt = 0;
     std::memcpy(&magic, saved.bytes().data(), 4);
     std::memcpy(&ver, saved.bytes().data() + 4, 4);
     std::memcpy(&cnt, saved.bytes().data() + 8, 4);
-    CHECK_STAGE(magic == 0x4D454F51u && ver == 1u && cnt == 41u, "verify MEOQ state header");
+    CHECK_STAGE(magic == 0x4D454F51u && ver == 2u && cnt == 42u, "verify MEOQ v2 state header");
+
+    // Verify MEOQ v1 (41 params) -> v2 (42 params) backward-compatible stream loading and v2 round-trip
+    {
+        MemoryStream v1_stream;
+        uint32 v1_magic = 0x4D454F51u, v1_ver = 1u, v1_cnt = 41u;
+        v1_stream.write(&v1_magic, 4, nullptr);
+        v1_stream.write(&v1_ver, 4, nullptr);
+        v1_stream.write(&v1_cnt, 4, nullptr);
+        for (uint32 i = 0; i < 41u; ++i) {
+            float val = (i == 15u) ? 0.80f : (i == 17u ? 0.60f : 0.50f);
+            v1_stream.write(&val, 4, nullptr);
+        }
+        v1_stream.seek(0, kIBSeekSet, nullptr);
+        CHECK_STAGE(comp->setState(&v1_stream) == kResultOk, "load MEOQ v1 (41-param) state into v2 component");
+        MemoryStream migrated_v2;
+        CHECK_STAGE(comp->getState(&migrated_v2) == kResultOk &&
+                    migrated_v2.bytes().size() == 12u + 42u * sizeof(float),
+                    "MEOQ v1 migrates cleanly to v2 42-param envelope");
+        uint32 m_ver = 0, m_cnt = 0;
+        float m_mix = 0.0f, m_guard = 99.0f;
+        std::memcpy(&m_ver, migrated_v2.bytes().data() + 4, 4);
+        std::memcpy(&m_cnt, migrated_v2.bytes().data() + 8, 4);
+        std::memcpy(&m_mix, migrated_v2.bytes().data() + 12u + 15u * 4u, 4);
+        std::memcpy(&m_guard, migrated_v2.bytes().data() + 12u + 41u * 4u, 4);
+        CHECK_STAGE(m_ver == 2u && m_cnt == 42u && std::abs(m_mix - 0.80f) < 1e-6f && m_guard == 0.0f,
+                    "MEOQ v1->v2 migration preserves params and defaults param 41 to 0.0");
+
+        // v2 round-trip restoring param 41 = 0.85
+        MemoryStream restore_v2(saved.bytes());
+        CHECK_STAGE(comp->setState(&restore_v2) == kResultOk, "restore MEOQ v2 component state");
+        MemoryStream ctrl_restore_v2(saved.bytes());
+        CHECK_STAGE(ctrl->setComponentState(&ctrl_restore_v2) == kResultOk, "sync controller from MEOQ v2 state");
+        CHECK_STAGE(std::abs(ctrl->getParamNormalized(41) - 0.85) < 1e-5,
+                    "MEOQ v2 round-trip preserves Harmonic F0 Guard");
+    }
 
     // Reset mix to 1.0 and test flat vs surgical boost vs bypass vs sidechain carve
     {
         MultiParameterChanges restore;
         restore.add_queue(15).add(0, 1.0); // Mix 100%
         restore.add_queue(1).add(0, 0.0);  // Dynamic Off first for exact surgical check
+        restore.add_queue(41).add(0, 0.0); // F0 guard default off
         render_block(proc, 1024, 878.0f, 0.0f, &restore);
     }
     const float rms_flat = render_block(proc, 1024, 878.0f, 0.0f);
@@ -293,6 +342,112 @@ int main() {
     std::cout << "[INFO] sidechain carve 878 Hz: no_sc=" << rms_nosc << " with_sc=" << rms_with_sc << "\n";
     CHECK_STAGE(rms_with_sc < rms_nosc * 0.85f, "auxiliary sidechain 3/4 carves overlapping ERB energy");
 
+    // Continuous sample-to-sample dynamic carve smoothness across 0 dB transition boundary
+    {
+        comp->setActive(false);
+        comp->setActive(true);
+        constexpr int32 kBlock = 512;
+        constexpr float kTwoPi = 6.283185307179586f;
+        std::vector<float> in_l(kBlock), in_r(kBlock), sc_l(kBlock), sc_r(kBlock), out_l(kBlock), out_r(kBlock);
+        float* in_p[2] = {in_l.data(), in_r.data()};
+        float* sc_p[2] = {sc_l.data(), sc_r.data()};
+        float* out_p[2] = {out_l.data(), out_r.data()};
+        AudioBusBuffers ins[2]{};
+        ins[0].numChannels = 2; ins[0].channelBuffers32 = in_p;
+        ins[1].numChannels = 2; ins[1].channelBuffers32 = sc_p;
+        AudioBusBuffers outb{}; outb.numChannels = 2; outb.channelBuffers32 = out_p;
+        ProcessData pd{}; pd.numSamples = kBlock; pd.numInputs = 2; pd.numOutputs = 1; pd.inputs = ins; pd.outputs = &outb;
+
+        MultiParameterChanges zero_cross_setup;
+        zero_cross_setup.add_queue(0).add(0, 0.0);        // Active
+        zero_cross_setup.add_queue(1).add(0, 1.0);        // Dynamic ON
+        zero_cross_setup.add_queue(2).add(0, 1.0);        // Preserve
+        zero_cross_setup.add_queue(3).add(0, 1.0);        // Amount 100%
+        zero_cross_setup.add_queue(4).add(0, 0.9);        // Sensitivity
+        zero_cross_setup.add_queue(10).add(0, 1.0 / 3.0); // Sidechain 3/4
+        zero_cross_setup.add_queue(15).add(0, 1.0);       // Mix 100%
+        zero_cross_setup.add_queue(17 + 11).add(0, 0.5);  // Band 12 0 dB manual
+        pd.inputParameterChanges = &zero_cross_setup;
+
+        float prev_y = 0.0f;
+        float max_step = 0.0f;
+        int max_blk = -1, max_idx = -1;
+        bool all_finite = true;
+        size_t sample_idx = 0;
+        for (int blk = 0; blk < 28; ++blk) {
+            const bool sc_on = (blk >= 4 && blk < 12);
+            MultiParameterChanges step_chg;
+            if (blk == 4) {
+                step_chg.add_queue(2).add(0, 0.5); // Yield across 0 dB
+                pd.inputParameterChanges = &step_chg;
+            } else if (blk > 0) {
+                pd.inputParameterChanges = nullptr;
+            }
+            for (int32 i = 0; i < kBlock; ++i, ++sample_idx) {
+                const float ph = kTwoPi * 878.0f * static_cast<float>(sample_idx) / 48000.0f;
+                in_l[static_cast<size_t>(i)] = in_r[static_cast<size_t>(i)] = 0.25f * std::sin(ph);
+                sc_l[static_cast<size_t>(i)] = sc_r[static_cast<size_t>(i)] = sc_on ? (0.65f * std::sin(ph)) : 0.0f;
+            }
+            if (proc->process(pd) != kResultOk) {
+                CHECK_STAGE(false, "process continuous carve zero-crossing block");
+            }
+            for (int32 i = 0; i < kBlock; ++i) {
+                const float y = out_l[static_cast<size_t>(i)];
+                if (!std::isfinite(y)) all_finite = false;
+                if (blk >= 2) {
+                    const float d = std::abs(y - prev_y);
+                    if (d > max_step) {
+                        max_step = d;
+                        max_blk = blk;
+                        max_idx = i;
+                    }
+                }
+                prev_y = y;
+            }
+        }
+        CHECK_STAGE(all_finite, "continuous carve outputs are all finite");
+        std::cout << "[INFO] max sample-to-sample step across 0 dB carve boundary = " << max_step
+                  << " (blk=" << max_blk << ", idx=" << max_idx << ")\n";
+        CHECK_STAGE(max_step < 0.08f, "dynamic carve transitions across 0 dB without step discontinuity or click");
+    }
+
+    // Harmonic F0 Guard (param 41 = 1.0 vs 0.0) preserves self-pitch fundamental against peer masking
+    {
+        auto measure_f0_rms = [&](double guard_val) -> float {
+            comp->setActive(false);
+            comp->setActive(true);
+            MultiParameterChanges cfg;
+            cfg.add_queue(0).add(0, 0.0);        // Active
+            cfg.add_queue(1).add(0, 1.0);        // Dynamic ON
+            cfg.add_queue(2).add(0, 0.5);        // Yield
+            cfg.add_queue(3).add(0, 1.0);        // Amount 100%
+            cfg.add_queue(4).add(0, 0.95);       // High sensitivity
+            cfg.add_queue(5).add(0, 0.0);        // Low Protect 0% so only Harmonic F0 Guard protects 255 Hz
+            cfg.add_queue(6).add(0, 0.0);        // Transient Protect 0%
+            cfg.add_queue(10).add(0, 1.0 / 3.0); // Sidechain 3/4
+            cfg.add_queue(15).add(0, 1.0);       // Mix 100%
+            cfg.add_queue(41).add(0, guard_val); // Harmonic F0 Guard
+            render_block(proc, 1024, 255.0f, 255.0f, &cfg);
+            float out_rms = 0.0f;
+            for (int k = 0; k < 10; ++k) {
+                out_rms = render_block(proc, 1024, 255.0f, 255.0f);
+            }
+            return out_rms;
+        };
+        const float rms_unguarded = measure_f0_rms(0.0);
+        const float rms_guarded = measure_f0_rms(1.0);
+        std::cout << "[INFO] Harmonic F0 Guard @ 255 Hz: unguarded=" << rms_unguarded
+                  << " guarded=" << rms_guarded << "\n";
+        CHECK_STAGE(rms_guarded > rms_unguarded * 1.04f,
+                    "Harmonic F0 Guard (param 41) measurably preserves self-pitch fundamental under masking");
+        // Restore Low/Transient protect defaults
+        MultiParameterChanges restore_prot;
+        restore_prot.add_queue(5).add(0, 0.70);
+        restore_prot.add_queue(6).add(0, 0.60);
+        restore_prot.add_queue(41).add(0, 0.0);
+        render_block(proc, 1024, 878.0f, 0.0f, &restore_prot);
+    }
+
     // Self De-Harsh mode test on isolated single-track tone (no sidechain, no eco peer)
     MultiParameterChanges flat_2550;
     flat_2550.add_queue(1).add(0, 0.0); // Dynamic OFF
@@ -309,28 +464,49 @@ int main() {
     CHECK_STAGE(rms_deharsh_settled > 0.0f && rms_deharsh_settled < rms_2550_flat * 0.96f,
                 "Self De-Harsh attenuates isolated narrowband ERB spike");
 
-    // Ecosystem MEC3 peer carving test on Ch 3 (slot=2): publish loud peer at 1265 Hz, Onion EQ follows Ch 3
+    // Ecosystem MEC4 3-peer (synth + vocal + aux_eq) coexistence on Ch 3 (slot=2) + setActive(false) clears aux_eq
     {
         monkeys_ear::EcosystemBusClient peer_pub;
         peer_pub.ensure_connected();
-        monkeys_ear::EcosystemStreamFrame sf{};
+        monkeys_ear::EcosystemStreamFrame sf{}, vf{};
         sf.frame_id = 999001ULL;
         sf.role = 1;
         sf.active = true;
         sf.loudness = 0.8f;
         sf.spectral_occupancy.fill(0.0f);
-        sf.spectral_occupancy[13] = 0.95f; // 1265 Hz loud peer
+        sf.spectral_occupancy[13] = 0.95f; // 1265 Hz loud synth peer
         peer_pub.publish_synth(2, sf);
+
+        vf.frame_id = 999002ULL;
+        vf.role = 2;
+        vf.active = true;
+        vf.loudness = 0.7f;
+        vf.spectral_occupancy.fill(0.0f);
+        vf.spectral_occupancy[15] = 0.85f; // 1800 Hz vocal peer
+        peer_pub.publish_vocal(2, vf);
 
         MultiParameterChanges eco_follow;
         eco_follow.add_queue(10).add(0, 2.0 / 3.0); // Eco Peer only
-        eco_follow.add_queue(11).add(0, 2.0 / 3.0); // Follow
+        eco_follow.add_queue(11).add(0, 1.0);       // Bi-Dir (Follow + Publish aux_eq)
         eco_follow.add_queue(12).add(0, 2.0 / 7.0); // Ch 3 (slot 2)
         eco_follow.add_queue(13).add(0, 1.0);       // Peer weight 100%
         render_block(proc, 1024, 1265.0f, 0.0f, &eco_follow);
         float rms_eco_carved = 0.0f;
         for (int k = 0; k < 6; ++k) rms_eco_carved = render_block(proc, 1024, 1265.0f, 0.0f);
-        CHECK_STAGE(rms_eco_carved < rms_nosc * 0.88f, "Ecosystem MEC3 peer occupancy carves matching ERB band");
+        CHECK_STAGE(rms_eco_carved < rms_nosc * 0.88f, "Ecosystem MEC4 peer occupancy carves matching ERB band");
+
+        monkeys_ear::EcosystemStreamFrame s_chk{}, v_chk{}, a_chk{};
+        CHECK_STAGE(peer_pub.read_aux_eq(2, a_chk) && a_chk.active && a_chk.role == 3u,
+                    "MEC4 aux_eq frame published on slot 2");
+        CHECK_STAGE(peer_pub.read_synth(2, s_chk) && s_chk.active && s_chk.frame_id == 999001ULL &&
+                    peer_pub.read_vocal(2, v_chk) && v_chk.active && v_chk.frame_id == 999002ULL,
+                    "MEC4 3-peer aux_eq coexists alongside synth & vocal on same channel");
+
+        CHECK_STAGE(comp->setActive(false) == kResultOk, "deactivate Onion EQ component");
+        CHECK_STAGE(!peer_pub.read_aux_eq(2, a_chk),
+                    "setActive(false) clears MEC4 aux_eq bus activity");
+        CHECK_STAGE(peer_pub.read_synth(2, s_chk) && peer_pub.read_vocal(2, v_chk),
+                    "deactivating aux_eq does not clear synth or vocal peers");
     }
 
     // Sibling instance isolation + GDI+ editor attach/detach check

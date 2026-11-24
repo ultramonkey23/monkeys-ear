@@ -28,6 +28,17 @@ enum class VocalBuiltinTuning : uint8_t {
     QuarterTone24, BohlenPierce13, Count
 };
 
+constexpr std::array<const char*, static_cast<size_t>(VocalBuiltinTuning::Count)> kVocalBuiltinTuningNames{{
+    "Chromatic", "Major / Ionian", "Natural Minor / Aeolian", "Dorian", "Phrygian",
+    "Lydian", "Mixolydian", "Locrian", "Harmonic Minor", "Melodic Minor",
+    "Phrygian Dominant", "Lydian Sharp 2", "Lydian Dominant", "Altered",
+    "Major Pentatonic", "Minor Pentatonic", "Blues", "Whole Tone",
+    "Diminished Half-Whole", "Diminished Whole-Half", "Augmented",
+    "Bebop Major", "Bebop Dominant", "Bebop Dorian",
+    "Hirajoshi (0,2,3,7,8)", "Insen (0,1,5,7,10)", "Iwato (0,1,5,6,10)",
+    "Pelog (0,1,3,7,8)", "24 Equal Divisions", "Bohlen-Pierce 13"
+}};
+
 struct TuningSpace {
     static constexpr size_t MAX_DEGREES = 48;
     float root_cents = 0.0f;       // offset from A4 = 440 Hz

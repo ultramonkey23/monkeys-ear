@@ -98,7 +98,7 @@ void EcosystemBusClient::ensure_connected() noexcept {
 #ifdef _WIN32
     wchar_t name[96]{};
     const DWORD pid = ::GetCurrentProcessId();
-    _snwprintf_s(name, 96, _TRUNCATE, L"Local\\MonkeysEarEcoBus_%lu", static_cast<unsigned long>(pid));
+    _snwprintf_s(name, 96, _TRUNCATE, L"Local\\MonkeysEarEcoBus4_%lu", static_cast<unsigned long>(pid));
     HANDLE h = ::CreateFileMappingW(INVALID_HANDLE_VALUE, nullptr, PAGE_READWRITE, 0,
                                     static_cast<DWORD>(sizeof(EcosystemSharedMemory)), name);
     if (h != nullptr) {
@@ -109,7 +109,7 @@ void EcosystemBusClient::ensure_connected() noexcept {
             if (!already_exists || shm->magic != EcosystemSharedMemory::kMagic) {
                 new (shm) EcosystemSharedMemory{};
                 shm->magic = EcosystemSharedMemory::kMagic;
-                shm->version = 1;
+                shm->version = 3;
             }
             mem_ = shm;
             platform_handle_ = h;
@@ -139,6 +139,32 @@ void EcosystemBusClient::publish_vocal(int slot, const EcosystemStreamFrame& fra
     seqlock_write(mem_->slots[idx].vocal_seq, mem_->slots[idx].vocal, clean_f);
 }
 
+void EcosystemBusClient::publish_aux_eq(int slot, const EcosystemStreamFrame& frame) noexcept {
+    if (!mem_) return;
+    const size_t idx = static_cast<size_t>(clamp(slot, 0, static_cast<int>(kSlotCount) - 1));
+    EcosystemStreamFrame clean_f = sanitize_frame(frame);
+    clean_f.role = 3;
+    seqlock_write(mem_->slots[idx].aux_eq_seq, mem_->slots[idx].aux_eq, clean_f);
+}
+
+void EcosystemBusClient::publish_inactive(int slot, int role_index) noexcept {
+    if (!mem_) return;
+    const size_t idx = static_cast<size_t>(clamp(slot, 0, static_cast<int>(kSlotCount) - 1));
+    EcosystemStreamFrame cleared{};
+    cleared.active = false;
+    cleared.note_gate = 0.0f;
+    if (role_index == 0) {
+        cleared.role = 1;
+        seqlock_write(mem_->slots[idx].synth_seq, mem_->slots[idx].synth, cleared);
+    } else if (role_index == 1) {
+        cleared.role = 2;
+        seqlock_write(mem_->slots[idx].vocal_seq, mem_->slots[idx].vocal, cleared);
+    } else if (role_index == 2) {
+        cleared.role = 3;
+        seqlock_write(mem_->slots[idx].aux_eq_seq, mem_->slots[idx].aux_eq, cleared);
+    }
+}
+
 bool EcosystemBusClient::read_synth(int slot, EcosystemStreamFrame& out) const noexcept {
     if (!mem_) return false;
     const size_t idx = static_cast<size_t>(clamp(slot, 0, static_cast<int>(kSlotCount) - 1));
@@ -149,6 +175,12 @@ bool EcosystemBusClient::read_vocal(int slot, EcosystemStreamFrame& out) const n
     if (!mem_) return false;
     const size_t idx = static_cast<size_t>(clamp(slot, 0, static_cast<int>(kSlotCount) - 1));
     return seqlock_read(mem_->slots[idx].vocal_seq, mem_->slots[idx].vocal, out);
+}
+
+bool EcosystemBusClient::read_aux_eq(int slot, EcosystemStreamFrame& out) const noexcept {
+    if (!mem_) return false;
+    const size_t idx = static_cast<size_t>(clamp(slot, 0, static_cast<int>(kSlotCount) - 1));
+    return seqlock_read(mem_->slots[idx].aux_eq_seq, mem_->slots[idx].aux_eq, out);
 }
 
 bool EcosystemBusClient::read_synth_or_any(int preferred_slot, EcosystemStreamFrame& out) const noexcept {

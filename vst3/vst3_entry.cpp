@@ -1,13 +1,17 @@
 #include "vst3_sdk_minimal.h"
 #include "native_editor.h"
+#include "editor_bridge.h"
 #include "preset_param_snapshot.h"
 #include "snapshot_replay.h"
 #include "monkeys_ear/engine.h"
+#include "monkeys_ear/vocal_target.h"
+#include "monkeys_ear/pattern_sequencer.h"
 #include <atomic>
 #include <cstring>
 #include <vector>
 #include <string>
 #include <memory>
+#include <mutex>
 #include <cmath>
 #include <cstdio>
 #include <array>
@@ -35,7 +39,7 @@ static const TUID kMonkeysEarControllerCID = INLINE_UID(
     0x4D6F6E6B, 0x65797345, 0x61724374, 0x726C7202
 );
 
-static constexpr int kNumParams = 245;
+static constexpr int kNumParams = 259;
 // Root + existing coherent, independently navigable instrument subsystems.
 static constexpr int kUnitCount = 15;
 static constexpr const char* kUnitNames[kUnitCount]={
@@ -50,16 +54,20 @@ static int32 unit_for_parameter(int32 id){
     if((id>=9&&id<=12)||(id>=19&&id<=27)||(id>=70&&id<=78)||(id>=161&&id<=164)||(id>=178&&id<=191)||(id>=202&&id<=217))return 2;
     if((id>=28&&id<=36)||(id>=165&&id<=168))return 3;
     if(id>=13&&id<=17)return 6;
-    if((id>=37&&id<=54)||(id>=192&&id<=197)||(id>=218&&id<=244))return 4;
-    if((id>=55&&id<=69)||(id>=169&&id<=171)||(id>=174&&id<=175))return 5;
+    if((id>=37&&id<=54)||(id>=192&&id<=197)||(id>=218&&id<=244)||id==251)return 4;
+    if((id>=55&&id<=69)||(id>=169&&id<=171)||(id>=174&&id<=175)||(id>=252&&id<=258))return 5;
     if(id>=82&&id<=112)return 7;
-    if(id>=113&&id<=123)return 8;
+    if((id>=113&&id<=123)||(id>=245&&id<=250))return 8;
     if(id>=124&&id<=128)return 9;
     if(id>=129&&id<=160)return 10+(id-129)/8;
     return 0;
 }
 static constexpr uint32 kStateMagic = 0x4D453032u; // ME02
-static constexpr uint32 kStateVersion = 9u;
+static constexpr uint32 kStateVersion = 10u;
+
+static const TUID kMonkeysEarLivePeer_iid = INLINE_UID(
+    0x4D6F6E6B, 0x65794561, 0x72506565, 0x724C6976
+);
 
 // Avoid C++ fast-math assumptions when host automation includes NaN/Inf.
 static bool valid_normalized(ParamValue value) {
@@ -85,6 +93,36 @@ struct SharedPluginState {
     std::atomic<bool> dirty[kNumParams];
     std::atomic<bool> restore_in_progress{false};
     std::atomic<bool> restored_snapshot_pending{false};
+
+    // Double-buffered lock-free POD lineage handoff so audio thread compiles or clears
+    // GrowthResonator without ever touching heap or mutexes.
+    std::array<monkeys_ear::GrowthLineage, 2> growth_slots{};
+    std::array<bool, 2> growth_enabled_slots{{false, false}};
+    std::atomic<int> growth_active_slot{0};
+    std::atomic<bool> growth_pending{false};
+    std::atomic<int> seq_step{0};
+    std::mutex growth_mu{};
+    std::string growth_snapshot{};
+
+    void stage_growth_snapshot(const std::string& snap, bool active) {
+        std::string safe = snap.size() <= 16384 ? snap : std::string{};
+        monkeys_ear::GrowthLineage decoded{};
+        const bool ok = active && !safe.empty() && monkeys_ear::GrowthSnapshotCodec::decode(safe, decoded);
+        {
+            std::lock_guard<std::mutex> lock(growth_mu);
+            growth_snapshot = ok ? safe : std::string{};
+        }
+        const int next_slot = 1 - growth_active_slot.load(std::memory_order_acquire);
+        growth_slots[static_cast<size_t>(next_slot)] = decoded;
+        growth_enabled_slots[static_cast<size_t>(next_slot)] = ok;
+        growth_active_slot.store(next_slot, std::memory_order_release);
+        growth_pending.store(true, std::memory_order_release);
+    }
+
+    std::string read_growth_snapshot() {
+        std::lock_guard<std::mutex> lock(growth_mu);
+        return growth_snapshot;
+    }
 
     SharedPluginState(bool is_fx = false) {
         for (int i = 0; i < kNumParams; ++i) params[i].store(0.5f);
@@ -182,8 +220,26 @@ struct SharedPluginState {
         params[219].store(0.274f);// Onion Carve Q Focus (1.85)
         params[220].store(0.50f);// Onion Air Lift 0 dB
         for (int i = 221; i <= 244; ++i) params[i].store(0.50f); // 24 ERB bands 0 dB
+        params[245].store(0.0f);  // VOCAL Root Key (C)
+        params[246].store(0.0f);  // VOCAL Scale (Chromatic)
+        params[247].store(0.50f); // VOCAL Articulation (0.0)
+        params[248].store(0.0f);  // VOCAL Portamento
+        params[249].store(0.45f); // VOCAL Note Hysteresis
+        params[250].store(0.50f); // VOCAL Onset Protection
+        params[251].store(0.0f);  // ONION Harmonic F0 Guard
+        params[252].store(0.0f);  // SEQ Enable (Off)
+        params[253].store(0.0f);  // SEQ Pattern
+        params[254].store(15.0f / 31.0f); // SEQ Loop Steps (16)
+        params[255].store(3.0f / 5.0f);   // SEQ Division (1/16)
+        params[256].store(1.0f);  // SEQ Quantize Strength
+        params[257].store((0.65f - 0.10f) / 0.90f); // SEQ Gate Length
+        params[258].store(0.50f); // SEQ Transpose (0 st)
         for (int i = 0; i < kNumParams; ++i) dirty[i].store(false);
     }
+};
+
+static constexpr const char* kRootKeyNames[12] = {
+    "C", "C#", "D", "D#", "E", "F", "F#", "G", "G#", "A", "A#", "B"
 };
 
 static bool stream_write(IBStream* s, void* data, int32 bytes) { int32 done=0; return s&&s->write(data,bytes,&done)==kResultOk&&done==bytes; }
@@ -197,6 +253,13 @@ static tresult write_plugin_state(IBStream* stream, const std::shared_ptr<Shared
         // never start with the sustain pedal held down.
         float v=i==172?0.0f:state->params[i].load();
         if(!stream_write(stream,&v,4))return kInternalError;
+    }
+    const std::string snap = state->read_growth_snapshot();
+    uint8_t has_growth = snap.empty() ? 0u : 1u;
+    uint32_t snap_len = static_cast<uint32_t>(std::min<size_t>(snap.size(), 16384u));
+    if (!stream_write(stream, &has_growth, 1) || !stream_write(stream, &snap_len, 4)) return kInternalError;
+    if (has_growth && snap_len > 0) {
+        if (!stream_write(stream, const_cast<char*>(snap.data()), static_cast<int32>(snap_len))) return kInternalError;
     }
     return kResultOk;
 }
@@ -222,11 +285,25 @@ static tresult read_plugin_state(IBStream* stream, const std::shared_ptr<SharedP
         for(uint32 i=count;i<static_cast<uint32>(kNumParams);++i)
             values[i]=defaults.params[i].load();
     }
+    std::string restored_growth{};
+    bool has_restored_growth = false;
+    if (version >= 10u) {
+        uint8_t has_g = 0;
+        uint32_t snap_len = 0;
+        if (!stream_read(stream, &has_g, 1) || !stream_read(stream, &snap_len, 4)) return kInternalError;
+        if (snap_len > 16384u) return kResultFalse;
+        if (has_g != 0 && snap_len > 0) {
+            restored_growth.resize(snap_len);
+            if (!stream_read(stream, restored_growth.data(), static_cast<int32>(snap_len))) return kInternalError;
+            has_restored_growth = true;
+        }
+    }
     values[172]=0.0f; // never restore a physical pedal as pressed
     for(int i=0;i<kNumParams;++i){
         state->params[i].store(values[i],std::memory_order_relaxed);
         state->dirty[i].store(true,std::memory_order_relaxed);
     }
+    state->stage_growth_snapshot(restored_growth, has_restored_growth);
     return kResultOk;
 }
 
@@ -243,11 +320,18 @@ struct ParameterCursor {
     bool pending=false;
 };
 
+struct ILivePeerProvider {
+    virtual ~ILivePeerProvider() = default;
+    virtual std::shared_ptr<SharedPluginState> live_component_state() const noexcept = 0;
+    virtual void release_peer_ref() noexcept = 0;
+};
+
 // ── VST3 Component (Shared DSP Engine for Instrument & FX) ────────────────
 class MonkeysEarComponent : public IComponent,
                             public IAudioProcessor,
                             public IProcessContextRequirements,
-                            public IConnectionPoint {
+                            public IConnectionPoint,
+                            public ILivePeerProvider {
 public:
     explicit MonkeysEarComponent(bool is_fx = false)
         : ref_count_(1), is_fx_(is_fx), active_(false), processing_(false) {
@@ -296,10 +380,18 @@ public:
             addRef();
             return kResultOk;
         }
+        if (memcmp(_iid, kMonkeysEarLivePeer_iid, sizeof(TUID)) == 0) {
+            *obj = static_cast<ILivePeerProvider*>(this);
+            addRef();
+            return kResultOk;
+        }
 
         *obj = nullptr;
         return kResultFalse;
     }
+
+    std::shared_ptr<SharedPluginState> live_component_state() const noexcept override { return state_; }
+    void release_peer_ref() noexcept override { release(); }
 
     uint32 SMTG_STDCALL addRef() override { return ++ref_count_; }
     uint32 SMTG_STDCALL release() override {
@@ -480,6 +572,12 @@ public:
                         apply_param_to_engine(static_cast<ParamID>(i),
                                               state_->params[i].load());
             }
+            if(state_->growth_pending.exchange(false, std::memory_order_acq_rel)) {
+                const int slot = state_->growth_active_slot.load(std::memory_order_acquire);
+                engine_.apply_growth_lineage_rt(
+                    state_->growth_slots[static_cast<size_t>(slot)],
+                    state_->growth_enabled_slots[static_cast<size_t>(slot)]);
+            }
         }
 
         // Resolve the clock after applying a newly selected patch, so its
@@ -647,6 +745,7 @@ public:
                                   static_cast<size_t>(next-position));
             position=next;
         }
+        state_->seq_step.store(engine_.get_sequencer_step(), std::memory_order_relaxed);
         return kResultOk;
     }
 
@@ -702,7 +801,8 @@ private:
 class MonkeysEarController : public IEditController,
                              public IMidiMapping,
                              public IConnectionPoint,
-                             public IUnitInfo {
+                             public IUnitInfo,
+                             public monkeys_ear::ui::IMonkeysEarEditorBridge {
 public:
     MonkeysEarController()
         : ref_count_(1), handler_(nullptr), state_(std::make_shared<SharedPluginState>()) {}
@@ -768,9 +868,33 @@ public:
             addRef();
             return kResultOk;
         }
+        if (memcmp(_iid, monkeys_ear::ui::kMonkeysEarEditorBridge_iid, sizeof(TUID)) == 0) {
+            *obj = static_cast<monkeys_ear::ui::IMonkeysEarEditorBridge*>(this);
+            addRef();
+            return kResultOk;
+        }
         *obj = nullptr;
         return kResultFalse;
     }
+
+    std::string get_growth_snapshot() const override {
+        return state_ ? state_->read_growth_snapshot() : std::string{};
+    }
+    void set_growth_snapshot(const std::string& snapshot, bool active) override {
+        if (state_) state_->stage_growth_snapshot(snapshot, active);
+        std::lock_guard<std::mutex> lock(peer_mu_);
+        if (auto peer = connected_component_state_.lock()) {
+            peer->stage_growth_snapshot(snapshot, active);
+        }
+    }
+    int get_sequencer_step() const override {
+        std::lock_guard<std::mutex> lock(peer_mu_);
+        if (auto peer = connected_component_state_.lock()) {
+            return peer->seq_step.load(std::memory_order_relaxed);
+        }
+        return state_ ? state_->seq_step.load(std::memory_order_relaxed) : 0;
+    }
+    void release_bridge_ref() noexcept override { release(); }
 
     uint32 SMTG_STDCALL addRef() override { return ++ref_count_; }
     uint32 SMTG_STDCALL release() override {
@@ -825,6 +949,13 @@ public:
             : paramIndex==199?7
             : paramIndex==202?9
             : paramIndex==216?3
+            : paramIndex==245?11
+            : paramIndex==246?29
+            : paramIndex==252?1
+            : paramIndex==253?7
+            : paramIndex==254?31
+            : paramIndex==255?5
+            : paramIndex==258?24
             : ((paramIndex>=101&&paramIndex<=112&&((paramIndex-101)%3)<2)?7:0);
         info.unitId = unit_for_parameter(paramIndex);
         // Pitch bend and pressure are hidden from ordinary editing, but must
@@ -922,6 +1053,15 @@ public:
             const int band = paramIndex - 221;
             const int hz = static_cast<int>(monkeys_ear::OnionSkinEQ::kBandCentersHz[static_cast<size_t>(band)] + 0.5f);
             std::snprintf(title,sizeof(title),"ONION ERB %02d (%d Hz)", band + 1, hz);
+        } else if(paramIndex>=245&&paramIndex<=258){
+            static constexpr const char* extTitles3[14] = {
+                "VOCAL: Root Key", "VOCAL: Scale / Tuning", "VOCAL: Articulation",
+                "VOCAL: Portamento", "VOCAL: Note Hysteresis", "VOCAL: Onset Protection",
+                "ONION: Harmonic F0 Guard",
+                "SEQ: Enable", "SEQ: Pattern", "SEQ: Loop Steps",
+                "SEQ: Division", "SEQ: Quantize Strength", "SEQ: Gate Length", "SEQ: Transpose"
+            };
+            std::snprintf(title,sizeof(title),"%s",extTitles3[paramIndex-245]);
         } else {
             std::snprintf(title,sizeof(title),"%s",titles[paramIndex]);
         }
@@ -931,7 +1071,8 @@ public:
             : (paramIndex>=161&&paramIndex<=168&&paramIndex!=163&&paramIndex!=167)?"s"
             : (paramIndex==215?"Hz"
             : (paramIndex==218||paramIndex==220||(paramIndex>=221&&paramIndex<=244))?"dB"
-            : (paramIndex==203?"c":(paramIndex>=124?"":"%"))));
+            : (paramIndex==258?"st"
+            : (paramIndex==245||paramIndex==246||paramIndex>=252?"":(paramIndex==203?"c":(paramIndex>=124?"":"%"))))));
         copy_to_char16(info.units,u,128);
 
         return kResultOk;
@@ -944,8 +1085,30 @@ public:
         if(id>=129&&id<=160&&((id-129)%8)==1){
             int type=std::clamp(static_cast<int>(valueNormalized*monkeys_ear::kTubeFlavorCount),0,monkeys_ear::kTubeFlavorCount-1);
             snprintf(buf,sizeof(buf),"%s",monkeys_ear::kTubeFlavorNames[type]);
-        }else if(id==124||id==128||id==169||id==172||id==174){
+        }else if(id==124||id==128||id==169||id==172||id==174||id==252){
             snprintf(buf,sizeof(buf),"%s",valueNormalized>=.5?"On":"Off");
+        }else if(id==245){
+            const int r=std::clamp(static_cast<int>(std::lround(valueNormalized*11.0)),0,11);
+            snprintf(buf,sizeof(buf),"%s",kRootKeyNames[static_cast<size_t>(r)]);
+        }else if(id==246){
+            const int s=std::clamp(static_cast<int>(std::lround(valueNormalized*29.0)),0,29);
+            snprintf(buf,sizeof(buf),"%s",monkeys_ear::kVocalBuiltinTuningNames[static_cast<size_t>(s)]);
+        }else if(id==247){
+            snprintf(buf,sizeof(buf),"%+.0f %%",(valueNormalized*2.0-1.0)*100.0);
+        }else if(id==253){
+            const int p=std::clamp(static_cast<int>(std::lround(valueNormalized*7.0)),0,7);
+            snprintf(buf,sizeof(buf),"%s",monkeys_ear::kPatternPresetNames[static_cast<size_t>(p)]);
+        }else if(id==254){
+            const int steps=1+std::clamp(static_cast<int>(std::lround(valueNormalized*31.0)),0,31);
+            snprintf(buf,sizeof(buf),"%d steps",steps);
+        }else if(id==255){
+            const int d=std::clamp(static_cast<int>(std::lround(valueNormalized*5.0)),0,5);
+            snprintf(buf,sizeof(buf),"%s",monkeys_ear::kPatternDivisionNames[static_cast<size_t>(d)]);
+        }else if(id==257){
+            snprintf(buf,sizeof(buf),"%.0f %%",(0.10+valueNormalized*0.90)*100.0);
+        }else if(id==258){
+            const int st=std::clamp(static_cast<int>(std::lround((valueNormalized-0.5)*24.0)),-12,12);
+            snprintf(buf,sizeof(buf),"%+d st",st);
         }else if(id==125){
             snprintf(buf,sizeof(buf),"%s",valueNormalized>=.5?"Two parallel pairs":"Four in series");
         }else if(id==171){
@@ -1092,7 +1255,26 @@ public:
                 "1/8 triplet","1/8 dotted","1/16 dotted"};
             for(int n=0;n<12;++n)if(matches(divisions[n])){out=(n+.5)/12.0;return kResultOk;}
         }
-        if(id==124||id==125||id==128||id==169||id==172||id==174||
+        if(id==245){
+            static constexpr const char* kRootKeys[12]={"C","C#","D","D#","E","F","F#","G","G#","A","A#","B"};
+            for(int n=0;n<12;++n)if(matches(kRootKeys[n])){out=static_cast<double>(n)/11.0;return kResultOk;}
+        }
+        if(id==246){
+            for(int n=0;n<30;++n)if(matches(monkeys_ear::kVocalBuiltinTuningNames[static_cast<size_t>(n)])){
+                out=static_cast<double>(n)/29.0;return kResultOk;
+            }
+        }
+        if(id==253){
+            for(int n=0;n<8;++n)if(matches(monkeys_ear::kPatternPresetNames[static_cast<size_t>(n)])){
+                out=static_cast<double>(n)/7.0;return kResultOk;
+            }
+        }
+        if(id==255){
+            for(int n=0;n<6;++n)if(matches(monkeys_ear::kPatternDivisionNames[static_cast<size_t>(n)])){
+                out=static_cast<double>(n)/5.0;return kResultOk;
+            }
+        }
+        if(id==124||id==125||id==128||id==169||id==172||id==174||id==252||
            (id>=129&&id<=160&&(id-129)%8==0)){
             if(matches("on")||matches("true")||matches("two parallel pairs")){out=1;return kResultOk;}
             if(matches("off")||matches("false")||matches("four in series")){out=0;return kResultOk;}
@@ -1109,6 +1291,14 @@ public:
         else if(id==171)out=(std::clamp(static_cast<int>(number),0,11)+.5)/12.0;
         else if(id==173)out=(std::clamp(static_cast<int>(number),0,7)+.5)/8.0;
         else if(id==79)out=std::min(1.0,(std::clamp(static_cast<int>(number),0,3)+.5)/3.99);
+        else if(id==245)out=static_cast<double>(std::clamp(static_cast<int>(std::lround(number)),0,11))/11.0;
+        else if(id==246)out=static_cast<double>(std::clamp(static_cast<int>(std::lround(number)),0,29))/29.0;
+        else if(id==247)out=std::clamp(((input.find('%')!=std::string::npos?number/100.0:number)+1.0)*0.5,0.0,1.0);
+        else if(id==253)out=static_cast<double>(std::clamp(static_cast<int>(std::lround(number)),0,7))/7.0;
+        else if(id==254)out=static_cast<double>(std::clamp(static_cast<int>(std::lround(number)),1,32)-1)/31.0;
+        else if(id==255)out=static_cast<double>(std::clamp(static_cast<int>(std::lround(number)),0,5))/5.0;
+        else if(id==257)out=std::clamp(((input.find('%')!=std::string::npos?number/100.0:number)-0.10)/0.90,0.0,1.0);
+        else if(id==258)out=std::clamp(number/24.0+0.5,0.0,1.0);
         else if(id==0)out=number<=0?0:std::clamp(std::log(number/40.0)/std::log(450.0),0.0,1.0);
         else if(id==8)out=number<=-100?0:std::clamp(number/40.0+.85,0.0,1.0);
         else if(id==11)out=std::clamp(number/48.0+.5,0.0,1.0);
@@ -1194,10 +1384,19 @@ public:
     }
 
     // ── IConnectionPoint ─────────────────────────────────────────────────────
-    tresult SMTG_STDCALL connect(IConnectionPoint* /*other*/) override {
+    tresult SMTG_STDCALL connect(IConnectionPoint* other) override {
+        if (!other) return kInvalidArgument;
+        ILivePeerProvider* peer = nullptr;
+        if (other->queryInterface(kMonkeysEarLivePeer_iid, reinterpret_cast<void**>(&peer)) == kResultOk && peer) {
+            std::lock_guard<std::mutex> lock(peer_mu_);
+            connected_component_state_ = peer->live_component_state();
+            peer->release_peer_ref();
+        }
         return kResultOk;
     }
     tresult SMTG_STDCALL disconnect(IConnectionPoint* /*other*/) override {
+        std::lock_guard<std::mutex> lock(peer_mu_);
+        connected_component_state_.reset();
         return kResultOk;
     }
     tresult SMTG_STDCALL notify(IMessage* /*message*/) override {
@@ -1209,6 +1408,8 @@ private:
     IComponentHandler* handler_;
     std::shared_ptr<SharedPluginState> state_;
     UnitID selected_unit_=0;
+    mutable std::mutex peer_mu_{};
+    std::weak_ptr<SharedPluginState> connected_component_state_{};
 };
 
 // ── VST3 Plugin Factory ──────────────────────────────────────────────────

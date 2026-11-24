@@ -153,12 +153,98 @@ static void test_real_instrument_to_stems() {
     assert(a!=b); // Existing engine gave different instrument stems.
     fs::remove_all(target,error);
 }
+
+static void test_odd_meter_7_8_synchronized_stems() {
+    const fs::path target = "me_odd_meter_7_8_stems";
+    std::error_code error;
+    fs::remove_all(target, error);
+
+    constexpr std::uint32_t sr = 48000;
+    constexpr double bpm = 140.0;
+    constexpr int bars = 2;
+    constexpr std::uint16_t meter_num = 7;
+    constexpr std::uint16_t meter_den = 8;
+    // 2 bars of 7/8 = 7.0 quarter notes; at 140 BPM = 3.0 seconds = 144000 frames exact
+    const double total_quarters = static_cast<double>(bars * meter_num) * (4.0 / static_cast<double>(meter_den));
+    const std::uint64_t total_frames = static_cast<std::uint64_t>(std::llround((total_quarters * 60.0 / bpm) * sr));
+    assert(total_frames == 144000);
+
+    const std::uint32_t loop_ticks = static_cast<std::uint32_t>(std::llround(
+        static_cast<double>(meter_num) * (4.0 / static_cast<double>(meter_den)) * 960.0));
+    PatternTiming timing{960, loop_ticks, bpm, static_cast<double>(sr), 480, 1.0, 0.0};
+    PatternNote notes[] = {
+        {1, 0, 360, 0, 48, 120, 0},
+        {2, 960, 360, 0, 55, 110, 0},
+        {3, 1920, 360, 0, 58, 105, 0}
+    };
+    PatternProgram prog;
+    assert(PatternProgram::compile(prog, notes, 3, timing));
+
+    std::array<std::vector<float>, 3> l_bufs, r_bufs;
+    const std::array<PresetData, 3> patches{{
+        PresetManager::create_monolith(),
+        PresetManager::create_tube_foundry(),
+        PresetManager::create_glass_chamber()
+    }};
+    for (int s = 0; s < 3; ++s) {
+        MonkeysEarEngine eng;
+        eng.init(static_cast<float>(sr), 128);
+        eng.load_preset(patches[static_cast<size_t>(s)]);
+        PatternPlayer player;
+        player.bind(prog);
+        player.start(eng);
+        l_bufs[static_cast<size_t>(s)].resize(total_frames);
+        r_bufs[static_cast<size_t>(s)].resize(total_frames);
+        for (std::size_t pos = 0; pos < total_frames; pos += 128) {
+            const std::size_t n = std::min<std::size_t>(128, total_frames - pos);
+            player.process(eng, nullptr, nullptr,
+                           l_bufs[static_cast<size_t>(s)].data() + pos,
+                           r_bufs[static_cast<size_t>(s)].data() + pos, n);
+        }
+        player.stop(eng);
+        for (std::size_t i = 0; i < total_frames; ++i) {
+            assert((std::bit_cast<std::uint32_t>(l_bufs[static_cast<size_t>(s)][i]) & 0x7f800000u) != 0x7f800000u);
+            assert((std::bit_cast<std::uint32_t>(r_bufs[static_cast<size_t>(s)][i]) & 0x7f800000u) != 0x7f800000u);
+        }
+    }
+
+    constexpr std::uint64_t offset_frames = 12000;
+    const std::span<const float> tail_l(l_bufs[2].data(), total_frames - offset_frames);
+    const std::span<const float> tail_r(r_bufs[2].data(), total_frames - offset_frames);
+    const std::array<StemSource, 3> stems{{
+        {"Sub_7_8", l_bufs[0], r_bufs[0], 0, true},
+        {"Foundry_7_8", l_bufs[1], r_bufs[1], 0, true},
+        {"Glass_Offset_7_8", tail_l, tail_r, offset_frames, true}
+    }};
+    assert(StemBundle::export_directory(target, stems, {sr, total_frames, bpm, meter_num, meter_den}));
+
+    for (const char* name : {"stem_01.wav", "stem_02.wav", "stem_03.wav"}) {
+        const auto wav = contents(target / name);
+        assert(wav.size() == 44 + total_frames * 6);
+        const std::uint32_t channels = u32(wav, 22) & 0xffffu;
+        const std::uint32_t bits = u32(wav, 34) & 0xffffu;
+        assert(channels == 2u);
+        assert(bits == 24u);
+        assert(u32(wav, 24) == sr);
+        assert(u32(wav, 40) == total_frames * 6);
+    }
+    const auto wav3 = contents(target / "stem_03.wav");
+    for (std::size_t f = 0; f < offset_frames; ++f) {
+        assert(pcm24(wav3, f, 0) == 0 && pcm24(wav3, f, 1) == 0);
+    }
+    const auto meta = contents(target / "manifest.json");
+    const std::string m(meta.begin(), meta.end());
+    assert(m.find("\"total_frames\": 144000") != std::string::npos);
+    assert(m.find("\"meter\": [7, 8]") != std::string::npos);
+    fs::remove_all(target, error);
+}
 #endif
 
 int main() {
     test_stems_and_rollback();
 #ifdef MONKEYS_EAR_STEM_INTEGRATION
     test_real_instrument_to_stems();
+    test_odd_meter_7_8_synchronized_stems();
 #endif
     std::puts("[PASS] Monkey's Ear aligned WAV stems and manifest");
 }

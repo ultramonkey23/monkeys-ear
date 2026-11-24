@@ -68,6 +68,9 @@ target_link_libraries(monkeys_ear_stem_bundle_probe PRIVATE monkeys_ear_core)
 target_compile_definitions(monkeys_ear_stem_bundle_probe PRIVATE
     MONKEYS_EAR_STEM_INTEGRATION=1)
 
+add_executable(monkeys_ear_stem_render src/stem_render_cli.cpp)
+target_link_libraries(monkeys_ear_stem_render PRIVATE monkeys_ear_core)
+
 # The four-tube rack is product DSP. Run its focused tests in addition to
 # the whole-engine suite, not as a disconnected prototype executable.
 add_executable(monkeys_ear_tube_rack_probe test/test_tube_rack.cpp)

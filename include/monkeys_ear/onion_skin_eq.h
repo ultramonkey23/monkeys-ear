@@ -18,6 +18,7 @@ struct OnionSkinControls {
     float sensitivity = 0.55f;       // Conflict detection sensitivity [0, 1]
     float low_protect = 0.70f;       // Protects fundamental & sub bands [0, 1]
     float transient_protect = 0.60f; // Holds carve back during transients [0, 1]
+    float harmonic_protect = 0.0f;   // Pitch-informed f0..3*f0 harmonic protection [0, 1]
     float tilt_db = 0.0f;            // Spectral tilt [-6, +6] dB across ERB spectrum
     float q_focus = 1.85f;           // Peaking surgical Q [0.85, 4.50]
     float air_db = 0.0f;             // Upper-air shimmer shelf >= 4.2 kHz [-6, +6] dB
@@ -56,8 +57,10 @@ public:
     void set_controls(const OnionSkinControls& controls) noexcept;
     void reset() noexcept;
 
-    // Set external peer spectral occupancy (6 ERB normalized bands [0..1]) and blend weight.
+    // Set external peer spectral occupancy (24 ERB normalized bands [0..1]) and blend weight.
     void set_peer_occupancy(const std::array<float, kNumBands>& peer_occ, float peer_weight) noexcept;
+    // Set tracked self pitch (Hz) & confidence [0..1] for harmonic/fundamental guard.
+    void set_self_pitch(float hz, float confidence) noexcept;
 
     // Process one audio sample using local reference (e.g. harmonic/weight sidechain) + peer evidence.
     float process_sample(float input, float local_reference) noexcept;
@@ -92,6 +95,8 @@ private:
     std::array<float, kNumBands> ref_env_{};
     std::array<float, kNumBands> peer_occ_{};
     float peer_weight_ = 0.0f;
+    float self_pitch_hz_ = 0.0f;
+    float self_pitch_confidence_ = 0.0f;
 
     std::array<float, kNumBands> target_db_{};
     std::array<float, kNumBands> current_db_{};
