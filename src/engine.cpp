@@ -237,7 +237,13 @@ float MonkeysEarEngine::get_macro(MacroId id) const {
 
 void MonkeysEarEngine::load_preset(const PresetData& preset) {
     preset_manager_.load_preset(preset);
-    growth_resonator_.disable(); // plain/legacy preset loads have exact original DSP path
+    // Frozen graph is recalled through the same native preset load pathway.
+    // Legacy and invalid snapshots retain the exact disabled signal path.
+    GrowthLineage recalled{};
+    if (GrowthSnapshotCodec::decode(preset.growth_snapshot, recalled))
+        growth_resonator_.compile(recalled);
+    else
+        growth_resonator_.disable();
     apply_macros();
 }
 
@@ -247,7 +253,6 @@ GrowthLineage MonkeysEarEngine::grow_current_preset(std::uint32_t seed,
     const auto grown = PresetGrowth::develop(preset_manager_.get_current(), seed,
                                             steps, pressure);
     load_preset(grown.preset);
-    growth_resonator_.compile(grown.lineage);
     return grown.lineage;
 }
 
