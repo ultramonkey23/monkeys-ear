@@ -27,6 +27,7 @@ void MonkeysEarEngine::init(float sample_rate, size_t max_block_size) {
     eq_.set_sample_rate(sample_rate_);
     external_sub_.set_sample_rate(sample_rate_);
     sound_space_.set_sample_rate(sample_rate_);
+    growth_resonator_.set_sample_rate(sample_rate_);
     onion_eq_.set_sample_rate(sample_rate_);
     eco_bus_.ensure_connected();
     cutoff_motion_.set_sample_rate(sample_rate_, 7.0f);
@@ -58,6 +59,7 @@ void MonkeysEarEngine::reset() {
     eq_.reset();
     external_sub_.reset();
     sound_space_.reset();
+    growth_resonator_.reset();
     onion_eq_.reset();
     eco_peer_active_ = false;
     eco_peer_pitch_cents_ = 0.0f;
@@ -235,6 +237,7 @@ float MonkeysEarEngine::get_macro(MacroId id) const {
 
 void MonkeysEarEngine::load_preset(const PresetData& preset) {
     preset_manager_.load_preset(preset);
+    growth_resonator_.disable(); // plain/legacy preset loads have exact original DSP path
     apply_macros();
 }
 
@@ -244,6 +247,7 @@ GrowthLineage MonkeysEarEngine::grow_current_preset(std::uint32_t seed,
     const auto grown = PresetGrowth::develop(preset_manager_.get_current(), seed,
                                             steps, pressure);
     load_preset(grown.preset);
+    growth_resonator_.compile(grown.lineage);
     return grown.lineage;
 }
 
@@ -659,6 +663,7 @@ void MonkeysEarEngine::process_block(
 
         // 7. Modal Cabinet Resonator
         float resonated = resonator_cab_.process(driven);
+        resonated = growth_resonator_.process(resonated);
 
         float weight = synth_weight;
         if(p.input_route_mode==2) weight = weight_lowpass_.process(ext_sample) * p.fundamental_mix + tracked_sub*p.sub_mix;
