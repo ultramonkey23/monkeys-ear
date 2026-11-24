@@ -178,6 +178,7 @@ std::string PresetData::serialize() const {
     for (size_t i = 0; i < 24; ++i) {
         oss << "\nONION_BAND_" << i << "=" << onion_band_db[i];
     }
+    if (!growth_snapshot.empty()) oss << "\nGROWTH_SNAPSHOT=" << growth_snapshot;
     oss << "\n";
     return oss.str();
 }
@@ -191,7 +192,10 @@ bool PresetData::deserialize(const std::string& data) {
         std::string key = line.substr(0, eq);
         std::string val_str = line.substr(eq + 1);
 
-        if (key == "NAME") {
+        if (key == "GROWTH_SNAPSHOT") {
+            // Bounded text length before the topology parser sees this field.
+            growth_snapshot = val_str.size() <= 16384 ? val_str : std::string{};
+        } else if (key == "NAME") {
             name = val_str;
         } else if (key.rfind("MACRO_", 0) == 0) {
             int idx = std::stoi(key.substr(6));
