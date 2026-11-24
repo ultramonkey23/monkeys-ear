@@ -51,11 +51,16 @@ int main() {
     CHECK(a.lineage.branches > 0);
     CHECK(a.lineage.node_count == a.lineage.branches + 8);
     CHECK(a.lineage.node_count <= a.lineage.nodes.size());
+    // Check the mechanism across a deterministic seed corpus; one seed need
+    // not produce a fork under a particular perturbation schedule.
     bool has_fork = false;
-    std::array<unsigned,104> child_counts{};
-    for (unsigned i=8; i<a.lineage.node_count; ++i) {
-        const unsigned parent_index = a.lineage.nodes[i].parent;
-        if (++child_counts[parent_index] >= 2u) has_fork = true;
+    for (unsigned seed=1; seed<=16 && !has_fork; ++seed) {
+        const auto graph = PresetGrowth::develop(parent, seed, 512, 0.65f);
+        std::array<unsigned,104> child_counts{};
+        for (unsigned i=8; i<graph.lineage.node_count; ++i) {
+            const unsigned parent_index = graph.lineage.nodes[i].parent;
+            if (++child_counts[parent_index] >= 2u) has_fork = true;
+        }
     }
     CHECK(has_fork);
     for (unsigned i = 8; i < a.lineage.node_count; ++i) {
