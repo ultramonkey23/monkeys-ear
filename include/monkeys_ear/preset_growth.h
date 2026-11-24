@@ -104,6 +104,23 @@ public:
             tips[i] = i;
         }
         result.lineage.node_count = 8;
+        // Descendants inherit the frozen parent's actual graph, rather than
+        // restarting from eight vertices and merely inheriting its knob values.
+        GrowthLineage ancestor{};
+        if (GrowthSnapshotCodec::decode(parent.growth_snapshot, ancestor)) {
+            result.lineage.node_count = ancestor.node_count;
+            result.lineage.nodes = ancestor.nodes;
+            result.lineage.branches = ancestor.branches;
+            for (unsigned n=8; n<ancestor.node_count; ++n) {
+                const auto& node=ancestor.nodes[n];
+                tips[node.site]=n;
+                auto& site=result.lineage.sites[node.site];
+                ++site.branches;
+                site.inheritance=std::clamp(site.inheritance+0.075f+
+                                          node.material*0.05f,0.0f,1.0f);
+                site.strain=std::max(site.strain,node.material);
+            }
+        }
         std::array<unsigned, 8> periods{};
         std::array<float, 8> lowpass{};
         for (unsigned i = 0; i < 8; ++i) {
@@ -125,7 +142,7 @@ public:
                 s.strain = std::clamp(s.strain * 0.98f + std::abs(highpass) * 0.13f,
                                       0.0f, 1.0f);
                 ++result.lineage.events;
-                if (s.energy > 0.52f && s.branches < 12u &&
+                if (s.energy > 0.52f &&
                     result.lineage.node_count < result.lineage.nodes.size()) {
                     const unsigned parent_index = tips[i];
                     const auto& parent_node = result.lineage.nodes[parent_index];
