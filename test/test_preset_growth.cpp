@@ -118,6 +118,11 @@ int main() {
     CHECK(integrated_lineage.branches == a.lineage.branches);
     CHECK(integrated.is_growth_resonator_active());
     CHECK(integrated.get_current_preset().serialize() == a.preset.serialize());
+    const auto before_noop = integrated.get_current_preset().serialize();
+    CHECK(integrated.grow_current_preset(77, 0, 0.65f).node_count == integrated_lineage.node_count);
+    CHECK(integrated.grow_current_preset(77, 512, 0.0f).node_count == integrated_lineage.node_count);
+    CHECK(integrated.get_current_preset().serialize() == before_noop);
+    CHECK(integrated.is_growth_resonator_active());
     // The keeper can be saved, and a descendant explored without mutating it.
     const auto keeper = integrated.get_current_preset();
     const auto child = integrated.preview_growth_candidate(99, 512, 0.65f);
